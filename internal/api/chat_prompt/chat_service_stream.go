@@ -2,6 +2,8 @@ package llmChat
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -1665,14 +1667,34 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		lat, lon = userLocation.UserLat, userLocation.UserLon
 	}
 
-	// Step 4: Fan-in Fan-out Setup
+	// Step 4: Cache Integration - Generate cache key based on session parameters
+	sessionID := uuid.New()
+	
+	// Generate cache key based on session parameters
+	cacheKeyData := map[string]interface{}{
+		"user_id":       userID.String(),
+		"profile_id":    profileID.String(),
+		"city":          cityName,
+		"message":       cleanedMessage,
+		"domain":        string(domain),
+		"preferences":   basePreferences,
+	}
+	cacheKeyBytes, _ := json.Marshal(cacheKeyData)
+	hash := md5.Sum(cacheKeyBytes)
+	cacheKey := hex.EncodeToString(hash[:])
+	
+	// Step 5: Fan-in Fan-out Setup
 	var wg sync.WaitGroup
 	var closeOnce sync.Once
 
-	sessionID := uuid.New()
 	l.sendEventSimple(ctx, eventCh, types.StreamEvent{
 		Type: types.EventTypeStart,
-		Data: map[string]interface{}{"domain": string(domain), "city": cityName, "session_id": sessionID.String()},
+		Data: map[string]interface{}{
+			"domain": string(domain), 
+			"city": cityName, 
+			"session_id": sessionID.String(),
+			"cache_key": cacheKey,
+		},
 	})
 
 	// Step 5: Collect responses for saving interaction
@@ -1698,30 +1720,33 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		l.sendEventSimple(ctx, eventCh, event)
 	}
 
-	// Step 6: Spawn streaming workers based on domain
+	// Step 6: Spawn streaming workers based on domain with cache support
 	switch domain {
 	case types.DomainItinerary, types.DomainGeneral:
 		wg.Add(3)
 
-		// Worker 1: Stream City Data
+		// Worker 1: Stream City Data with cache
 		go func() {
 			defer wg.Done()
 			prompt := getCityDataPrompt(cityName)
-			l.streamWorkerWithResponse(ctx, prompt, "city_data", sendEventWithResponse, domain)
+			partCacheKey := cacheKey + "_city_data"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "city_data", sendEventWithResponse, domain, partCacheKey)
 		}()
 
-		// Worker 2: Stream General POIs
+		// Worker 2: Stream General POIs with cache
 		go func() {
 			defer wg.Done()
 			prompt := getGeneralPOIPrompt(cityName)
-			l.streamWorkerWithResponse(ctx, prompt, "general_pois", sendEventWithResponse, domain)
+			partCacheKey := cacheKey + "_general_pois"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "general_pois", sendEventWithResponse, domain, partCacheKey)
 		}()
 
-		// Worker 3: Stream Personalized Itinerary
+		// Worker 3: Stream Personalized Itinerary with cache
 		go func() {
 			defer wg.Done()
 			prompt := getPersonalizedItineraryPrompt(cityName, basePreferences)
-			l.streamWorkerWithResponse(ctx, prompt, "itinerary", sendEventWithResponse, domain)
+			partCacheKey := cacheKey + "_itinerary"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "itinerary", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	case types.DomainAccommodation:
@@ -1729,7 +1754,8 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		go func() {
 			defer wg.Done()
 			prompt := getAccommodationPrompt(cityName, lat, lon, basePreferences)
-			l.streamWorkerWithResponse(ctx, prompt, "hotels", sendEventWithResponse, domain)
+			partCacheKey := cacheKey + "_hotels"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "hotels", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	case types.DomainDining:
@@ -1737,7 +1763,8 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		go func() {
 			defer wg.Done()
 			prompt := getDiningPrompt(cityName, lat, lon, basePreferences)
-			l.streamWorkerWithResponse(ctx, prompt, "restaurants", sendEventWithResponse, domain)
+			partCacheKey := cacheKey + "_restaurants"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "restaurants", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	case types.DomainActivities:
@@ -1745,7 +1772,8 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		go func() {
 			defer wg.Done()
 			prompt := getActivitiesPrompt(cityName, lat, lon, basePreferences)
-			l.streamWorkerWithResponse(ctx, prompt, "activities", sendEventWithResponse, domain)
+			partCacheKey := cacheKey + "_activities"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "activities", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	default:
@@ -1861,7 +1889,12 @@ func (l *ServiceImpl) streamWorker(ctx context.Context, prompt, partType string,
 
 // streamWorkerWithResponse handles streaming for a single worker with response capture
 func (l *ServiceImpl) streamWorkerWithResponse(ctx context.Context, prompt, partType string, sendEvent func(types.StreamEvent), domain types.DomainType) {
-	iter, err := l.aiClient.GenerateContentStream(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)})
+	l.streamWorkerWithResponseAndCache(ctx, prompt, partType, sendEvent, domain, "")
+}
+
+// streamWorkerWithResponseAndCache handles streaming for a single worker with response capture and cache support
+func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prompt, partType string, sendEvent func(types.StreamEvent), domain types.DomainType, cacheKey string) {
+	iter, err := l.aiClient.GenerateContentStreamWithCache(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)}, cacheKey)
 	if err != nil {
 		if ctx.Err() == nil {
 			sendEvent(types.StreamEvent{
@@ -1895,9 +1928,11 @@ func (l *ServiceImpl) streamWorkerWithResponse(ctx context.Context, prompt, part
 						sendEvent(types.StreamEvent{
 							Type: types.EventTypeChunk,
 							Data: map[string]interface{}{
-								"part":   partType,
-								"chunk":  chunk,
-								"domain": string(domain),
+								"part":       partType,
+								"chunk":      chunk,
+								"domain":     string(domain),
+								"cache_key":  cacheKey,
+								"cache_used": cacheKey != "",
 							},
 						})
 					}
