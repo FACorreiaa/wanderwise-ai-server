@@ -218,7 +218,7 @@ func POIRoutes(HandlerImpl *poi.HandlerImpl) http.Handler {
 	r.Get("/itineraries", HandlerImpl.GetItineraries)                           // GET /api/v1/itineraries?page=1&page_size=20
 	r.Get("/itineraries/itinerary/{itinerary_id}", HandlerImpl.GetItinerary)    // GET /api/v1/itineraries/{uuid}
 	r.Put("/itineraries/itinerary/{itinerary_id}", HandlerImpl.UpdateItinerary) // PUT /api/v1/itineraries/{uuid}
-	r.Get("/nearby", HandlerImpl.GetPOIsByDistance)                             // GET http://localhost:8000/api/v1/llm/prompt-response/poi/nearby
+	r.Get("/nearby", HandlerImpl.GetNearbyRecommendations)                      // GET http://localhost:8000/api/v1/llm/prompt-response/poi/nearby
 
 	// Traditional search
 	r.Get("/search", HandlerImpl.GetPOIs) // GET http://localhost:8000/api/v1/pois/search

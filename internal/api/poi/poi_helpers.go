@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/google/uuid"
 )
 
@@ -80,42 +79,42 @@ func cleanJSONResponse(response string) string {
 }
 
 // applyClientFilters applies filtering logic to POI slice
-func applyClientFilters(pois []types.POIDetailedInfo, filters map[string]string) []types.POIDetailedInfo {
-	if len(filters) == 0 {
-		return pois
-	}
+// func applyClientFilters(pois []types.POIDetailedInfo, filters map[string]string) []types.POIDetailedInfo {
+// 	if len(filters) == 0 {
+// 		return pois
+// 	}
 
-	var filtered []types.POIDetailedInfo
-	for _, poi := range pois {
-		include := true
+// 	var filtered []types.POIDetailedInfo
+// 	for _, poi := range pois {
+// 		include := true
 
-		// Category filter
-		if category, exists := filters["category"]; exists && category != "" && category != "all" {
-			if !strings.EqualFold(poi.Category, category) {
-				include = false
-			}
-		}
+// 		// Category filter
+// 		if category, exists := filters["category"]; exists && category != "" && category != "all" {
+// 			if !strings.EqualFold(poi.Category, category) {
+// 				include = false
+// 			}
+// 		}
 
-		// Price range filter
-		if priceRange, exists := filters["price_range"]; exists && priceRange != "" && priceRange != "all" {
-			if poi.PriceRange == "" || !strings.EqualFold(poi.PriceRange, priceRange) {
-				include = false
-			}
-		}
+// 		// Price range filter
+// 		if priceRange, exists := filters["price_range"]; exists && priceRange != "" && priceRange != "all" {
+// 			if poi.PriceRange == "" || !strings.EqualFold(poi.PriceRange, priceRange) {
+// 				include = false
+// 			}
+// 		}
 
-		// Min rating filter
-		if minRatingStr, exists := filters["min_rating"]; exists && minRatingStr != "" && minRatingStr != "all" {
-			if minRating := parseFloat(minRatingStr); minRating > 0 && poi.Rating < minRating {
-				include = false
-			}
-		}
+// 		// Min rating filter
+// 		if minRatingStr, exists := filters["min_rating"]; exists && minRatingStr != "" && minRatingStr != "all" {
+// 			if minRating := parseFloat(minRatingStr); minRating > 0 && poi.Rating < minRating {
+// 				include = false
+// 			}
+// 		}
 
-		if include {
-			filtered = append(filtered, poi)
-		}
-	}
-	return filtered
-}
+// 		if include {
+// 			filtered = append(filtered, poi)
+// 		}
+// 	}
+// 	return filtered
+// }
 
 // parseFloat safely parses a string to float64
 func parseFloat(s string) float64 {

@@ -922,7 +922,7 @@ func (h *HandlerImpl) GenerateEmbeddingsForPOIs(w http.ResponseWriter, r *http.R
 }
 
 // TODO GetPOIsByDistance test this
-func (HandlerImpl *HandlerImpl) GetPOIsByDistance(w http.ResponseWriter, r *http.Request) {
+func (HandlerImpl *HandlerImpl) GetNearbyRecommendations(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetPOIsByDistance", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
 		semconv.HTTPRouteKey.String("/llm_interaction/pois_by_distance"),
@@ -938,21 +938,21 @@ func (HandlerImpl *HandlerImpl) GetPOIsByDistance(w http.ResponseWriter, r *http
 	distanceStr := r.URL.Query().Get("distance")
 
 	// Optional filter parameters
-	category := r.URL.Query().Get("category")
-	priceRange := r.URL.Query().Get("price_range")
-	minRating := r.URL.Query().Get("min_rating")
+	// category := r.URL.Query().Get("category")
+	// priceRange := r.URL.Query().Get("price_range")
+	// minRating := r.URL.Query().Get("min_rating")
 
 	// Create filters map
-	filters := make(map[string]string)
-	if category != "" && category != "all" {
-		filters["category"] = category
-	}
-	if priceRange != "" && priceRange != "all" {
-		filters["price_range"] = priceRange
-	}
-	if minRating != "" && minRating != "all" {
-		filters["min_rating"] = minRating
-	}
+	// filters := make(map[string]string)
+	// if category != "" && category != "all" {
+	// 	filters["category"] = category
+	// }
+	// if priceRange != "" && priceRange != "all" {
+	// 	filters["price_range"] = priceRange
+	// }
+	// if minRating != "" && minRating != "all" {
+	// 	filters["min_rating"] = minRating
+	// }
 
 	// Parse latitude
 	lat, err := strconv.ParseFloat(latStr, 64)
@@ -1008,16 +1008,17 @@ func (HandlerImpl *HandlerImpl) GetPOIsByDistance(w http.ResponseWriter, r *http
 
 	// Call service method with filters
 	var pois []types.POIDetailedInfo
-	if len(filters) > 0 {
-		pois, err = HandlerImpl.poiService.GetGeneralPOIByDistanceWithFilters(ctx, userID, lat, lon, distance, filters)
-	} else {
-		pois, err = HandlerImpl.poiService.GetGeneralPOIByDistance(ctx, userID, lat, lon, distance)
-	}
-	if err != nil {
-		l.ErrorContext(ctx, "Failed to fetch POIs", slog.Any("error", err))
-		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to fetch POIs: %s", err.Error()))
-		return
-	}
+	// if len(filters) > 0 {
+	// 	pois, err = HandlerImpl.poiService.GetGeneralPOIByDistanceWithFilters(ctx, userID, lat, lon, distance, filters)
+	// } else {
+	// 	pois, err = HandlerImpl.poiService.GetGeneralPOIByDistance(ctx, userID, lat, lon, distance)
+	// }
+	// if err != nil {
+	// 	l.ErrorContext(ctx, "Failed to fetch POIs", slog.Any("error", err))
+	// 	api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to fetch POIs: %s", err.Error()))
+	// 	return
+	// }
+	pois, err = HandlerImpl.poiService.GetGeneralPOIByDistance(ctx, userID, lat, lon, distance)
 
 	// Prepare response
 	response := struct {
@@ -1035,8 +1036,4 @@ func (HandlerImpl *HandlerImpl) GetPOIsByDistance(w http.ResponseWriter, r *http
 
 	l.InfoContext(ctx, "Successfully fetched POIs")
 	span.SetStatus(codes.Ok, "Success")
-}
-
-func (HandlerImpl *HandlerImpl) GetNearbyRecommendations(w http.ResponseWriter, r *http.Request) {
-	return
 }
