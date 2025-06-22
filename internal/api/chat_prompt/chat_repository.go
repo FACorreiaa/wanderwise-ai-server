@@ -597,6 +597,13 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
                 MIN(created_at) as first_interaction,
                 MAX(created_at) as last_interaction,
                 COUNT(*) as interaction_count,
+                -- Performance metrics aggregation
+                AVG(latency_ms)::int as avg_latency_ms,
+                SUM(total_tokens) as total_tokens,
+                SUM(prompt_tokens) as total_prompt_tokens,
+                SUM(completion_tokens) as total_completion_tokens,
+                SUM(latency_ms) as total_latency_ms,
+                array_agg(DISTINCT model_used) FILTER (WHERE model_used IS NOT NULL) as models_used,
                 json_agg(
                     json_build_object(
                         'id', id,
@@ -604,7 +611,12 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
                         'response_text', response_text,
                         'created_at', created_at,
                         'city_name', city_name,
-                        'session_id', session_id
+                        'session_id', session_id,
+                        'model_used', model_used,
+                        'latency_ms', latency_ms,
+                        'total_tokens', total_tokens,
+                        'prompt_tokens', prompt_tokens,
+                        'completion_tokens', completion_tokens
                     ) ORDER BY created_at
                 ) as interactions
             FROM llm_interactions 
@@ -618,6 +630,12 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
             first_interaction,
             last_interaction,
             interaction_count,
+            avg_latency_ms,
+            total_tokens,
+            total_prompt_tokens,
+            total_completion_tokens,
+            total_latency_ms,
+            models_used,
             interactions
         FROM grouped_interactions
         ORDER BY last_interaction DESC
@@ -639,9 +657,15 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 		var userIDFromDB uuid.UUID
 		var firstInteraction, lastInteraction time.Time
 		var interactionCount int
+		var avgLatencyMs, totalTokens, totalPromptTokens, totalCompletionTokens, totalLatencyMs sql.NullInt64
+		var modelsUsed []string
 		var interactionsJSON string
 
-		err := rows.Scan(&sessionKey, &userIDFromDB, &cityName, &firstInteraction, &lastInteraction, &interactionCount, &interactionsJSON)
+		err := rows.Scan(
+			&sessionKey, &userIDFromDB, &cityName, &firstInteraction, &lastInteraction, &interactionCount,
+			&avgLatencyMs, &totalTokens, &totalPromptTokens, &totalCompletionTokens, &totalLatencyMs, 
+			&modelsUsed, &interactionsJSON,
+		)
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "Failed to scan LLM interaction row")
@@ -656,6 +680,11 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 		}
 
 		var conversationHistory []types.ConversationMessage
+		var totalPOIs, totalHotels, totalRestaurants int
+		var citiesCovered []string
+		var hasItinerary bool
+		var dominantCategories []string
+
 		for _, interaction := range interactions {
 			if prompt, ok := interaction["prompt"].(string); ok && prompt != "" {
 				conversationHistory = append(conversationHistory, types.ConversationMessage{
@@ -668,6 +697,16 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 				if response == "" {
 					response = fmt.Sprintf("I provided recommendations for %s", cityName)
 				} else {
+					// Count content items from response for metrics
+					contentCounts := countContentFromResponse(response)
+					totalPOIs += contentCounts.POIs
+					totalHotels += contentCounts.Hotels
+					totalRestaurants += contentCounts.Restaurants
+					if contentCounts.HasItinerary {
+						hasItinerary = true
+					}
+					dominantCategories = append(dominantCategories, contentCounts.Categories...)
+
 					// Convert JSON response to human-readable format
 					response = formatResponseForDisplay(response, cityName)
 				}
@@ -679,6 +718,55 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 			}
 		}
 
+		// Calculate enriched metrics
+		performanceMetrics := types.SessionPerformanceMetrics{
+			AvgResponseTimeMs: int(avgLatencyMs.Int64),
+			TotalTokens:       int(totalTokens.Int64),
+			PromptTokens:      int(totalPromptTokens.Int64),
+			CompletionTokens:  int(totalCompletionTokens.Int64),
+			ModelsUsed:        modelsUsed,
+			TotalLatencyMs:    int(totalLatencyMs.Int64),
+		}
+
+		// Calculate unique cities covered
+		citiesMap := make(map[string]bool)
+		citiesMap[cityName] = true
+		for _, city := range citiesCovered {
+			citiesMap[city] = true
+		}
+		uniqueCities := make([]string, 0, len(citiesMap))
+		for city := range citiesMap {
+			uniqueCities = append(uniqueCities, city)
+		}
+
+		// Calculate complexity score (1-10)
+		complexityScore := calculateComplexityScore(totalPOIs, totalHotels, totalRestaurants, len(conversationHistory), hasItinerary)
+
+		contentMetrics := types.SessionContentMetrics{
+			TotalPOIs:          totalPOIs,
+			TotalHotels:        totalHotels,
+			TotalRestaurants:   totalRestaurants,
+			CitiesCovered:      uniqueCities,
+			HasItinerary:       hasItinerary,
+			ComplexityScore:    complexityScore,
+			DominantCategories: uniqueStringSlice(dominantCategories),
+		}
+
+		// Calculate engagement metrics
+		userMsgCount, assistantMsgCount := countMessagesByRole(conversationHistory)
+		conversationDuration := lastInteraction.Sub(firstInteraction)
+		avgMsgLength := calculateAverageMessageLength(conversationHistory)
+		engagementLevel := calculateEngagementLevel(len(conversationHistory), conversationDuration, complexityScore)
+
+		engagementMetrics := types.SessionEngagementMetrics{
+			MessageCount:          len(conversationHistory),
+			ConversationDuration:  conversationDuration,
+			UserMessageCount:      userMsgCount,
+			AssistantMessageCount: assistantMsgCount,
+			AvgMessageLength:      avgMsgLength,
+			EngagementLevel:       engagementLevel,
+		}
+
 		sessionID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(sessionKey))
 		session := types.ChatSession{
 			ID:                  sessionID,
@@ -688,6 +776,9 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 			CreatedAt:           firstInteraction,
 			UpdatedAt:           lastInteraction,
 			Status:              "active",
+			PerformanceMetrics:  performanceMetrics,
+			ContentMetrics:      contentMetrics,
+			EngagementMetrics:   engagementMetrics,
 		}
 		sessions = append(sessions, session)
 	}
@@ -729,6 +820,8 @@ func formatResponseForDisplay(response, cityName string) string {
 		`\[hotels\]\s*`,
 		`\[activities\]\s*`,
 		`\[pois\]\s*`,
+		`\[general_pois\]\s*`,
+		`\[personalized_pois\]\s*`,
 	}
 
 	for _, pattern := range prefixPatterns {
@@ -744,6 +837,12 @@ func formatResponseForDisplay(response, cityName string) string {
 	if !json.Valid([]byte(cleanedResponse)) {
 		// If not JSON, return as-is (might be already formatted text)
 		return response
+	}
+
+	// Try to parse as GeneralCityData first (for [city_data] responses)
+	var generalCity types.GeneralCityData
+	if err := json.Unmarshal([]byte(cleanedResponse), &generalCity); err == nil && generalCity.City != "" {
+		return formatCityDataResponse(generalCity)
 	}
 
 	// Try to parse as AiCityResponse (most common format)
@@ -773,7 +872,32 @@ func formatResponseForDisplay(response, cityName string) string {
 		return formatPOIResponse(pois, cityName)
 	}
 
-	// If we can't parse it meaningfully, return a generic message
+	// Try to extract meaningful information from malformed JSON or text
+	cleanedLower := strings.ToLower(cleanedResponse)
+	
+	// Check if it contains city information
+	if strings.Contains(cleanedLower, "city") || strings.Contains(cleanedLower, "country") {
+		return fmt.Sprintf("I found information about %s and prepared some details for you!", cityName)
+	}
+	
+	// Check for content type indicators
+	if strings.Contains(cleanedLower, "hotel") || strings.Contains(cleanedLower, "accommodation") {
+		return fmt.Sprintf("I found some excellent hotel options in %s for you!", cityName)
+	}
+	
+	if strings.Contains(cleanedLower, "restaurant") || strings.Contains(cleanedLower, "dining") {
+		return fmt.Sprintf("I discovered some amazing restaurants in %s for you!", cityName)
+	}
+	
+	if strings.Contains(cleanedLower, "poi") || strings.Contains(cleanedLower, "attraction") || strings.Contains(cleanedLower, "point") {
+		return fmt.Sprintf("I found some exciting places to visit in %s for you!", cityName)
+	}
+	
+	if strings.Contains(cleanedLower, "itinerary") || strings.Contains(cleanedLower, "plan") {
+		return fmt.Sprintf("I created a personalized travel plan for %s!", cityName)
+	}
+	
+	// If we can't determine the content type, return a generic message
 	return fmt.Sprintf("I provided personalized recommendations for %s. Here are some great options I found for you!", cityName)
 }
 
@@ -859,6 +983,44 @@ func formatPOIResponse(pois []types.POIDetailedInfo, cityName string) string {
 		pluralize(len(pois)),
 		cityName,
 		pois[0].Name)
+}
+
+// Format city data response to readable text
+func formatCityDataResponse(cityData types.GeneralCityData) string {
+	result := fmt.Sprintf("Let me tell you about %s, %s! ", cityData.City, cityData.Country)
+	
+	if cityData.Description != "" {
+		result += cityData.Description + " "
+	}
+	
+	// Add additional details if available
+	details := make([]string, 0)
+	
+	if cityData.Population != "" {
+		details = append(details, fmt.Sprintf("population of %s", cityData.Population))
+	}
+	
+	if cityData.Weather != "" {
+		details = append(details, fmt.Sprintf("weather: %s", cityData.Weather))
+	}
+	
+	if cityData.Language != "" {
+		details = append(details, fmt.Sprintf("language: %s", cityData.Language))
+	}
+	
+	if len(details) > 0 {
+		result += "Key details: " + strings.Join(details, ", ") + ". "
+	}
+	
+	if cityData.Attractions != "" {
+		result += fmt.Sprintf("Notable attractions include: %s. ", cityData.Attractions)
+	}
+	
+	if cityData.History != "" {
+		result += fmt.Sprintf("History: %s", cityData.History)
+	}
+	
+	return strings.TrimSpace(result)
 }
 
 // Helper functions
@@ -1318,3 +1480,198 @@ func (r *RepositoryImpl) GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetai
 // 	span.SetStatus(codes.Ok, "Interaction saved successfully")
 // 	return interactionID, nil
 // }
+
+// ContentCounts represents counts of different content types found in responses
+type ContentCounts struct {
+	POIs         int
+	Hotels       int
+	Restaurants  int
+	HasItinerary bool
+	Categories   []string
+}
+
+// countContentFromResponse analyzes a response to count different content types
+func countContentFromResponse(response string) ContentCounts {
+	counts := ContentCounts{
+		Categories: make([]string, 0),
+	}
+
+	// Try to parse as JSON first
+	var jsonData map[string]interface{}
+	if err := json.Unmarshal([]byte(response), &jsonData); err == nil {
+		// Handle JSON response
+		if pois, ok := jsonData["points_of_interest"].([]interface{}); ok {
+			counts.POIs = len(pois)
+			counts.Categories = append(counts.Categories, "attractions")
+		}
+		if hotels, ok := jsonData["hotels"].([]interface{}); ok {
+			counts.Hotels = len(hotels)
+			counts.Categories = append(counts.Categories, "accommodation")
+		}
+		if restaurants, ok := jsonData["restaurants"].([]interface{}); ok {
+			counts.Restaurants = len(restaurants)
+			counts.Categories = append(counts.Categories, "dining")
+		}
+		if _, ok := jsonData["itinerary_response"]; ok {
+			counts.HasItinerary = true
+			counts.Categories = append(counts.Categories, "itinerary")
+		}
+		if _, ok := jsonData["itinerary_name"]; ok {
+			counts.HasItinerary = true
+			counts.Categories = append(counts.Categories, "itinerary")
+		}
+	} else {
+		// Handle text response with pattern matching
+		lowerResponse := strings.ToLower(response)
+		
+		// Count mentions of different content types
+		if strings.Contains(lowerResponse, "hotel") || strings.Contains(lowerResponse, "accommodation") {
+			counts.Hotels = 1
+			counts.Categories = append(counts.Categories, "accommodation")
+		}
+		if strings.Contains(lowerResponse, "restaurant") || strings.Contains(lowerResponse, "dining") {
+			counts.Restaurants = 1
+			counts.Categories = append(counts.Categories, "dining")
+		}
+		if strings.Contains(lowerResponse, "attraction") || strings.Contains(lowerResponse, "visit") || strings.Contains(lowerResponse, "see") {
+			counts.POIs = 1
+			counts.Categories = append(counts.Categories, "attractions")
+		}
+		if strings.Contains(lowerResponse, "itinerary") || strings.Contains(lowerResponse, "plan") || strings.Contains(lowerResponse, "schedule") {
+			counts.HasItinerary = true
+			counts.Categories = append(counts.Categories, "itinerary")
+		}
+	}
+
+	return counts
+}
+
+// calculateComplexityScore calculates a complexity score from 1-10 based on session content
+func calculateComplexityScore(pois, hotels, restaurants, messageCount int, hasItinerary bool) int {
+	score := 1
+	
+	// Base score from content count
+	totalContent := pois + hotels + restaurants
+	if totalContent > 20 {
+		score += 3
+	} else if totalContent > 10 {
+		score += 2
+	} else if totalContent > 5 {
+		score += 1
+	}
+	
+	// Bonus for having itinerary
+	if hasItinerary {
+		score += 2
+	}
+	
+	// Bonus for message count (engagement)
+	if messageCount > 20 {
+		score += 2
+	} else if messageCount > 10 {
+		score += 1
+	}
+	
+	// Bonus for content diversity
+	contentTypes := 0
+	if pois > 0 {
+		contentTypes++
+	}
+	if hotels > 0 {
+		contentTypes++
+	}
+	if restaurants > 0 {
+		contentTypes++
+	}
+	if contentTypes >= 3 {
+		score += 2
+	} else if contentTypes >= 2 {
+		score += 1
+	}
+	
+	// Cap at 10
+	if score > 10 {
+		score = 10
+	}
+	
+	return score
+}
+
+// countMessagesByRole counts messages by user and assistant roles
+func countMessagesByRole(messages []types.ConversationMessage) (userCount, assistantCount int) {
+	for _, msg := range messages {
+		if msg.Role == "user" {
+			userCount++
+		} else if msg.Role == "assistant" {
+			assistantCount++
+		}
+	}
+	return
+}
+
+// calculateAverageMessageLength calculates the average length of all messages
+func calculateAverageMessageLength(messages []types.ConversationMessage) int {
+	if len(messages) == 0 {
+		return 0
+	}
+	
+	totalLength := 0
+	for _, msg := range messages {
+		totalLength += len(msg.Content)
+	}
+	
+	return totalLength / len(messages)
+}
+
+// calculateEngagementLevel determines engagement level based on metrics
+func calculateEngagementLevel(messageCount int, duration time.Duration, complexityScore int) string {
+	score := 0
+	
+	// Message count factor
+	if messageCount > 15 {
+		score += 3
+	} else if messageCount > 8 {
+		score += 2
+	} else if messageCount > 3 {
+		score += 1
+	}
+	
+	// Duration factor (more than 10 minutes indicates engagement)
+	if duration > 30*time.Minute {
+		score += 3
+	} else if duration > 10*time.Minute {
+		score += 2
+	} else if duration > 2*time.Minute {
+		score += 1
+	}
+	
+	// Complexity factor
+	if complexityScore >= 8 {
+		score += 2
+	} else if complexityScore >= 5 {
+		score += 1
+	}
+	
+	// Determine level
+	if score >= 6 {
+		return "high"
+	} else if score >= 3 {
+		return "medium"
+	}
+	return "low"
+}
+
+// uniqueStringSlice removes duplicates from a string slice
+func uniqueStringSlice(slice []string) []string {
+	unique := make(map[string]bool)
+	result := make([]string, 0)
+	
+	for _, item := range slice {
+		if !unique[item] && item != "" {
+			unique[item] = true
+			result = append(result, item)
+		}
+	}
+	
+	return result
+}

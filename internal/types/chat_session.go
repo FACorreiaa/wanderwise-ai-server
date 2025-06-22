@@ -24,6 +24,11 @@ type ChatSession struct {
 	UpdatedAt           time.Time             `json:"updated_at"`
 	ExpiresAt           time.Time             `json:"expires_at"`
 	Status              SessionStatus         `json:"status"` // "active", "expired", etc.
+	
+	// Enriched fields for better chat history display
+	PerformanceMetrics  SessionPerformanceMetrics `json:"performance_metrics"`
+	ContentMetrics      SessionContentMetrics     `json:"content_metrics"`
+	EngagementMetrics   SessionEngagementMetrics  `json:"engagement_metrics"`
 }
 
 type ConversationMessage struct {
@@ -213,4 +218,36 @@ type StreamingResponse struct {
 	SessionID uuid.UUID
 	Stream    <-chan StreamEvent
 	Cancel    context.CancelFunc
+}
+
+// SessionPerformanceMetrics contains performance-related metrics for chat sessions
+type SessionPerformanceMetrics struct {
+	AvgResponseTimeMs int     `json:"avg_response_time_ms"`
+	TotalTokens       int     `json:"total_tokens"`
+	PromptTokens      int     `json:"prompt_tokens"`
+	CompletionTokens  int     `json:"completion_tokens"`
+	ModelsUsed        []string `json:"models_used"`
+	TotalLatencyMs    int     `json:"total_latency_ms"`
+}
+
+// SessionContentMetrics contains content-related metrics for chat sessions
+type SessionContentMetrics struct {
+	TotalPOIs           int      `json:"total_pois"`
+	TotalHotels         int      `json:"total_hotels"`
+	TotalRestaurants    int      `json:"total_restaurants"`
+	CitiesCovered       []string `json:"cities_covered"`
+	HasItinerary        bool     `json:"has_itinerary"`
+	ComplexityScore     int      `json:"complexity_score"` // 1-10 based on content richness
+	DominantCategories  []string `json:"dominant_categories"`
+}
+
+// SessionEngagementMetrics contains engagement-related metrics for chat sessions
+type SessionEngagementMetrics struct {
+	MessageCount        int           `json:"message_count"`
+	ConversationDuration time.Duration `json:"conversation_duration"`
+	UserMessageCount    int           `json:"user_message_count"`
+	AssistantMessageCount int         `json:"assistant_message_count"`
+	AvgMessageLength    int           `json:"avg_message_length"`
+	PeakActivityTime    *time.Time    `json:"peak_activity_time,omitempty"`
+	EngagementLevel     string        `json:"engagement_level"` // "low", "medium", "high"
 }
