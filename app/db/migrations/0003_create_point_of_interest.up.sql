@@ -1,7 +1,7 @@
 -- +migrate Up
 CREATE TABLE cities (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
-    name TEXT NOT NULL,
+    name TEXT,
     state_province TEXT, -- e.g., California, Bavaria
     country TEXT NOT NULL, -- e.g., USA, Germany
     -- Unique constraint on name/state/country to avoid duplicates
@@ -10,10 +10,8 @@ CREATE TABLE cities (
     bounding_box GEOMETRY (Polygon, 4326), -- Optional: Bounding box for spatial queries
     ai_summary TEXT, -- AI-generated summary of the city
     embedding VECTOR (768), -- Optional: Embedding vector for the city (adjust dimension)
-    created_at TIMESTAMP
-    WITH
-        TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Index for faster city lookups
@@ -66,10 +64,10 @@ CREATE INDEX idx_poi_city_id ON points_of_interest (city_id);
 -- Index for filtering by type
 CREATE INDEX idx_poi_type ON points_of_interest (poi_type);
 -- Index for text search on name/description (consider more advanced FTS later)
-CREATE INDEX idx_poi_name ON points_of_interest USING GIN (to_tsvector ('english', name));
+CREATE INDEX idx_poi_name ON points_of_interest USING GIN (to_tsvector('english', name));
 
 CREATE INDEX idx_poi_description ON points_of_interest USING GIN (
-    to_tsvector ('english', description)
+    to_tsvector('english', description)
 );
 -- Index for embeddings (Choose one - HNSW is often faster for high-dimensional data)
 -- Needs pgvector installed. Create AFTER inserting some data if using IVFFlat.
