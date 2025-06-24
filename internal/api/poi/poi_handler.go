@@ -937,23 +937,6 @@ func (HandlerImpl *HandlerImpl) GetNearbyRecommendations(w http.ResponseWriter, 
 	lonStr := r.URL.Query().Get("lon")
 	distanceStr := r.URL.Query().Get("distance")
 
-	// Optional filter parameters
-	// category := r.URL.Query().Get("category")
-	// priceRange := r.URL.Query().Get("price_range")
-	// minRating := r.URL.Query().Get("min_rating")
-
-	// Create filters map
-	// filters := make(map[string]string)
-	// if category != "" && category != "all" {
-	// 	filters["category"] = category
-	// }
-	// if priceRange != "" && priceRange != "all" {
-	// 	filters["price_range"] = priceRange
-	// }
-	// if minRating != "" && minRating != "all" {
-	// 	filters["min_rating"] = minRating
-	// }
-
 	// Parse latitude
 	lat, err := strconv.ParseFloat(latStr, 64)
 	if err != nil {
@@ -992,32 +975,8 @@ func (HandlerImpl *HandlerImpl) GetNearbyRecommendations(w http.ResponseWriter, 
 		return
 	}
 
-	// Create filters struct
-	// filters := types.POIFilters{
-	// 	City:       city,
-	// 	Category:   category,
-	// 	PriceRange: priceRange,
-	// }
-
-	// Create filters struct
-	// filters := map[string]string{
-	// 	"category":    category,
-	// 	"price_range": priceRange,
-	// 	"popularity":  popularity,
-	// }
-
-	// Call service method with filters
 	var pois []types.POIDetailedInfo
-	// if len(filters) > 0 {
-	// 	pois, err = HandlerImpl.poiService.GetGeneralPOIByDistanceWithFilters(ctx, userID, lat, lon, distance, filters)
-	// } else {
-	// 	pois, err = HandlerImpl.poiService.GetGeneralPOIByDistance(ctx, userID, lat, lon, distance)
-	// }
-	// if err != nil {
-	// 	l.ErrorContext(ctx, "Failed to fetch POIs", slog.Any("error", err))
-	// 	api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to fetch POIs: %s", err.Error()))
-	// 	return
-	// }
+
 	pois, err = HandlerImpl.poiService.GetGeneralPOIByDistance(ctx, userID, lat, lon, distance)
 
 	// Prepare response

@@ -76,6 +76,7 @@ type Repository interface {
 
 	// Distance
 	CalculateDistancePostGIS(ctx context.Context, userLat, userLon, poiLat, poiLon float64) (float64, error)
+	SaveLlmPoisToDatabase(ctx context.Context, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse) error
 }
 
 type RepositoryImpl struct {
@@ -2070,235 +2071,31 @@ func (r *RepositoryImpl) GetPOIsByLocationAndDistance(ctx context.Context, lat, 
 	return pois, nil
 }
 
-// GetPOIsByLocationAndDistanceWithFilters retrieves POIs within a specified radius with advanced filtering (category, price, popularity)
-// func (r *RepositoryImpl) GetPOIsByLocationAndDistanceWithFilters(ctx context.Context, lat, lon, radiusMeters float64, filters map[string]string) ([]types.POIDetailedInfo, error) {
-// 	ctx, span := otel.Tracer("POIRepository").Start(ctx, "GetPOIsByLocationAndDistanceWithFilters", trace.WithAttributes(
-// 		attribute.Float64("location.lat", lat),
-// 		attribute.Float64("location.lon", lon),
-// 		attribute.Float64("radius.meters", radiusMeters),
-// 		attribute.String("filters", fmt.Sprintf("%+v", filters)),
-// 	))
-// 	defer span.End()
+func (l *RepositoryImpl) SaveLlmPoisToDatabase(ctx context.Context, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse) error {
+	tx, err := l.pgpool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
 
-// 	l := r.logger.With(slog.String("method", "GetPOIsByLocationAndDistanceWithFilters"))
+	query := `
+        INSERT INTO llm_suggested_pois (id, name, latitude, longitude, description)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (id) DO NOTHING
+    `
+	for _, poi := range pois {
+		_, err := tx.Exec(ctx, query, poi.ID, poi.Name, poi.Latitude, poi.Longitude, poi.Description)
+		if err != nil {
+			return fmt.Errorf("failed to insert LLM POI: %w", err)
+		}
+	}
 
-// 	// Build the query with advanced filtering
-// 	baseQuery := `
-//         SELECT
-//             id,
-//             name,
-//             COALESCE(description, '') as description,
-//             ST_X(location) as longitude,
-//             ST_Y(location) as latitude,
-//             COALESCE(category, '') as category,
-//             COALESCE(address, '') as address,
-//             COALESCE(website, '') as website,
-//             COALESCE(phone_number, '') as phone_number,
-//             opening_hours,
-//             COALESCE(poi_type, '') as poi_type,
-//             price_level,
-//             COALESCE(average_rating, 0) as rating,
-//             ROUND(ST_Distance(location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) / 1000.0, 2) as distance_km,
-//             city_id,
-//             COALESCE(tags, '{}') as tags,
-//             COALESCE(rating_count, 0) as rating_count,
-//             COALESCE(is_sponsored, false) as is_sponsored
-//         FROM points_of_interest
-//         WHERE ST_DWithin(
-//             location::geography,
-//             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-//             $3
-//         )`
-
-// 	var args []interface{}
-// 	args = append(args, lon, lat, radiusMeters) // $1, $2, $3
-// 	argCounter := 4
-
-// 	// Add category filter if provided
-// 	if categoryFilter, exists := filters["category"]; exists && categoryFilter != "" && categoryFilter != "all" {
-// 		baseQuery += fmt.Sprintf(` AND LOWER(category) ILIKE $%d`, argCounter)
-// 		args = append(args, "%"+strings.ToLower(categoryFilter)+"%")
-// 		argCounter++
-// 	}
-
-// 	// Add price filter if provided
-// 	if priceFilter, exists := filters["price_range"]; exists && priceFilter != "" && priceFilter != "all" {
-// 		switch strings.ToLower(priceFilter) {
-// 		case "free":
-// 			baseQuery += fmt.Sprintf(` AND (price_level IS NULL OR price_level = 0)`)
-// 		case "budget", "€":
-// 			baseQuery += fmt.Sprintf(` AND price_level = 1`)
-// 		case "moderate", "€€":
-// 			baseQuery += fmt.Sprintf(` AND price_level = 2`)
-// 		case "expensive", "€€€":
-// 			baseQuery += fmt.Sprintf(` AND price_level = 3`)
-// 		case "luxury", "€€€€":
-// 			baseQuery += fmt.Sprintf(` AND price_level = 4`)
-// 		}
-// 	}
-
-// 	// Add minimum rating filter if provided
-// 	if minRatingFilter, exists := filters["min_rating"]; exists && minRatingFilter != "" && minRatingFilter != "all" {
-// 		if minRating, err := strconv.ParseFloat(minRatingFilter, 64); err == nil {
-// 			baseQuery += fmt.Sprintf(` AND average_rating >= %.1f`, minRating)
-// 		}
-// 	}
-
-// 	// Add popularity/rating filter if provided
-// 	if popularityFilter, exists := filters["popularity"]; exists && popularityFilter != "" && popularityFilter != "all" {
-// 		switch strings.ToLower(popularityFilter) {
-// 		case "high":
-// 			baseQuery += fmt.Sprintf(` AND average_rating >= 4.0`)
-// 		case "medium":
-// 			baseQuery += fmt.Sprintf(` AND average_rating >= 3.0 AND average_rating < 4.0`)
-// 		case "any":
-// 			baseQuery += fmt.Sprintf(` AND average_rating >= 1.0`)
-// 		}
-// 	}
-
-// 	// Order by distance
-// 	baseQuery += ` ORDER BY distance_km ASC LIMIT 50`
-
-// 	l.DebugContext(ctx, "Executing POI advanced filter query",
-// 		slog.String("query", baseQuery),
-// 		slog.Float64("lat", lat),
-// 		slog.Float64("lon", lon),
-// 		slog.Float64("radius_meters", radiusMeters),
-// 		slog.Any("filters", filters))
-
-// 	rows, err := r.pgpool.Query(ctx, baseQuery, args...)
-// 	if err != nil {
-// 		l.ErrorContext(ctx, "Failed to query POIs with advanced filters", slog.Any("error", err))
-// 		span.RecordError(err)
-// 		span.SetStatus(codes.Error, "Database query failed")
-// 		return nil, fmt.Errorf("failed to query POIs with advanced filters: %w", err)
-// 	}
-// 	defer rows.Close()
-
-// 	var pois []types.POIDetailedInfo
-// 	for rows.Next() {
-// 		var poi types.POIDetailedInfo
-// 		var description, address, website, phoneNumber, poiType sql.NullString
-// 		var openingHours sql.NullString // JSONB can be scanned as string
-// 		var priceLevel sql.NullInt32
-// 		var rating sql.NullFloat64
-// 		var cityID sql.NullString
-// 		var tagsRaw []byte // Postgres array of text
-// 		var ratingCount sql.NullInt32
-// 		var isSponsored sql.NullBool
-
-// 		err := rows.Scan(
-// 			&poi.ID,
-// 			&poi.Name,
-// 			&description,
-// 			&poi.Longitude,
-// 			&poi.Latitude,
-// 			&poi.Category,
-// 			&address,
-// 			&website,
-// 			&phoneNumber,
-// 			&openingHours,
-// 			&poiType,
-// 			&priceLevel,
-// 			&rating,
-// 			&poi.Distance, // Already calculated in km
-// 			&cityID,
-// 			&tagsRaw,
-// 			&ratingCount,
-// 			&isSponsored,
-// 		)
-// 		if err != nil {
-// 			l.ErrorContext(ctx, "Failed to scan POI row with filters", slog.Any("error", err))
-// 			span.RecordError(err)
-// 			return nil, fmt.Errorf("failed to scan POI row with filters: %w", err)
-// 		}
-
-// 		// Set optional fields
-// 		if description.Valid {
-// 			poi.Description = description.String
-// 		}
-// 		if address.Valid {
-// 			poi.Address = address.String
-// 		}
-// 		if website.Valid {
-// 			poi.Website = website.String
-// 		}
-// 		if phoneNumber.Valid {
-// 			poi.PhoneNumber = phoneNumber.String
-// 		}
-// 		if rating.Valid {
-// 			poi.Rating = rating.Float64
-// 		}
-// 		if priceLevel.Valid {
-// 			// Convert price level to string format
-// 			switch priceLevel.Int32 {
-// 			case 1:
-// 				poi.PriceLevel = "€"
-// 			case 2:
-// 				poi.PriceLevel = "€€"
-// 			case 3:
-// 				poi.PriceLevel = "€€€"
-// 			case 4:
-// 				poi.PriceLevel = "€€€€"
-// 			default:
-// 				poi.PriceLevel = "Free"
-// 			}
-// 		} else {
-// 			poi.PriceLevel = "Free"
-// 		}
-
-// 		// Process tags array from PostgreSQL
-// 		if tagsRaw != nil {
-// 			// Parse PostgreSQL array format: {tag1,tag2,tag3}
-// 			tagsStr := string(tagsRaw)
-// 			if tagsStr != "{}" && len(tagsStr) > 2 {
-// 				// Remove braces and split by commas
-// 				tagsStr = strings.Trim(tagsStr, "{}")
-// 				if tagsStr != "" {
-// 					poi.Tags = strings.Split(tagsStr, ",")
-// 					// Clean up quotes and spaces
-// 					for i, tag := range poi.Tags {
-// 						poi.Tags[i] = strings.Trim(strings.Trim(tag, `"`), " ")
-// 					}
-// 				}
-// 			}
-// 		}
-
-// 		// Calculate popularity from rating count and sponsored status
-// 		popularityScore := 0
-// 		if ratingCount.Valid {
-// 			popularityScore = int(ratingCount.Int32)
-// 		}
-// 		if isSponsored.Valid && isSponsored.Bool {
-// 			popularityScore += 50 // Boost sponsored items
-// 		}
-// 		// Map popularity score to 1-10 scale for display
-// 		if popularityScore > 100 {
-// 			poi.Priority = 10
-// 		} else if popularityScore > 0 {
-// 			poi.Priority = (popularityScore / 10) + 1
-// 		} else {
-// 			poi.Priority = 1
-// 		}
-
-// 		pois = append(pois, poi)
-// 	}
-
-// 	if err = rows.Err(); err != nil {
-// 		l.ErrorContext(ctx, "Error iterating POI rows with filters", slog.Any("error", err))
-// 		span.RecordError(err)
-// 		return nil, fmt.Errorf("error iterating POI rows with filters: %w", err)
-// 	}
-
-// 	l.InfoContext(ctx, "POIs by location and distance with filters found",
-// 		slog.Int("count", len(pois)),
-// 		slog.Float64("radius_km", radiusMeters/1000),
-// 		slog.Any("filters", filters))
-// 	span.SetAttributes(attribute.Int("results.count", len(pois)))
-// 	span.SetStatus(codes.Ok, "POIs by location and distance with filters retrieved")
-
-// 	return pois, nil
-// }
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	l.logger.InfoContext(ctx, "Saved LLM-generated POIs to llm_suggested_pois", "count", len(pois))
+	return nil
+}
 
 // calculateDistancePostGIS computes the distance between two points using PostGIS (in meters)
 func (l *RepositoryImpl) CalculateDistancePostGIS(ctx context.Context, userLat, userLon, poiLat, poiLon float64) (float64, error) {

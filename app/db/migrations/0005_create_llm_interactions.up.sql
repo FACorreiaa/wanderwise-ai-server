@@ -37,7 +37,7 @@ CREATE TABLE llm_suggested_pois (
     distance DOUBLE PRECISION, -- Distance from the user's current location (if applicable)
     location GEOMETRY(Point, 4326) NOT NULL, -- PostGIS geometry type for spatial queries
     name TEXT NOT NULL,
-    description_poi TEXT, -- LLM-generated description
+    description TEXT, -- LLM-generated description
     category TEXT, -- LLM-suggested category
     address TEXT, -- If LLM provides it
     website TEXT, -- If LLM provides it

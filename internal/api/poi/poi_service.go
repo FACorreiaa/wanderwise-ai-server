@@ -47,8 +47,6 @@ type Service interface {
 
 	// Discover Service
 	GetGeneralPOIByDistance(ctx context.Context, userID uuid.UUID, lat, lon, distance float64) ([]types.POIDetailedInfo, error) //, categoryFilter string
-	//GetGeneralPOIByDistanceWithFilters(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, filters map[string]string) ([]types.POIDetailedInfo, error)
-	//filters types.POIFilters
 }
 
 type ServiceImpl struct {
@@ -549,10 +547,10 @@ func (l *ServiceImpl) GetGeneralPOIByDistance(ctx context.Context, userID uuid.U
 
 	l.logger.InfoContext(ctx, "Cache miss. Querying POIs from database.", "lat", lat, "lon", lon, "distance_m", distance)
 	poisFromDB, err := l.poiRepository.GetPOIsByLocationAndDistance(ctx, lat, lon, distance)
-	if err != nil {
-		l.logger.WarnContext(ctx, "Failed to query POIs from database, will fallback to LLM", slog.Any("error", err))
-	} else if len(poisFromDB) > 0 {
-		l.logger.InfoContext(ctx, "Found POIs in database", "count", len(poisFromDB))
+	if err == nil && len(poisFromDB) > 0 {
+		for i := range poisFromDB {
+			poisFromDB[i].Source = "points_of_interest"
+		}
 		l.cache.Set(cacheKey, poisFromDB, cache.DefaultExpiration)
 		return poisFromDB, nil
 	}
@@ -567,10 +565,15 @@ func (l *ServiceImpl) GetGeneralPOIByDistance(ctx context.Context, userID uuid.U
 	}
 
 	enrichedPOIs := l.enrichAndFilterLLMResponse(ctx, genAIResponse.GeneralPOI, lat, lon, distance)
-	l.logger.InfoContext(ctx, "Generated and filtered POIs using LLM", "count", len(enrichedPOIs))
+	for i := range enrichedPOIs {
+		enrichedPOIs[i].Source = "llm_suggested_pois"
+	}
 
 	if len(enrichedPOIs) > 0 {
-		go l.saveLlmPoisToDatabase(context.Background(), enrichedPOIs, genAIResponse)
+		// Synchronous save to ensure POIs are available immediately
+		if err := l.poiRepository.SaveLlmPoisToDatabase(ctx, enrichedPOIs, genAIResponse); err != nil {
+			l.logger.WarnContext(ctx, "Failed to save LLM POIs to database", slog.Any("error", err))
+		}
 	}
 
 	l.cache.Set(cacheKey, enrichedPOIs, cache.DefaultExpiration)
@@ -621,153 +624,49 @@ func (l *ServiceImpl) enrichAndFilterLLMResponse(ctx context.Context, rawPOIs []
 	return processedPOIs
 }
 
-func (l *ServiceImpl) saveLlmPoisToDatabase(ctx context.Context, poisToSave []types.POIDetailedInfo, llmData *types.GenAIResponse) {
-	l.logger.InfoContext(ctx, "Starting background save of LLM-generated POIs", "count", len(poisToSave))
+// func (l *ServiceImpl) saveLlmPoisToDatabase(ctx context.Context, poisToSave []types.POIDetailedInfo, llmData *types.GenAIResponse) error {
+// 	l.logger.InfoContext(ctx, "Starting background save of LLM-generated POIs", "count", len(poisToSave))
 
-	for _, poi := range poisToSave {
-		cityID, cityName, err := l.cityRepo.GetCity(ctx, poi.Latitude, poi.Longitude)
-		if err != nil {
-			if llmData.City != "" && llmData.Country != "" {
-				cityDetail := types.CityDetail{
-					Name:            llmData.City,
-					Country:         llmData.Country,
-					StateProvince:   llmData.StateProvince,
-					AiSummary:       llmData.CityDescription,
-					CenterLatitude:  llmData.Latitude,
-					CenterLongitude: llmData.Longitude,
-				}
-				if cityDetail.CenterLatitude == 0 && cityDetail.CenterLongitude == 0 {
-					cityDetail.CenterLatitude = poi.Latitude
-					cityDetail.CenterLongitude = poi.Longitude
-				}
+// 	for _, poi := range poisToSave {
+// 		cityID, cityName, err := l.cityRepo.GetCity(ctx, poi.Latitude, poi.Longitude)
+// 		if err != nil {
+// 			if llmData.City != "" && llmData.Country != "" {
+// 				cityDetail := types.CityDetail{
+// 					Name:            llmData.City,
+// 					Country:         llmData.Country,
+// 					StateProvince:   llmData.StateProvince,
+// 					AiSummary:       llmData.CityDescription,
+// 					CenterLatitude:  llmData.Latitude,
+// 					CenterLongitude: llmData.Longitude,
+// 				}
+// 				if cityDetail.CenterLatitude == 0 && cityDetail.CenterLongitude == 0 {
+// 					cityDetail.CenterLatitude = poi.Latitude
+// 					cityDetail.CenterLongitude = poi.Longitude
+// 				}
 
-				createdCityID, cityErr := l.cityRepo.SaveCity(ctx, cityDetail)
-				if cityErr != nil {
-					l.logger.ErrorContext(ctx, "Failed to create city for POI", "error", cityErr, "poi_name", poi.Name)
-					continue
-				}
-				cityID = createdCityID
-			} else {
-				l.logger.ErrorContext(ctx, "Cannot save POI - city data missing from LLM response", "poi_name", poi.Name)
-				continue
-			}
-		}
+// 				createdCityID, cityErr := l.cityRepo.SaveCity(ctx, cityDetail)
+// 				if cityErr != nil {
+// 					l.logger.ErrorContext(ctx, "Failed to create city for POI", "error", cityErr, "poi_name", poi.Name)
+// 					continue
+// 				}
+// 				cityID = createdCityID
+// 			} else {
+// 				l.logger.ErrorContext(ctx, "Cannot save POI - city data missing from LLM response", "poi_name", poi.Name)
+// 				continue
+// 			}
+// 		}
 
-		poiToSave := poi
-		poiToSave.City = cityName
-		poiToSave.CityID = cityID
+// 		poiToSave := poi
+// 		poiToSave.City = cityName
+// 		poiToSave.CityID = cityID
 
-		if _, err := l.poiRepository.SavePOIDetails(ctx, poiToSave, cityID); err != nil {
-			l.logger.WarnContext(ctx, "Failed to save POI to database", "error", err, "poi_name", poi.Name)
-		}
-	}
-	l.logger.InfoContext(ctx, "Finished background save.")
-}
-
-// func (l *ServiceImpl) GetGeneralPOIByDistanceWithFilters(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, filters map[string]string) ([]types.POIDetailedInfo, error) {
-// 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GetGeneralPOIByDistanceWithFilters")
-// 	defer span.End()
-
-// 	// 1. Build a cache key that includes all parameters.
-// 	cacheKey := generateFilteredPOICacheKeyWithFilters(lat, lon, distance, filters, userID)
-// 	span.SetAttributes(attribute.String("cache.key", cacheKey))
-
-// 	// 2. Check cache first.
-// 	if cached, found := l.cache.Get(cacheKey); found {
-// 		if pois, ok := cached.([]types.POIDetailedInfo); ok {
-// 			l.logger.InfoContext(ctx, "Serving POIs from cache", "key", cacheKey, "count", len(pois))
-// 			return pois, nil
+// 		if _, err := l.poiRepository.SavePOIDetails(ctx, poiToSave, cityID); err != nil {
+// 			l.logger.WarnContext(ctx, "Failed to save POI to database", "error", err, "poi_name", poi.Name)
 // 		}
 // 	}
+// 	l.logger.InfoContext(ctx, "Finished background save.")
 
-// 	// 3. Check the database. This is the primary source of truth.
-// 	l.logger.InfoContext(ctx, "Cache miss. Querying database with filters.", "lat", lat, "lon", lon, "distance_m", distance)
-// 	poisFromDB, err := l.poiRepository.GetPOIsByLocationAndDistanceWithFilters(ctx, lat, lon, distance, filters)
-// 	if err != nil {
-// 		l.logger.WarnContext(ctx, "Database query failed, will fall back to LLM", slog.Any("error", err))
-// 	} else if len(poisFromDB) > 0 {
-// 		l.logger.InfoContext(ctx, "Found POIs in database", "count", len(poisFromDB))
-// 		l.cache.Set(cacheKey, poisFromDB, cache.DefaultExpiration)
-// 		return poisFromDB, nil
-// 	}
-
-// 	// --- LLM FALLBACK ---
-// 	l.logger.InfoContext(ctx, "No POIs found in database, falling back to LLM generation")
-// 	span.AddEvent("database_miss_fallback_to_llm")
-
-// 	// 4. Generate data via AI.
-// 	// NOTE: The LLM prompt is simplified. It doesn't need to handle filters,
-// 	// as we will filter the results in our Go code. It just needs to find places.
-// 	genAIResponse, err := l.generatePOIsWithLLM(ctx, userID, lat, lon, distance)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	// 5. Enrich the raw LLM data into a single, canonical list.
-// 	enrichedPOIs, city, err := l.enrichLLMPOIsWithMetadata(ctx, genAIResponse.GeneralPOI, lat, lon, distance)
-// 	if err != nil {
-// 		// If enrichment fails, we cannot proceed reliably.
-// 		return nil, fmt.Errorf("failed to enrich LLM data: %w", err)
-// 	}
-
-// 	// 6. NOW, apply the filters to the enriched, LLM-generated data.
-// 	//filteredLLMPOIs := applyClientFilters(enrichedPOIs, filters)
-// 	//l.logger.InfoContext(ctx, "Generated POIs via LLM and applied filters", "initial_count", len(enrichedPOIs), "final_count", len(filteredLLMPOIs))
-
-// 	// 7. Asynchronously save the *enriched* (but unfiltered) POIs to the database.
-// 	if city != uuid.Nil && len(enrichedPOIs) > 0 {
-// 		go func() {
-// 			// Use context with timeout instead of background context
-// 			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-// 			defer cancel()
-
-// 			l.logger.InfoContext(bgCtx, "Starting background save of LLM-generated POIs",
-// 				slog.Int("count", len(enrichedPOIs)),
-// 				slog.String("city_id", city.String()))
-
-// 			savedCount := 0
-// 			failedCount := 0
-
-// 			for i, poi := range enrichedPOIs {
-// 				select {
-// 				case <-bgCtx.Done():
-// 					l.logger.WarnContext(bgCtx, "Background save cancelled due to timeout",
-// 						slog.Int("saved", savedCount),
-// 						slog.Int("remaining", len(enrichedPOIs)-i))
-// 					return
-// 				default:
-// 				}
-
-// 				if poiID, saveErr := l.poiRepository.SavePOIDetails(bgCtx, poi, uuid.NullUUID{UUID: city, Valid: city != uuid.Nil}); saveErr != nil {
-// 					failedCount++
-// 					l.logger.ErrorContext(bgCtx, "Failed to save LLM-generated POI",
-// 						slog.Any("error", saveErr),
-// 						slog.String("poi_name", poi.Name),
-// 						slog.String("poi_id", poi.ID.String()),
-// 						slog.Float64("latitude", poi.Latitude),
-// 						slog.Float64("longitude", poi.Longitude))
-// 				} else {
-// 					savedCount++
-// 					l.logger.DebugContext(bgCtx, "Successfully saved POI",
-// 						slog.String("poi_name", poi.Name),
-// 						slog.String("poi_id", poiID.String()))
-// 				}
-// 			}
-
-// 			l.logger.InfoContext(bgCtx, "Finished background save of POIs",
-// 				slog.Int("saved", savedCount),
-// 				slog.Int("failed", failedCount),
-// 				slog.Int("total", len(enrichedPOIs)))
-// 		}()
-// 	} else {
-// 		l.logger.WarnContext(ctx, "Skipping POI save - invalid city ID or no POIs",
-// 			slog.String("city_id", city.String()),
-// 			slog.Int("poi_count", len(enrichedPOIs)))
-// 	}
-
-// 	// 8. Cache and return the **filtered** list to the user for this specific request.
-// 	l.cache.Set(cacheKey, enrichedPOIs, cache.DefaultExpiration)
-// 	return enrichedPOIs, nil
+// 	return nil
 // }
 
 func (l *ServiceImpl) generatePOIsWithLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64) (*types.GenAIResponse, error) {

@@ -72,11 +72,12 @@ type POIDetailedInfo struct {
 	Reviews          []string          `json:"reviews"`
 	LlmInteractionID uuid.UUID         `json:"llm_interaction_id"`
 	Tags             []string          `json:"tags,omitempty"`
-	Priority         int               `json:"priority,omitempty"`     // Popularity score 1-10
+	Priority         int               `json:"priority,omitempty"` // Popularity score 1-10
 	CreatedAt        time.Time         `json:"created_at"`
 	CuisineType      string            `json:"cuisine_type,omitempty"` // For restaurants
 	StarRating       string            `json:"star_rating,omitempty"`  // For hotels
 	Err              error             `json:"-"`
+	Source           string            `json:"source,omitempty"` // Source of the POI data (e.g., "google", "yelp", etc.)
 }
 
 type AddPoiRequest struct {

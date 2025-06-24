@@ -282,24 +282,6 @@ ITINERARY PREFERENCES:`
 	return basePrefs
 }
 
-// func getGeneralPOIByDistance(cityName string, lat, lon, distance float64) string {
-// 	return fmt.Sprintf(`
-//             Generate a list of points of interest that people usually see no matter the taste or preference for this city %s.
-//             The user location is at latitude %0.2f and longitude %0.2f, and the distance to search is %0.2f km.
-//             Return the response STRICTLY as a JSON object with:
-//             {
-//             "points_of_interest": [
-//                 {
-//                 "name": "Name of the Point of Interest",
-//                 "latitude": <float>,
-//                 "longitude": <float>,
-//                 "category": "Primary category (e.g., Museum, Historical Site, Park, Restaurant, Bar)",
-//                 "description_poi": "A 2-3 sentence description of this specific POI and why it's relevant."
-//                 }
-//             ]
-//             }`, cityName, lat, lon, distance)
-// }
-
 func getPOIDetailsPrompt(city string, lat, lon float64) string {
 	return fmt.Sprintf(`
 		Generate details for the following POI on the city of %s with the coordinates %0.2f , %0.2f.
