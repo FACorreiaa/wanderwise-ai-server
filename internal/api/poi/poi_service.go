@@ -571,7 +571,7 @@ func (l *ServiceImpl) GetGeneralPOIByDistance(ctx context.Context, userID uuid.U
 
 	if len(enrichedPOIs) > 0 {
 		// Synchronous save to ensure POIs are available immediately
-		if err := l.poiRepository.SaveLlmPoisToDatabase(ctx, enrichedPOIs, genAIResponse); err != nil {
+		if err := l.poiRepository.SaveLlmPoisToDatabase(ctx, enrichedPOIs, genAIResponse, userID); err != nil {
 			l.logger.WarnContext(ctx, "Failed to save LLM POIs to database", slog.Any("error", err))
 		}
 	}

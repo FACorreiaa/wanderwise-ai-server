@@ -76,7 +76,7 @@ type Repository interface {
 
 	// Distance
 	CalculateDistancePostGIS(ctx context.Context, userLat, userLon, poiLat, poiLon float64) (float64, error)
-	SaveLlmPoisToDatabase(ctx context.Context, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse) error
+	SaveLlmPoisToDatabase(ctx context.Context, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse, userID uuid.UUID) error
 }
 
 type RepositoryImpl struct {
@@ -1883,17 +1883,17 @@ func (r *RepositoryImpl) GetPOIsByLocationAndDistance(ctx context.Context, lat, 
 					SELECT 
 						id, 
 						name, 
-						COALESCE(description, '') as description,
-						ST_X(location) as longitude,
-						ST_Y(location) as latitude,
-						COALESCE(category, '') as category,
-						COALESCE(address, '') as address,
-						COALESCE(website, '') as website,
-						COALESCE(phone_number, '') as phone_number,
+						description,
+						longitude,
+						latitude,
+						category,
+						address,
+						website,
+						phone_number,
 						opening_hours,
-						COALESCE(poi_type, '') as poi_type,
+						poi_type,
 						price_level,
-						COALESCE(average_rating, 0) as rating,
+						rating,
 						ROUND(CAST(distance_meters / 1000.0 AS numeric), 2) as distance_km,
 						city_id,
 						COALESCE(tags, '{}') as tags,
@@ -2071,20 +2071,33 @@ func (r *RepositoryImpl) GetPOIsByLocationAndDistance(ctx context.Context, lat, 
 	return pois, nil
 }
 
-func (l *RepositoryImpl) SaveLlmPoisToDatabase(ctx context.Context, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse) error {
+func (l *RepositoryImpl) SaveLlmPoisToDatabase(ctx context.Context, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse, userID uuid.UUID) error {
+	if userID == uuid.Nil {
+		return fmt.Errorf("user_id is required but was nil")
+	}
+
 	tx, err := l.pgpool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
+	// Get or generate LLM interaction ID
+	var llmInteractionID uuid.UUID
+	if genAIResponse != nil && genAIResponse.LlmInteractionID != uuid.Nil {
+		llmInteractionID = genAIResponse.LlmInteractionID
+	} else {
+		// Generate a new interaction ID if not provided
+		llmInteractionID = uuid.New()
+	}
+
 	query := `
-        INSERT INTO llm_suggested_pois (id, name, latitude, longitude, description)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO llm_suggested_pois (id, user_id, llm_interaction_id, name, latitude, longitude, location, description)
+        VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($6, $5), 4326), $7)
         ON CONFLICT (id) DO NOTHING
     `
 	for _, poi := range pois {
-		_, err := tx.Exec(ctx, query, poi.ID, poi.Name, poi.Latitude, poi.Longitude, poi.Description)
+		_, err := tx.Exec(ctx, query, poi.ID, userID, llmInteractionID, poi.Name, poi.Latitude, poi.Longitude, poi.Description)
 		if err != nil {
 			return fmt.Errorf("failed to insert LLM POI: %w", err)
 		}
