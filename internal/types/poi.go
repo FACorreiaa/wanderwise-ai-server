@@ -81,5 +81,6 @@ type POIDetailedInfo struct {
 }
 
 type AddPoiRequest struct {
-	ID string `json:"poi_id"`
+	ID       string `json:"poi_id"`
+	IsLlmPoi bool   `json:"is_llm_poi"`
 }

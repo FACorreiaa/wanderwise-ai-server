@@ -118,7 +118,7 @@ func (h *HandlerImpl) AddPoiToFavourites(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	savedItinerary, err := h.poiService.AddPoiToFavourites(ctx, userID, poiID)
+	savedItinerary, err := h.poiService.AddPoiToFavourites(ctx, userID, poiID, true)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to save itinerary", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to save itinerary: %s", err.Error()))

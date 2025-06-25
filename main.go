@@ -215,6 +215,7 @@ func setupLogger() *slog.Logger {
 			Level:      slog.LevelDebug,
 			TimeFormat: time.Kitchen,
 			AddSource:  true,
+			NoColor:    false,
 		}
 		logger = slog.New(tint.NewHandler(os.Stdout, tintOpts))
 		log.Println("Initialized development logger (tint)")

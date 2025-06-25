@@ -25,7 +25,7 @@ var _ Service = (*ServiceImpl)(nil)
 
 // Service defines the business logic contract for POI operations.
 type Service interface {
-	AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID) (uuid.UUID, error)
+	AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) (uuid.UUID, error)
 	RemovePoiFromFavourites(ctx context.Context, poiID uuid.UUID, userID uuid.UUID) error
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
@@ -79,13 +79,38 @@ func NewServiceImpl(poiRepository Repository,
 		embeddingService: embeddingService,
 	}
 }
-func (s *ServiceImpl) AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID) (uuid.UUID, error) {
-	poi, err := s.poiRepository.AddPoiToFavourites(ctx, userID, poiID)
-	if err != nil {
-		s.logger.Error("failed to add POI to favourites", "error", err)
-		return uuid.Nil, err
+func (s *ServiceImpl) AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) (uuid.UUID, error) {
+	var id uuid.UUID
+	if !isLLMGenerated {
+		exists, err := s.poiRepository.CheckPoiExists(ctx, poiID)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("failed to check if POI exists: %w", err)
+		}
+		if !exists {
+			return uuid.Nil, fmt.Errorf("POI with ID %s does not exist", poiID)
+		}
+
+		id, err = s.poiRepository.AddPoiToFavourites(ctx, userID, poiID)
+		if err != nil {
+			s.logger.Error("failed to add POI to favourites", "error", err)
+			return uuid.Nil, err
+		}
+	} else {
+		exists, err := s.poiRepository.CheckLlmPoiExists(ctx, poiID)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("failed to check if LLM POI exists: %w", err)
+		}
+		if !exists {
+			return uuid.Nil, fmt.Errorf("LLM POI with ID %s does not exist", poiID)
+		}
+		// Insert into user_favorite_llm_pois
+		id, err = s.poiRepository.AddLLMPoiToFavourite(ctx, userID, poiID)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("failed to insert favorite LLM POI: %w", err)
+		}
 	}
-	return poi, nil
+
+	return id, nil
 }
 func (s *ServiceImpl) RemovePoiFromFavourites(ctx context.Context, poiID uuid.UUID, userID uuid.UUID) error {
 	if err := s.poiRepository.RemovePoiFromFavourites(ctx, poiID, userID); err != nil {

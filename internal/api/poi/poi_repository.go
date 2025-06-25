@@ -33,6 +33,9 @@ type Repository interface {
 	GetPOIsByLocationAndDistance(ctx context.Context, lat, lon, radiusMeters float64) ([]types.POIDetailedInfo, error)
 	//GetPOIsByLocationAndDistanceWithFilters(ctx context.Context, lat, lon, radiusMeters float64, filters map[string]string) ([]types.POIDetailedInfo, error)
 	AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID) (uuid.UUID, error)
+	AddLLMPoiToFavourite(ctx context.Context, userID uuid.UUID, llmPoiID uuid.UUID) (uuid.UUID, error)
+	CheckPoiExists(ctx context.Context, poiID uuid.UUID) (bool, error)
+	CheckLlmPoiExists(ctx context.Context, llmPoiID uuid.UUID) (bool, error)
 	RemovePoiFromFavourites(ctx context.Context, poiID uuid.UUID, userID uuid.UUID) error
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
@@ -248,30 +251,53 @@ func (r *RepositoryImpl) GetPOIsByCityAndDistance(ctx context.Context, cityID uu
 	return pois, nil
 }
 
-func (r *RepositoryImpl) AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID) (uuid.UUID, error) {
-	tx, err := r.pgpool.BeginTx(ctx, pgx.TxOptions{})
+func (r *RepositoryImpl) CheckPoiExists(ctx context.Context, poiID uuid.UUID) (bool, error) {
+	var exists bool
+	query := `SELECT EXISTS(SELECT 1 FROM points_of_interest WHERE id = $1)`
+	err := r.pgpool.QueryRow(ctx, query, poiID).Scan(&exists)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("failed to start transaction: %w", err)
+		return false, fmt.Errorf("failed to query points_of_interest: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	return exists, nil
+}
+
+func (r *RepositoryImpl) CheckLlmPoiExists(ctx context.Context, llmPoiID uuid.UUID) (bool, error) {
+	var exists bool
+	query := `SELECT EXISTS(SELECT 1 FROM llm_suggested_pois WHERE id = $1)`
+	err := r.pgpool.QueryRow(ctx, query, llmPoiID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to query llm_suggested_pois: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *RepositoryImpl) AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID) (uuid.UUID, error) {
 	query := `
-		INSERT INTO user_favorite_pois (poi_id, user_id)
+        INSERT INTO user_favorite_pois (user_id, poi_id)
 		VALUES ($1, $2)
-		ON CONFLICT (poi_id, user_id) DO NOTHING
+		ON CONFLICT (user_id, poi_id) DO UPDATE SET user_id = EXCLUDED.user_id
 		RETURNING id
-	`
+    `
 	var id uuid.UUID
-	if err = tx.QueryRow(ctx, query, poiID, userID).Scan(&id); err != nil {
-		if err == pgx.ErrNoRows {
-			return uuid.Nil, nil // No new row inserted
-		}
-		return uuid.Nil, fmt.Errorf("failed to insert favourite POI: %w", err)
+	err := r.pgpool.QueryRow(ctx, query, userID, poiID).Scan(&id)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to add POI to favourites: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return uuid.Nil, fmt.Errorf("failed to commit transaction: %w", err)
+	return id, nil
+}
+
+func (r *RepositoryImpl) AddLLMPoiToFavourite(ctx context.Context, userID uuid.UUID, llmPoiID uuid.UUID) (uuid.UUID, error) {
+	query := `
+        INSERT INTO user_favorite_llm_pois (user_id, llm_poi_id)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id, llm_poi_id) DO UPDATE SET user_id = EXCLUDED.user_id
+		RETURNING id
+    `
+	var id uuid.UUID
+	err := r.pgpool.QueryRow(ctx, query, userID, llmPoiID).Scan(&id)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to insert into user_favorite_llm_pois: %w", err)
 	}
-	// Log the successful insertion
-	r.logger.Info("Favourite POI added successfully", slog.String("poiID", poiID.String()), slog.String("userID", userID.String()), slog.String("favouriteID", id.String()))
 	return id, nil
 }
 

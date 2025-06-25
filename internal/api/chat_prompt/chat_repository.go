@@ -663,7 +663,7 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 
 		err := rows.Scan(
 			&sessionKey, &userIDFromDB, &cityName, &firstInteraction, &lastInteraction, &interactionCount,
-			&avgLatencyMs, &totalTokens, &totalPromptTokens, &totalCompletionTokens, &totalLatencyMs, 
+			&avgLatencyMs, &totalTokens, &totalPromptTokens, &totalCompletionTokens, &totalLatencyMs,
 			&modelsUsed, &interactionsJSON,
 		)
 		if err != nil {
@@ -874,29 +874,29 @@ func formatResponseForDisplay(response, cityName string) string {
 
 	// Try to extract meaningful information from malformed JSON or text
 	cleanedLower := strings.ToLower(cleanedResponse)
-	
+
 	// Check if it contains city information
 	if strings.Contains(cleanedLower, "city") || strings.Contains(cleanedLower, "country") {
 		return fmt.Sprintf("I found information about %s and prepared some details for you!", cityName)
 	}
-	
+
 	// Check for content type indicators
 	if strings.Contains(cleanedLower, "hotel") || strings.Contains(cleanedLower, "accommodation") {
 		return fmt.Sprintf("I found some excellent hotel options in %s for you!", cityName)
 	}
-	
+
 	if strings.Contains(cleanedLower, "restaurant") || strings.Contains(cleanedLower, "dining") {
 		return fmt.Sprintf("I discovered some amazing restaurants in %s for you!", cityName)
 	}
-	
+
 	if strings.Contains(cleanedLower, "poi") || strings.Contains(cleanedLower, "attraction") || strings.Contains(cleanedLower, "point") {
 		return fmt.Sprintf("I found some exciting places to visit in %s for you!", cityName)
 	}
-	
+
 	if strings.Contains(cleanedLower, "itinerary") || strings.Contains(cleanedLower, "plan") {
 		return fmt.Sprintf("I created a personalized travel plan for %s!", cityName)
 	}
-	
+
 	// If we can't determine the content type, return a generic message
 	return fmt.Sprintf("I provided personalized recommendations for %s. Here are some great options I found for you!", cityName)
 }
@@ -988,38 +988,38 @@ func formatPOIResponse(pois []types.POIDetailedInfo, cityName string) string {
 // Format city data response to readable text
 func formatCityDataResponse(cityData types.GeneralCityData) string {
 	result := fmt.Sprintf("Let me tell you about %s, %s! ", cityData.City, cityData.Country)
-	
+
 	if cityData.Description != "" {
 		result += cityData.Description + " "
 	}
-	
+
 	// Add additional details if available
 	details := make([]string, 0)
-	
+
 	if cityData.Population != "" {
 		details = append(details, fmt.Sprintf("population of %s", cityData.Population))
 	}
-	
+
 	if cityData.Weather != "" {
 		details = append(details, fmt.Sprintf("weather: %s", cityData.Weather))
 	}
-	
+
 	if cityData.Language != "" {
 		details = append(details, fmt.Sprintf("language: %s", cityData.Language))
 	}
-	
+
 	if len(details) > 0 {
 		result += "Key details: " + strings.Join(details, ", ") + ". "
 	}
-	
+
 	if cityData.Attractions != "" {
 		result += fmt.Sprintf("Notable attractions include: %s. ", cityData.Attractions)
 	}
-	
+
 	if cityData.History != "" {
 		result += fmt.Sprintf("History: %s", cityData.History)
 	}
-	
+
 	return strings.TrimSpace(result)
 }
 
@@ -1036,27 +1036,6 @@ func pluralize(count int) string {
 		return ""
 	}
 	return "s"
-}
-
-// Helper function to generate session title from conversation history
-func generateSessionTitleFromHistory(history []types.ConversationMessage, cityName string) string {
-	// Find first user message
-	for _, msg := range history {
-		if msg.Role == "user" && len(msg.Content) > 0 {
-			words := strings.Fields(msg.Content)
-			if len(words) > 4 {
-				return strings.Join(words[:4], " ") + "..."
-			}
-			return msg.Content
-		}
-	}
-
-	// Fallback to city name if available
-	if cityName != "" {
-		return "Trip to " + cityName
-	}
-
-	return "Chat Session"
 }
 
 // UpdateSession updates an existing session
@@ -1523,7 +1502,7 @@ func countContentFromResponse(response string) ContentCounts {
 	} else {
 		// Handle text response with pattern matching
 		lowerResponse := strings.ToLower(response)
-		
+
 		// Count mentions of different content types
 		if strings.Contains(lowerResponse, "hotel") || strings.Contains(lowerResponse, "accommodation") {
 			counts.Hotels = 1
@@ -1549,7 +1528,7 @@ func countContentFromResponse(response string) ContentCounts {
 // calculateComplexityScore calculates a complexity score from 1-10 based on session content
 func calculateComplexityScore(pois, hotels, restaurants, messageCount int, hasItinerary bool) int {
 	score := 1
-	
+
 	// Base score from content count
 	totalContent := pois + hotels + restaurants
 	if totalContent > 20 {
@@ -1559,19 +1538,19 @@ func calculateComplexityScore(pois, hotels, restaurants, messageCount int, hasIt
 	} else if totalContent > 5 {
 		score += 1
 	}
-	
+
 	// Bonus for having itinerary
 	if hasItinerary {
 		score += 2
 	}
-	
+
 	// Bonus for message count (engagement)
 	if messageCount > 20 {
 		score += 2
 	} else if messageCount > 10 {
 		score += 1
 	}
-	
+
 	// Bonus for content diversity
 	contentTypes := 0
 	if pois > 0 {
@@ -1588,12 +1567,12 @@ func calculateComplexityScore(pois, hotels, restaurants, messageCount int, hasIt
 	} else if contentTypes >= 2 {
 		score += 1
 	}
-	
+
 	// Cap at 10
 	if score > 10 {
 		score = 10
 	}
-	
+
 	return score
 }
 
@@ -1614,19 +1593,19 @@ func calculateAverageMessageLength(messages []types.ConversationMessage) int {
 	if len(messages) == 0 {
 		return 0
 	}
-	
+
 	totalLength := 0
 	for _, msg := range messages {
 		totalLength += len(msg.Content)
 	}
-	
+
 	return totalLength / len(messages)
 }
 
 // calculateEngagementLevel determines engagement level based on metrics
 func calculateEngagementLevel(messageCount int, duration time.Duration, complexityScore int) string {
 	score := 0
-	
+
 	// Message count factor
 	if messageCount > 15 {
 		score += 3
@@ -1635,7 +1614,7 @@ func calculateEngagementLevel(messageCount int, duration time.Duration, complexi
 	} else if messageCount > 3 {
 		score += 1
 	}
-	
+
 	// Duration factor (more than 10 minutes indicates engagement)
 	if duration > 30*time.Minute {
 		score += 3
@@ -1644,14 +1623,14 @@ func calculateEngagementLevel(messageCount int, duration time.Duration, complexi
 	} else if duration > 2*time.Minute {
 		score += 1
 	}
-	
+
 	// Complexity factor
 	if complexityScore >= 8 {
 		score += 2
 	} else if complexityScore >= 5 {
 		score += 1
 	}
-	
+
 	// Determine level
 	if score >= 6 {
 		return "high"
@@ -1665,13 +1644,13 @@ func calculateEngagementLevel(messageCount int, duration time.Duration, complexi
 func uniqueStringSlice(slice []string) []string {
 	unique := make(map[string]bool)
 	result := make([]string, 0)
-	
+
 	for _, item := range slice {
 		if !unique[item] && item != "" {
 			unique[item] = true
 			result = append(result, item)
 		}
 	}
-	
+
 	return result
 }
