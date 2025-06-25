@@ -8,15 +8,17 @@ CREATE TABLE llm_interactions (
     city_id UUID REFERENCES cities (id) ON DELETE SET NULL,
     prompt TEXT NOT NULL, -- The final prompt sent
     request_payload JSONB, -- Full request body sent to Gemini API (optional)
-    response_text TEXT, -- The final generated text response
+    response TEXT, -- The final generated text response
     response_payload JSONB, -- Full response body from Gemini API (incl. function calls, safety ratings)
-    model_used TEXT, -- e.g., 'gemini-1.5-pro'
+    model_name TEXT, -- e.g., 'gemini-1.5-pro'
     prompt_tokens INTEGER,
     completion_tokens INTEGER,
     total_tokens INTEGER,
+    latitude DOUBLE PRECISION, -- LLM provided latitude
+    longitude DOUBLE PRECISION, -- LLM provided longitude
+    distance DOUBLE PRECISION, -- Distance from the user's current location (if applicable)
     latency_ms INTEGER, -- Time taken for the API call
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-    --FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
 -- Indexes for querying logs
@@ -42,6 +44,7 @@ CREATE TABLE llm_suggested_pois (
     address TEXT, -- If LLM provides it
     website TEXT, -- If LLM provides it
     opening_hours_suggestion TEXT, -- If LLM provides it
+    description_poi TEXT, -- LLM-generated description of the POI
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     --FOREIGN KEY (search_profile_id) REFERENCES user_preference_profiles(id) ON DELETE SET NULL,
     FOREIGN KEY (llm_interaction_id) REFERENCES llm_interactions(id) ON DELETE CASCADE,
@@ -52,8 +55,11 @@ CREATE TABLE llm_suggested_pois (
 -- CONSTRAINT fk_llm_suggested_pois_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, -- Assuming you have a users table
 -- CONSTRAINT fk_llm_suggested_pois_profile FOREIGN KEY (search_profile_id) REFERENCES user_search_profiles(id) ON DELETE SET NULL,
 
+
 created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+CONSTRAINT unique_name_lat_long UNIQUE (name, latitude, longitude)
+
 );
 
 -- Indexes

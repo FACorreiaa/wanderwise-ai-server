@@ -140,4 +140,7 @@ Whether you're a tourist on a tight schedule or a local looking for something ne
 
 > 📃 _License type to be defined (MIT, Apache 2.0, or Proprietary)._
 
+
+On the /discover page and on the /itinerary screen or /restaurants or any result coming from the LLM, how do I add an interactive result so that you see the text slowly being populated on the screen instead of the user waiting for the full request. 
+The streaming is already implemented on the endpoints. 
 ---

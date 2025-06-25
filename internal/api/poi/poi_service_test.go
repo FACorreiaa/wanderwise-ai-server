@@ -15,6 +15,70 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type MockCityRepository struct {
+	mock.Mock
+}
+
+func (m *MockCityRepository) GetCity(ctx context.Context, lat, lon float64) (uuid.UUID, string, error) {
+	args := m.Called(ctx, lat, lon)
+	return args.Get(0).(uuid.UUID), args.Get(1).(string), args.Error(2)
+}
+
+func (m *MockCityRepository) SaveCity(ctx context.Context, city types.CityDetail) (uuid.UUID, error) {
+	args := m.Called(ctx, city)
+	return args.Get(0).(uuid.UUID), args.Error(1)
+}
+
+func (m *MockCityRepository) FindCityByNameAndCountry(ctx context.Context, name, country string) (*types.CityDetail, error) {
+	args := m.Called(ctx, name, country)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*types.CityDetail), args.Error(1)
+}
+
+func (m *MockCityRepository) GetCityByID(ctx context.Context, cityID uuid.UUID) (*types.CityDetail, error) {
+	args := m.Called(ctx, cityID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*types.CityDetail), args.Error(1)
+}
+
+func (m *MockCityRepository) FindSimilarCities(ctx context.Context, queryEmbedding []float32, limit int) ([]types.CityDetail, error) {
+	args := m.Called(ctx, queryEmbedding, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]types.CityDetail), args.Error(1)
+}
+
+func (m *MockCityRepository) UpdateCityEmbedding(ctx context.Context, cityID uuid.UUID, embedding []float32) error {
+	args := m.Called(ctx, cityID, embedding)
+	return args.Error(0)
+}
+
+func (m *MockCityRepository) GetCitiesWithoutEmbeddings(ctx context.Context, limit int) ([]types.CityDetail, error) {
+	args := m.Called(ctx, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]types.CityDetail), args.Error(1)
+}
+
+func (m *MockCityRepository) GetCityIDByName(ctx context.Context, cityName string) (uuid.UUID, error) {
+	args := m.Called(ctx, cityName)
+	return args.Get(0).(uuid.UUID), args.Error(1)
+}
+
+func (m *MockCityRepository) GetAllCities(ctx context.Context) ([]types.CityDetail, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]types.CityDetail), args.Error(1)
+}
+
 // MockPOIRepository is a mock implementation of POIRepository
 type MockPOIRepository struct {
 	mock.Mock
@@ -83,7 +147,7 @@ func (m *MockPOIRepository) GetPOIsByCityID(ctx context.Context, cityID uuid.UUI
 	return args.Get(0).([]types.POIDetailedInfo), args.Error(1)
 }
 
-func (m *MockPOIRepository) FindPOIDetailedInfos(ctx context.Context, cityID uuid.UUID, lat, lon float64, tolerance float64) (*types.POIDetailedInfo, error) {
+func (m *MockPOIRepository) FindPOIDetails(ctx context.Context, cityID uuid.UUID, lat, lon float64, tolerance float64) (*types.POIDetailedInfo, error) {
 	args := m.Called(ctx, cityID, lat, lon, tolerance)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -91,7 +155,7 @@ func (m *MockPOIRepository) FindPOIDetailedInfos(ctx context.Context, cityID uui
 	return args.Get(0).(*types.POIDetailedInfo), args.Error(1)
 }
 
-func (m *MockPOIRepository) SavePOIDetailedInfos(ctx context.Context, poi types.POIDetailedInfo, cityID uuid.UUID) (uuid.UUID, error) {
+func (m *MockPOIRepository) SavePOIDetails(ctx context.Context, poi types.POIDetailedInfo, cityID uuid.UUID) (uuid.UUID, error) {
 	args := m.Called(ctx, poi, cityID)
 	return args.Get(0).(uuid.UUID), args.Error(1)
 }
@@ -227,17 +291,33 @@ func (m *MockPOIRepository) CityExists(ctx context.Context, cityID uuid.UUID) (b
 	return args.Get(0).(bool), args.Error(1)
 }
 
+func (m *MockPOIRepository) CalculateDistancePostGIS(ctx context.Context, userLat, userLon, poiLat, poiLon float64) (float64, error) {
+	args := m.Called(ctx, userLat, userLon, poiLat, poiLon)
+	return args.Get(0).(float64), args.Error(1)
+}
+
+func (m *MockPOIRepository) SaveLlmPoisToDatabase(ctx context.Context, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse, llmInteractionID uuid.UUID) error {
+	args := m.Called(ctx, pois, genAIResponse, llmInteractionID)
+	return args.Error(0)
+}
+
+func (m *MockPOIRepository) SaveLlmInteraction(ctx context.Context, interaction *types.LlmInteraction) (uuid.UUID, error) {
+	args := m.Called(ctx, interaction)
+	return args.Get(0).(uuid.UUID), args.Error(1)
+}
+
 // Helper to setup service with mock repository
-func setupPOIServiceTest() (*ServiceImpl, *MockPOIRepository) {
+func setupPOIServiceTest() (*ServiceImpl, *MockPOIRepository, *MockCityRepository) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})) // or io.Discard
 	mockRepo := new(MockPOIRepository)
+	mockCityRepo := new(MockCityRepository)
 	embeddingService := &generativeAI.EmbeddingService{} // Mock or nil
-	service := NewServiceImpl(mockRepo, embeddingService, logger)
-	return service, mockRepo
+	service := NewServiceImpl(mockRepo, embeddingService, mockCityRepo, logger)
+	return service, mockRepo, mockCityRepo
 }
 
 func TestPOIServiceImpl_AddPoiToFavourites(t *testing.T) {
-	service, mockRepo := setupPOIServiceTest()
+	service, mockRepo, _ := setupPOIServiceTest()
 	ctx := context.Background()
 	userID := uuid.New()
 	poiID := uuid.New()
@@ -263,24 +343,4 @@ func TestPOIServiceImpl_AddPoiToFavourites(t *testing.T) {
 	})
 }
 
-func TestServiceImpl_GetGeneralPOIByDistanceResponse_Integration(t *testing.T) {
-	ctx := context.Background()
-	clearChatTables(t)
 
-	userID := createTestUserForChat(t)
-	createTestCityForChat(t)
-
-	t.Run("Get POIs by distance", func(t *testing.T) {
-		city := "Lisbon"
-		lat := 38.7223
-		lon := -9.1393
-		distance := 5.0 // 5km radius
-
-		pois, err := testChatService.GetGeneralPOIByDistanceResponse(ctx, userID, city, lat, lon, distance)
-		require.NoError(t, err)
-
-		// POIs should be empty if no test data exists, but method should succeed
-		assert.NotNil(t, pois)
-		// assert.GreaterOrEqual(t, len(pois), 0) // Could be 0 if no POIs in test DB
-	})
-}

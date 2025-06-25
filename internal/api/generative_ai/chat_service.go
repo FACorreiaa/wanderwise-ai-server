@@ -22,8 +22,9 @@ import (
 var model = flag.String("model", "gemini-2.0-flash", "the model name, e.g. gemini-2.0-flash")
 
 type AIClient struct {
-	client *genai.Client
-	model  string
+	client    *genai.Client
+	model     string
+	ModelName string
 }
 
 type ChatSession struct {
@@ -82,8 +83,9 @@ func NewAIClient(ctx context.Context) (*AIClient, error) {
 
 	span.SetStatus(codes.Ok, "AI client created successfully")
 	return &AIClient{
-		client: client,
-		model:  *model,
+		client:    client,
+		model:     *model,
+		ModelName: *model,
 	}, nil
 }
 

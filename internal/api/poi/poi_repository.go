@@ -76,7 +76,8 @@ type Repository interface {
 
 	// Distance
 	CalculateDistancePostGIS(ctx context.Context, userLat, userLon, poiLat, poiLon float64) (float64, error)
-	SaveLlmPoisToDatabase(ctx context.Context, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse, userID uuid.UUID) error
+	SaveLlmPoisToDatabase(ctx context.Context, userID uuid.UUID, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse, llmInteractionID uuid.UUID) error
+	SaveLlmInteraction(ctx context.Context, interaction *types.LlmInteraction) (uuid.UUID, error)
 }
 
 type RepositoryImpl struct {
@@ -1894,7 +1895,7 @@ func (r *RepositoryImpl) GetPOIsByLocationAndDistance(ctx context.Context, lat, 
 						poi_type,
 						price_level,
 						rating,
-						ROUND(CAST(distance_meters / 1000.0 AS numeric), 2) as distance_km,
+						ROUND(CAST(distance_meters / 1000.0 AS numeric), 2) as distance,
 						city_id,
 						COALESCE(tags, '{}') as tags,
 						COALESCE(rating_count, 0) as rating_count,
@@ -1926,7 +1927,7 @@ func (r *RepositoryImpl) GetPOIsByLocationAndDistance(ctx context.Context, lat, 
 							$3
 						)
 					) sub
-					ORDER BY distance_km ASC LIMIT 50
+					ORDER BY distance ASC LIMIT 50
 				`
 
 	var args []interface{}
@@ -2071,42 +2072,86 @@ func (r *RepositoryImpl) GetPOIsByLocationAndDistance(ctx context.Context, lat, 
 	return pois, nil
 }
 
-func (l *RepositoryImpl) SaveLlmPoisToDatabase(ctx context.Context, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse, userID uuid.UUID) error {
-	if userID == uuid.Nil {
-		return fmt.Errorf("user_id is required but was nil")
-	}
+func (r *RepositoryImpl) SaveLlmInteraction(ctx context.Context, interaction *types.LlmInteraction) (uuid.UUID, error) {
+	ctx, span := otel.Tracer("POIRepository").Start(ctx, "SaveLlmInteraction")
+	defer span.End()
 
-	tx, err := l.pgpool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	// Get or generate LLM interaction ID
-	var llmInteractionID uuid.UUID
-	if genAIResponse != nil && genAIResponse.LlmInteractionID != uuid.Nil {
-		llmInteractionID = genAIResponse.LlmInteractionID
-	} else {
-		// Generate a new interaction ID if not provided
-		llmInteractionID = uuid.New()
-	}
+	l := r.logger.With(slog.String("method", "SaveLlmInteraction"))
 
 	query := `
-        INSERT INTO llm_suggested_pois (id, user_id, llm_interaction_id, name, latitude, longitude, location, description)
-        VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($6, $5), 4326), $7)
-        ON CONFLICT (id) DO NOTHING
-    `
+		INSERT INTO llm_interactions (user_id, model_name, prompt, response, latitude, longitude, distance)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id
+	`
+
+	var id uuid.UUID
+	err := r.pgpool.QueryRow(ctx, query, interaction.UserID, interaction.ModelName, interaction.Prompt, interaction.Response, interaction.Latitude, interaction.Longitude, interaction.Distance).Scan(&id)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to save LLM interaction", slog.Any("error", err))
+		span.RecordError(err)
+		return uuid.Nil, fmt.Errorf("failed to save LLM interaction: %w", err)
+	}
+
+	l.InfoContext(ctx, "Successfully saved LLM interaction", slog.String("id", id.String()))
+	span.SetStatus(codes.Ok, "LLM interaction saved successfully")
+	return id, nil
+}
+
+func (r *RepositoryImpl) SaveLlmPoisToDatabase(ctx context.Context, userID uuid.UUID, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse, llmInteractionID uuid.UUID) error {
+	ctx, span := otel.Tracer("POIRepository").Start(ctx, "SaveLlmPoisToDatabase", trace.WithAttributes(
+		attribute.Int("poi.count", len(pois)),
+	))
+	defer span.End()
+
+	l := r.logger.With(slog.String("method", "SaveLlmPoisToDatabase"))
+
+	if len(pois) == 0 {
+		l.InfoContext(ctx, "No LLM POIs to save.")
+		return nil
+	}
+
+	tx, err := r.pgpool.Begin(ctx)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to begin transaction for saving LLM POIs", slog.Any("error", err))
+		span.RecordError(err)
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // Rollback on error
+
+	stmt, err := tx.Prepare(ctx, "insert_llm_poi", `
+		INSERT INTO llm_suggested_pois (id, user_id, llm_interaction_id, name, latitude, longitude, category, description_poi, distance, location)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, ST_SetSRID(ST_MakePoint($5, $4), 4326))
+		ON CONFLICT (name, latitude, longitude) DO NOTHING
+	`)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to prepare statement for LLM POI insertion", slog.Any("error", err))
+		span.RecordError(err)
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
 	for _, poi := range pois {
-		_, err := tx.Exec(ctx, query, poi.ID, userID, llmInteractionID, poi.Name, poi.Latitude, poi.Longitude, poi.Description)
+		if poi.Latitude == 0 || poi.Longitude == 0 {
+			l.WarnContext(ctx, "POI has invalid coordinates, skipping", slog.String("poi_name", poi.Name))
+			continue
+		}
+
+		_, err := tx.Exec(ctx, stmt.Name, poi.ID, userID, llmInteractionID, poi.Name, poi.Latitude, poi.Longitude, poi.Category, poi.Description, poi.Distance)
 		if err != nil {
+			l.ErrorContext(ctx, "Failed to insert LLM POI", slog.Any("error", err), slog.String("poi_name", poi.Name))
+			span.RecordError(err)
 			return fmt.Errorf("failed to insert LLM POI: %w", err)
+
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
+		l.ErrorContext(ctx, "Failed to commit transaction for saving LLM POIs", slog.Any("error", err))
+		span.RecordError(err)
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
-	l.logger.InfoContext(ctx, "Saved LLM-generated POIs to llm_suggested_pois", "count", len(pois))
+
+	l.InfoContext(ctx, "Successfully saved LLM POIs to database", slog.Int("count", len(pois)))
+	span.SetStatus(codes.Ok, "LLM POIs saved successfully")
 	return nil
 }
 

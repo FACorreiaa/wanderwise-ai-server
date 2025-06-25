@@ -92,7 +92,7 @@ func TestTagsServiceImpl_GetTags(t *testing.T) {
 			{ID: uuid.New(), Name: "Outdoors", TagType: "preference"},
 			{ID: uuid.New(), Name: "Foodie", TagType: "preference"},
 		}
-		mockRepo.On("GetAll", ctx, userID).Return(expectedTags, nil).Once()
+		mockRepo.On("GetAll", mock.Anything, userID).Return(expectedTags, nil).Once()
 
 		tags, err := service.GetTags(ctx, userID)
 		require.NoError(t, err)
@@ -112,7 +112,7 @@ func TestTagsServiceImpl_GetTags(t *testing.T) {
 
 	t.Run("repository error", func(t *testing.T) {
 		repoErr := errors.New("db error fetching all tags")
-		mockRepo.On("GetAll", ctx, userID).Return(nil, repoErr).Once()
+		mockRepo.On("GetAll", mock.Anything, userID).Return(nil, repoErr).Once()
 
 		_, err := service.GetTags(ctx, userID)
 		require.Error(t, err)
@@ -130,7 +130,7 @@ func TestTagsServiceImpl_GetTag(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		expectedTag := &types.Tags{ID: tagID, Name: "Specific Tag", TagType: "preference"}
-		mockRepo.On("Get", ctx, userID, tagID).Return(expectedTag, nil).Once()
+		mockRepo.On("Get", mock.Anything, userID, tagID).Return(expectedTag, nil).Once()
 
 		tag, err := service.GetTag(ctx, userID, tagID)
 		require.NoError(t, err)
@@ -140,7 +140,7 @@ func TestTagsServiceImpl_GetTag(t *testing.T) {
 
 	t.Run("repository error - not found", func(t *testing.T) {
 		repoErr := errors.New("tag not found in repo") // Or types.ErrNotFound
-		mockRepo.On("Get", ctx, userID, tagID).Return(nil, repoErr).Once()
+		mockRepo.On("Get", mock.Anything, userID, tagID).Return(nil, repoErr).Once()
 
 		_, err := service.GetTag(ctx, userID, tagID)
 		require.Error(t, err)
@@ -169,7 +169,7 @@ func TestTagsServiceImpl_CreateTag(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		mockRepo.On("Create", ctx, userID, params).Return(expectedPersonalTag, nil).Once()
+		mockRepo.On("Create", mock.Anything, userID, params).Return(expectedPersonalTag, nil).Once()
 
 		tag, err := service.CreateTag(ctx, userID, params)
 		require.NoError(t, err)
@@ -179,7 +179,7 @@ func TestTagsServiceImpl_CreateTag(t *testing.T) {
 
 	t.Run("repository error", func(t *testing.T) {
 		repoErr := errors.New("db error creating tag")
-		mockRepo.On("Create", ctx, userID, params).Return(nil, repoErr).Once()
+		mockRepo.On("Create", mock.Anything, userID, params).Return(nil, repoErr).Once()
 
 		_, err := service.CreateTag(ctx, userID, params)
 		require.Error(t, err)
@@ -196,7 +196,7 @@ func TestTagsServiceImpl_DeleteTag(t *testing.T) {
 	tagID := uuid.New()
 
 	t.Run("success", func(t *testing.T) {
-		mockRepo.On("Delete", ctx, userID, tagID).Return(nil).Once()
+		mockRepo.On("Delete", mock.Anything, userID, tagID).Return(nil).Once()
 
 		err := service.DeleteTag(ctx, userID, tagID)
 		require.NoError(t, err)
@@ -205,7 +205,7 @@ func TestTagsServiceImpl_DeleteTag(t *testing.T) {
 
 	t.Run("repository error", func(t *testing.T) {
 		repoErr := errors.New("db error deleting tag")
-		mockRepo.On("Delete", ctx, userID, tagID).Return(repoErr).Once()
+		mockRepo.On("Delete", mock.Anything, userID, tagID).Return(repoErr).Once()
 
 		err := service.DeleteTag(ctx, userID, tagID)
 		require.Error(t, err)
@@ -229,7 +229,7 @@ func TestTagsServiceImpl_Update(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		mockRepo.On("Update", ctx, userID, tagID, params).Return(nil).Once()
+		mockRepo.On("Update", mock.Anything, userID, tagID, params).Return(nil).Once()
 
 		err := service.Update(ctx, userID, tagID, params)
 		require.NoError(t, err)
@@ -238,7 +238,7 @@ func TestTagsServiceImpl_Update(t *testing.T) {
 
 	t.Run("repository error", func(t *testing.T) {
 		repoErr := errors.New("db error updating tag")
-		mockRepo.On("Update", ctx, userID, tagID, params).Return(repoErr).Once()
+		mockRepo.On("Update", mock.Anything, userID, tagID, params).Return(repoErr).Once()
 
 		err := service.Update(ctx, userID, tagID, params)
 		require.Error(t, err)

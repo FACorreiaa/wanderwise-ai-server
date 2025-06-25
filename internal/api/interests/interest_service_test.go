@@ -97,14 +97,14 @@ func TestCreateInterest(t *testing.T) {
 		{
 			name: "Success",
 			setupMock: func() {
-				mockRepo.On("CreateInterest", ctx, name, &description, isActive, userID).Return(expectedInterest, nil)
+				mockRepo.On("CreateInterest", mock.Anything, name, &description, isActive, userID).Return(expectedInterest, nil)
 			},
 			expectedError: false,
 		},
 		{
 			name: "Repository Error",
 			setupMock: func() {
-				mockRepo.On("CreateInterest", ctx, name, &description, isActive, userID).Return(nil, errors.New("repository error"))
+				mockRepo.On("CreateInterest", mock.Anything, name, &description, isActive, userID).Return(nil, errors.New("repository error"))
 			},
 			expectedError: true,
 		},
@@ -154,14 +154,14 @@ func TestRemoveinterests(t *testing.T) {
 		{
 			name: "Success",
 			setupMock: func() {
-				mockRepo.On("Removeinterests", ctx, userID, interestID).Return(nil)
+				mockRepo.On("Removeinterests", mock.Anything, userID, interestID).Return(nil)
 			},
 			expectedError: false,
 		},
 		{
 			name: "Repository Error",
 			setupMock: func() {
-				mockRepo.On("Removeinterests", ctx, userID, interestID).Return(errors.New("repository error"))
+				mockRepo.On("Removeinterests", mock.Anything, userID, interestID).Return(errors.New("repository error"))
 			},
 			expectedError: true,
 		},
@@ -226,14 +226,14 @@ func TestGetAllInterests(t *testing.T) {
 		{
 			name: "Success",
 			setupMock: func() {
-				mockRepo.On("GetAllInterests", ctx).Return(expectedInterests, nil)
+				mockRepo.On("GetAllInterests", mock.Anything).Return(expectedInterests, nil)
 			},
 			expectedError: false,
 		},
 		{
 			name: "Repository Error",
 			setupMock: func() {
-				mockRepo.On("GetAllInterests", ctx).Return(nil, errors.New("repository error"))
+				mockRepo.On("GetAllInterests", mock.Anything).Return(nil, errors.New("repository error"))
 			},
 			expectedError: true,
 		},
@@ -291,14 +291,14 @@ func TestUpdateinterests(t *testing.T) {
 		{
 			name: "Success",
 			setupMock: func() {
-				mockRepo.On("Updateinterests", ctx, userID, interestID, params).Return(nil)
+				mockRepo.On("Updateinterests", mock.Anything, userID, interestID, params).Return(nil)
 			},
 			expectedError: false,
 		},
 		{
 			name: "Repository Error",
 			setupMock: func() {
-				mockRepo.On("Updateinterests", ctx, userID, interestID, params).Return(errors.New("repository error"))
+				mockRepo.On("Updateinterests", mock.Anything, userID, interestID, params).Return(errors.New("repository error"))
 			},
 			expectedError: true,
 		},

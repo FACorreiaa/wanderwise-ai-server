@@ -570,8 +570,24 @@ func (l *ServiceImpl) GetGeneralPOIByDistance(ctx context.Context, userID uuid.U
 	}
 
 	if len(enrichedPOIs) > 0 {
+		interaction := &types.LlmInteraction{
+			UserID:    userID,
+			ModelName: genAIResponse.ModelName,
+			Prompt:    genAIResponse.Prompt,
+			Response:  genAIResponse.Response,
+			Latitude:  &lat,
+			Longitude: &lon,
+			Distance:  &distance,
+		}
+
+		llmInteractionID, err := l.poiRepository.SaveLlmInteraction(ctx, interaction)
+		if err != nil {
+			l.logger.ErrorContext(ctx, "Failed to save LLM interaction", slog.Any("error", err))
+			return nil, err
+		}
+
 		// Synchronous save to ensure POIs are available immediately
-		if err := l.poiRepository.SaveLlmPoisToDatabase(ctx, enrichedPOIs, genAIResponse, userID); err != nil {
+		if err := l.poiRepository.SaveLlmPoisToDatabase(ctx, userID, enrichedPOIs, genAIResponse, llmInteractionID); err != nil {
 			l.logger.WarnContext(ctx, "Failed to save LLM POIs to database", slog.Any("error", err))
 		}
 	}
@@ -763,7 +779,12 @@ func (l *ServiceImpl) getGeneralPOIByDistance(wg *sync.WaitGroup,
 
 	span.SetAttributes(attribute.Int("pois.count", len(poiData.PointsOfInterest)))
 	span.SetStatus(codes.Ok, "General POIs generated successfully")
-	resultCh <- types.GenAIResponse{GeneralPOI: poiData.PointsOfInterest}
+	resultCh <- types.GenAIResponse{
+		GeneralPOI: poiData.PointsOfInterest,
+		ModelName:  l.aiClient.ModelName,
+		Prompt:     prompt,
+		Response:   cleanTxt,
+	}
 }
 
 func (l *ServiceImpl) enrichLLMPOIsWithMetadata(ctx context.Context, pois []types.POIDetailedInfo, userLat, userLon, searchRadiusMeters float64) ([]types.POIDetailedInfo, uuid.UUID, error) {

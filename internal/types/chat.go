@@ -13,21 +13,28 @@ import (
 )
 
 type LlmInteraction struct {
-	ID               uuid.UUID       `json:"id"`
-	SessionID        uuid.UUID       `json:"session_id"`
-	UserID           uuid.UUID       `json:"user_id"`
-	ProfileID        uuid.UUID       `json:"profile_id"`
-	CityName         string          `json:"city_name,omitempty"` // The city context for this interaction
-	Prompt           string          `json:"prompt"`
-	RequestPayload   json.RawMessage `json:"request_payload"`
-	ResponseText     string          `json:"response_text"`
-	ResponsePayload  json.RawMessage `json:"response_payload"`
-	ModelUsed        string          `json:"model_used"`
-	PromptTokens     int             `json:"prompt_tokens"`
-	CompletionTokens int             `json:"completion_tokens"`
-	TotalTokens      int             `json:"total_tokens"`
-	LatencyMs        int             `json:"latency_ms"`
-	Timestamp        time.Time       `json:"timestamp"`
+	ID                 uuid.UUID       `json:"id"`
+	SessionID          uuid.UUID       `json:"session_id"`
+	UserID             uuid.UUID       `json:"user_id"`
+	ProfileID          uuid.UUID       `json:"profile_id"`
+	CityName           string          `json:"city_name,omitempty"` // The city context for this interaction
+	Prompt             string          `json:"prompt"`
+	RequestPayload     json.RawMessage `json:"request_payload"`
+	ResponseText       string          `json:"response_text"`
+	ResponsePayload    json.RawMessage `json:"response_payload"`
+	ModelUsed          string          `json:"model_used"`
+	PromptTokens       int             `json:"prompt_tokens"`
+	CompletionTokens   int             `json:"completion_tokens"`
+	TotalTokens        int             `json:"total_tokens"`
+	LatencyMs          int             `json:"latency_ms"`
+	Timestamp          time.Time       `json:"timestamp"`
+	ModelName          string          `json:"model_name"`
+	Response           string          `json:"response"`
+	Latitude           *float64        `json:"latitude"`
+	Longitude          *float64        `json:"longitude"`
+	Distance           *float64        `json:"distance"`
+	PromptTokenCount   int             `json:"prompt_token_count"`
+	ResponseTokenCount int             `json:"response_token_count"`
 }
 
 type AIItineraryResponse struct {
@@ -76,6 +83,9 @@ type GenAIResponse struct {
 	PersonalisedPOI      []POIDetailedInfo `json:"personalised_poi,omitempty"` // Consider changing to []PersonalizedPOIDetail
 	POIDetailedInfo      []POIDetailedInfo `json:"poi_detailed_info,omitempty"`
 	Err                  error             `json:"-"`
+	ModelName            string            `json:"model_name"`
+	Prompt               string            `json:"prompt"`
+	Response             string            `json:"response"`
 }
 
 type AIRequestPayloadForLog struct {

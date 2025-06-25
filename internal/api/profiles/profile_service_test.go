@@ -194,7 +194,7 @@ func TestProfilesServiceImpl_GetSearchProfile(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		expectedProfile := &types.UserPreferenceProfileResponse{ID: profileID, UserID: userID, ProfileName: "Test Profile"}
-		mockPrefRepo.On("GetSearchProfile", ctx, userID, profileID).Return(expectedProfile, nil).Once()
+		mockPrefRepo.On("GetSearchProfile", mock.Anything, userID, profileID).Return(expectedProfile, nil).Once()
 
 		profile, err := service.GetSearchProfile(ctx, userID, profileID)
 		require.NoError(t, err)
@@ -204,7 +204,7 @@ func TestProfilesServiceImpl_GetSearchProfile(t *testing.T) {
 
 	t.Run("repository error", func(t *testing.T) {
 		repoErr := errors.New("db error fetching profile")
-		mockPrefRepo.On("GetSearchProfile", ctx, userID, profileID).Return(nil, repoErr).Once()
+		mockPrefRepo.On("GetSearchProfile", mock.Anything, userID, profileID).Return(nil, repoErr).Once()
 
 		_, err := service.GetSearchProfile(ctx, userID, profileID)
 		require.Error(t, err)
@@ -225,7 +225,7 @@ func TestProfilesServiceImpl_GetSearchProfiles(t *testing.T) {
 			{ID: uuid.New(), UserID: userID, ProfileName: "Profile 1"},
 			{ID: uuid.New(), UserID: userID, ProfileName: "Profile 2"},
 		}
-		mockPrefRepo.On("GetSearchProfiles", ctx, userID).Return(expectedProfiles, nil).Once()
+		mockPrefRepo.On("GetSearchProfiles", mock.Anything, userID).Return(expectedProfiles, nil).Once()
 
 		profiles, err := service.GetSearchProfiles(ctx, userID)
 		require.NoError(t, err)
@@ -235,7 +235,7 @@ func TestProfilesServiceImpl_GetSearchProfiles(t *testing.T) {
 
 	t.Run("repository error", func(t *testing.T) {
 		repoErr := errors.New("db error fetching profiles")
-		mockPrefRepo.On("GetSearchProfiles", ctx, userID).Return(nil, repoErr).Once()
+		mockPrefRepo.On("GetSearchProfiles", mock.Anything, userID).Return(nil, repoErr).Once()
 
 		_, err := service.GetSearchProfiles(ctx, userID)
 		require.Error(t, err)
@@ -253,7 +253,7 @@ func TestProfilesServiceImpl_GetDefaultSearchProfile(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		expectedProfile := &types.UserPreferenceProfileResponse{ID: uuid.New(), UserID: userID, ProfileName: "Default Profile", IsDefault: true}
-		mockPrefRepo.On("GetDefaultSearchProfile", ctx, userID).Return(expectedProfile, nil).Once()
+		mockPrefRepo.On("GetDefaultSearchProfile", mock.Anything, userID).Return(expectedProfile, nil).Once()
 
 		profile, err := service.GetDefaultSearchProfile(ctx, userID)
 		require.NoError(t, err)
@@ -263,7 +263,7 @@ func TestProfilesServiceImpl_GetDefaultSearchProfile(t *testing.T) {
 
 	t.Run("repository error", func(t *testing.T) {
 		repoErr := errors.New("db error fetching default profile")
-		mockPrefRepo.On("GetDefaultSearchProfile", ctx, userID).Return(nil, repoErr).Once()
+		mockPrefRepo.On("GetDefaultSearchProfile", mock.Anything, userID).Return(nil, repoErr).Once()
 
 		_, err := service.GetDefaultSearchProfile(ctx, userID)
 		require.Error(t, err)
@@ -284,7 +284,7 @@ func TestProfilesServiceImpl_UpdateSearchProfile(t *testing.T) {
 		params := types.UpdateSearchProfileParams{
 			ProfileName: "Updated Profile",
 		}
-		mockPrefRepo.On("UpdateSearchProfile", ctx, userID, profileID, params).Return(nil).Once()
+		mockPrefRepo.On("UpdateSearchProfile", mock.Anything, userID, profileID, params).Return(nil).Once()
 
 		err := service.UpdateSearchProfile(ctx, userID, profileID, params)
 		require.NoError(t, err)
@@ -296,7 +296,7 @@ func TestProfilesServiceImpl_UpdateSearchProfile(t *testing.T) {
 			ProfileName: "Updated Profile",
 		}
 		repoErr := errors.New("db error updating profile")
-		mockPrefRepo.On("UpdateSearchProfile", ctx, userID, profileID, params).Return(repoErr).Once()
+		mockPrefRepo.On("UpdateSearchProfile", mock.Anything, userID, profileID, params).Return(repoErr).Once()
 
 		err := service.UpdateSearchProfile(ctx, userID, profileID, params)
 		require.Error(t, err)
@@ -314,7 +314,7 @@ func TestProfilesServiceImpl_DeleteSearchProfile(t *testing.T) {
 	profileID := uuid.New()
 
 	t.Run("success", func(t *testing.T) {
-		mockPrefRepo.On("DeleteSearchProfile", ctx, userID, profileID).Return(nil).Once()
+		mockPrefRepo.On("DeleteSearchProfile", mock.Anything, userID, profileID).Return(nil).Once()
 
 		err := service.DeleteSearchProfile(ctx, userID, profileID)
 		require.NoError(t, err)
@@ -323,7 +323,7 @@ func TestProfilesServiceImpl_DeleteSearchProfile(t *testing.T) {
 
 	t.Run("repository error", func(t *testing.T) {
 		repoErr := errors.New("db error deleting profile")
-		mockPrefRepo.On("DeleteSearchProfile", ctx, userID, profileID).Return(repoErr).Once()
+		mockPrefRepo.On("DeleteSearchProfile", mock.Anything, userID, profileID).Return(repoErr).Once()
 
 		err := service.DeleteSearchProfile(ctx, userID, profileID)
 		require.Error(t, err)
@@ -341,7 +341,7 @@ func TestProfilesServiceImpl_SetDefaultSearchProfile(t *testing.T) {
 	profileID := uuid.New()
 
 	t.Run("success", func(t *testing.T) {
-		mockPrefRepo.On("SetDefaultSearchProfile", ctx, userID, profileID).Return(nil).Once()
+		mockPrefRepo.On("SetDefaultSearchProfile", mock.Anything, userID, profileID).Return(nil).Once()
 
 		err := service.SetDefaultSearchProfile(ctx, userID, profileID)
 		require.NoError(t, err)
@@ -350,7 +350,7 @@ func TestProfilesServiceImpl_SetDefaultSearchProfile(t *testing.T) {
 
 	t.Run("repository error", func(t *testing.T) {
 		repoErr := errors.New("db error setting default profile")
-		mockPrefRepo.On("SetDefaultSearchProfile", ctx, userID, profileID).Return(repoErr).Once()
+		mockPrefRepo.On("SetDefaultSearchProfile", mock.Anything, userID, profileID).Return(repoErr).Once()
 
 		err := service.SetDefaultSearchProfile(ctx, userID, profileID)
 		require.Error(t, err)
@@ -389,11 +389,11 @@ func TestProfilesServiceImpl_CreateSearchProfile(t *testing.T) {
 		// And the service's transaction logic is what we are testing.
 
 		// Mock validation calls
-		mockIntRepo.On("GetInterest", ctx, interestID1).Return(&types.Interest{ID: interestID1, Name: "Hiking"}, nil).Once()
-		mockTagRepo.On("Get", ctx, userID, tagID1).Return(&types.Tags{ID: tagID1, Name: "Mountains"}, nil).Once()
+		mockIntRepo.On("GetInterest", mock.Anything, interestID1).Return(&types.Interest{ID: interestID1, Name: "Hiking"}, nil).Once()
+		mockTagRepo.On("Get", mock.Anything, userID, tagID1).Return(&types.Tags{ID: tagID1, Name: "Mountains"}, nil).Once()
 
 		// Mock repo.CreateSearchProfile
-		mockPrefRepo.On("CreateSearchProfile", ctx, userID, params).Return(createdCoreProfile, nil).Once()
+		mockPrefRepo.On("CreateSearchProfile", mock.Anything, userID, params).Return(createdCoreProfile, nil).Once()
 
 		// Mock linking calls (these happen inside the transaction in the service)
 		// To test the transactional version (CreateSearchProfileCC), we need to mock Begin, Commit, Rollback
@@ -404,12 +404,12 @@ func TestProfilesServiceImpl_CreateSearchProfile(t *testing.T) {
 		// It directly calls repo.CreateSearchProfile, then AddInterestToProfile, LinkPersonalTagToProfile
 		// THEN fetches. This order needs to be mocked.
 
-		mockIntRepo.On("AddInterestToProfile", ctx, createdCoreProfile.ID, interestID1).Return(nil).Once()
-		mockTagRepo.On("LinkPersonalTagToProfile", ctx, userID, createdCoreProfile.ID, tagID1).Return(nil).Once()
+		mockIntRepo.On("AddInterestToProfile", mock.Anything, createdCoreProfile.ID, interestID1).Return(nil).Once()
+		mockTagRepo.On("LinkPersonalTagToProfile", mock.Anything, userID, createdCoreProfile.ID, tagID1).Return(nil).Once()
 
 		// Mock fetching associated data for the response
-		mockIntRepo.On("GetInterestsForProfile", ctx, createdCoreProfile.ID).Return([]*types.Interest{{ID: interestID1, Name: "Hiking"}}, nil).Once()
-		mockTagRepo.On("GetTagsForProfile", ctx, createdCoreProfile.ID).Return([]*types.Tags{{ID: tagID1, Name: "Mountains"}}, nil).Once()
+		mockIntRepo.On("GetInterestsForProfile", mock.Anything, createdCoreProfile.ID).Return([]*types.Interest{{ID: interestID1, Name: "Hiking"}}, nil).Once()
+		mockTagRepo.On("GetTagsForProfile", mock.Anything, createdCoreProfile.ID).Return([]*types.Tags{{ID: tagID1, Name: "Mountains"}}, nil).Once()
 
 		// Mock transaction parts - this is where it gets hard if service has `s.prefRepo.(*PostgresprofilessRepo).pgpool.Begin(ctx)`
 		// If we are testing `CreateSearchProfile` (not `CreateSearchProfileCC` which has explicit Tx):
@@ -453,7 +453,7 @@ func TestProfilesServiceImpl_CreateSearchProfile(t *testing.T) {
 			Interests:   []uuid.UUID{invalidInterestID},
 		}
 		repoErr := fmt.Errorf("interest %s not found", invalidInterestID) // Mock this error
-		mockIntRepo.On("GetInterest", ctx, invalidInterestID).Return(nil, repoErr).Once()
+		mockIntRepo.On("GetInterest", mock.Anything, invalidInterestID).Return(nil, repoErr).Once()
 
 		_, err := service.CreateSearchProfile(ctx, userID, paramsWithInvalidInterest)
 		require.Error(t, err)

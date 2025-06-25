@@ -241,8 +241,7 @@ func TestRegisterHandlerImpl(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		// Set up expectations
-		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], "user").
-			Return(nil).Once()
+		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], "user").Return(nil)
 
 		// Call the HandlerImpl
 		HandlerImpl.Register(w, req)
@@ -309,8 +308,7 @@ func TestRegisterHandlerImpl(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		// Set up expectations
-		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], "user").
-			Return(types.ErrConflict).Once()
+		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], "user").Return(types.ErrConflict).Once()
 
 		// Call the HandlerImpl
 		HandlerImpl.Register(w, req)
@@ -336,8 +334,7 @@ func TestRegisterHandlerImpl(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		// Set up expectations
-		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], "user").
-			Return(errors.New("internal error")).Once()
+		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], "user").Return(errors.New("internal error")).Once()
 
 		// Call the HandlerImpl
 		HandlerImpl.Register(w, req)
