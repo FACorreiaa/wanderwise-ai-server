@@ -2119,10 +2119,10 @@ func (r *RepositoryImpl) SaveLlmPoisToDatabase(ctx context.Context, userID uuid.
 	defer tx.Rollback(ctx) // Rollback on error
 
 	stmt, err := tx.Prepare(ctx, "insert_llm_poi", `
-		INSERT INTO llm_suggested_pois (id, user_id, llm_interaction_id, name, latitude, longitude, category, description_poi, distance, location)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, ST_SetSRID(ST_MakePoint($5, $4), 4326))
-		ON CONFLICT (name, latitude, longitude) DO NOTHING
-	`)
+        INSERT INTO llm_suggested_pois (id, user_id, llm_interaction_id, name, latitude, longitude, category, description_poi, distance, location)
+        VALUES ($1, $2, $3, $4::TEXT, $5, $6, $7, $8, $9, ST_SetSRID(ST_MakePoint($6, $5), 4326))
+        ON CONFLICT (name, latitude, longitude) DO NOTHING
+    `)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to prepare statement for LLM POI insertion", slog.Any("error", err))
 		span.RecordError(err)
@@ -2130,17 +2130,30 @@ func (r *RepositoryImpl) SaveLlmPoisToDatabase(ctx context.Context, userID uuid.
 	}
 
 	for _, poi := range pois {
+		// Validate POI data
+		if poi.Name == "" {
+			l.WarnContext(ctx, "POI has empty or nil name, skipping", slog.String("poi_name", poi.Name))
+			continue
+		}
 		if poi.Latitude == 0 || poi.Longitude == 0 {
 			l.WarnContext(ctx, "POI has invalid coordinates, skipping", slog.String("poi_name", poi.Name))
 			continue
 		}
+
+		// Log parameter values for debugging
+		l.DebugContext(ctx, "Inserting POI",
+			slog.String("poi_name", poi.Name),
+			slog.Float64("latitude", poi.Latitude),
+			slog.Float64("longitude", poi.Longitude),
+			slog.String("category", poi.Category),
+			slog.String("description", poi.Description),
+			slog.Float64("distance", poi.Distance))
 
 		_, err := tx.Exec(ctx, stmt.Name, poi.ID, userID, llmInteractionID, poi.Name, poi.Latitude, poi.Longitude, poi.Category, poi.Description, poi.Distance)
 		if err != nil {
 			l.ErrorContext(ctx, "Failed to insert LLM POI", slog.Any("error", err), slog.String("poi_name", poi.Name))
 			span.RecordError(err)
 			return fmt.Errorf("failed to insert LLM POI: %w", err)
-
 		}
 	}
 

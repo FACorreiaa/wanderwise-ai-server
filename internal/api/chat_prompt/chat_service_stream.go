@@ -28,10 +28,33 @@ import (
 //     // Save to a persistent store
 // }
 
-func (l *ServiceImpl) sendEventWithRetry(ctx context.Context, ch chan<- types.StreamEvent, event types.StreamEvent, retries int) bool {
+func (l *ServiceImpl) sendEvent(ctx context.Context, ch chan<- types.StreamEvent, event types.StreamEvent, retries int) bool {
 	for i := 0; i < retries; i++ {
-		if l.sendEvent(ctx, ch, event) {
-			return true
+		if event.EventID == "" {
+			event.EventID = uuid.New().String()
+		}
+		if event.Timestamp.IsZero() {
+			event.Timestamp = time.Now()
+		}
+
+		select {
+		case <-ctx.Done():
+			l.logger.WarnContext(ctx, "Context cancelled, not sending stream event", slog.String("eventType", event.Type))
+			l.deadLetterCh <- event // Send to dead letter queue
+			return false
+		default:
+			select {
+			case ch <- event:
+				return true
+			case <-ctx.Done():
+				l.logger.WarnContext(ctx, "Context cancelled while trying to send stream event", slog.String("eventType", event.Type))
+				l.deadLetterCh <- event // Send to dead letter queue
+				return false
+			case <-time.After(2 * time.Second): // Use a reasonable timeout
+				l.logger.WarnContext(ctx, "Dropped stream event due to slow consumer or blocked channel (timeout)", slog.String("eventType", event.Type))
+				l.deadLetterCh <- event // Send to dead letter queue
+				return false
+			}
 		}
 		time.Sleep(100 * time.Millisecond) // Backoff
 	}
@@ -45,34 +68,7 @@ func (l *ServiceImpl) processDeadLetterQueue() {
 	}
 }
 
-func (l *ServiceImpl) sendEvent(ctx context.Context, ch chan<- types.StreamEvent, event types.StreamEvent) bool {
-	if event.EventID == "" {
-		event.EventID = uuid.New().String()
-	}
-	if event.Timestamp.IsZero() {
-		event.Timestamp = time.Now()
-	}
 
-	select {
-	case <-ctx.Done():
-		l.logger.WarnContext(ctx, "Context cancelled, not sending stream event", slog.String("eventType", event.Type))
-		l.deadLetterCh <- event // Send to dead letter queue
-		return false
-	default:
-		select {
-		case ch <- event:
-			return true
-		case <-ctx.Done():
-			l.logger.WarnContext(ctx, "Context cancelled while trying to send stream event", slog.String("eventType", event.Type))
-			l.deadLetterCh <- event // Send to dead letter queue
-			return false
-		case <-time.After(2 * time.Second): // Use a reasonable timeout
-			l.logger.WarnContext(ctx, "Dropped stream event due to slow consumer or blocked channel (timeout)", slog.String("eventType", event.Type))
-			l.deadLetterCh <- event // Send to dead letter queue
-			return false
-		}
-	}
-}
 
 // getPersonalizedPOI generates a prompt for personalized POIs
 func getPersonalizedPOI(interestNames []string, cityName, tagsPromptPart, userPrefs string) string {
@@ -120,7 +116,7 @@ func (l *ServiceImpl) streamingCityDataWorker(wg *sync.WaitGroup,
 		defer wg.Done()
 	}
 
-	if !l.sendEventWithRetry(ctxWorker, eventCh, types.StreamEvent{
+	if !l.sendEvent(ctxWorker, eventCh, types.StreamEvent{
 		Type: types.EventTypeProgress,
 		Data: map[string]interface{}{"status": "generating_city_data", "progress": 10},
 	}, 3) {
@@ -135,7 +131,7 @@ func (l *ServiceImpl) streamingCityDataWorker(wg *sync.WaitGroup,
 	cleanTxt, err := l.generateCityData(ctxWorker, cityName)
 	if err != nil {
 		span.RecordError(err)
-		l.sendEventWithRetry(ctxWorker, eventCh, types.StreamEvent{
+		l.sendEvent(ctxWorker, eventCh, types.StreamEvent{
 			Type:      types.EventTypeError,
 			Error:     err.Error(),
 			Timestamp: time.Now(),
@@ -146,7 +142,7 @@ func (l *ServiceImpl) streamingCityDataWorker(wg *sync.WaitGroup,
 	}
 
 	// Send partial data event (for consistency with original)
-	l.sendEventWithRetry(ctxWorker, eventCh, types.StreamEvent{
+	l.sendEvent(ctxWorker, eventCh, types.StreamEvent{
 		Type:      types.EventTypeCityData,
 		Data:      map[string]string{"partial_city_data": cleanTxt},
 		Timestamp: time.Now(),
@@ -165,12 +161,12 @@ func (l *ServiceImpl) streamingCityDataWorker(wg *sync.WaitGroup,
 	_, err = l.saveCityInteraction(ctxWorker, interaction)
 	if err != nil {
 		span.RecordError(err)
-		l.sendEventWithRetry(ctxWorker, eventCh, types.StreamEvent{
-			Type:      types.EventTypeError,
-			Error:     fmt.Sprintf("failed to save city data interaction: %v", err),
-			Timestamp: time.Now(),
-			EventID:   uuid.New().String(),
-		}, 3)
+		l.sendEvent(ctxWorker, eventCh, types.StreamEvent{
+				Type:      types.EventTypeError,
+				Error:     fmt.Sprintf("failed to save city data interaction: %v", err),
+				Timestamp: time.Now(),
+				EventID:   uuid.New().String(),
+			}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -186,12 +182,12 @@ func (l *ServiceImpl) streamingCityDataWorker(wg *sync.WaitGroup,
 	}
 	if err := json.Unmarshal([]byte(cleanTxt), &cityData); err != nil {
 		span.RecordError(err)
-		l.sendEventWithRetry(ctxWorker, eventCh, types.StreamEvent{
-			Type:      types.EventTypeError,
-			Error:     fmt.Sprintf("failed to parse city data JSON: %v", err),
-			Timestamp: time.Now(),
-			EventID:   uuid.New().String(),
-		}, 3)
+		l.sendEvent(ctxWorker, eventCh, types.StreamEvent{
+				Type:      types.EventTypeError,
+				Error:     fmt.Sprintf("failed to parse city data JSON: %v", err),
+				Timestamp: time.Now(),
+				EventID:   uuid.New().String(),
+			}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -210,7 +206,7 @@ func (l *ServiceImpl) streamingCityDataWorker(wg *sync.WaitGroup,
 		Longitude:       cityData.CenterLongitude,
 	}
 
-	l.sendEventWithRetry(ctxWorker, eventCh, types.StreamEvent{
+	l.sendEvent(ctxWorker, eventCh, types.StreamEvent{
 		Type:      types.EventTypeCityData,
 		Data:      result,
 		Timestamp: time.Now(),
@@ -237,7 +233,7 @@ func (l *ServiceImpl) streamingGeneralPOIWorker(wg *sync.WaitGroup,
 		Data:      map[string]interface{}{"status": "generating_general_pois", "progress": 30},
 		Timestamp: time.Now(),
 		EventID:   uuid.New().String(),
-	})
+	}, 3)
 
 	prompt := getGeneralPOIPrompt(cityName)
 	startTime := time.Now()
@@ -254,7 +250,7 @@ func (l *ServiceImpl) streamingGeneralPOIWorker(wg *sync.WaitGroup,
 					Error:     fmt.Sprintf("streaming general POI error: %v", err),
 					Timestamp: time.Now(),
 					EventID:   uuid.New().String(),
-				})
+				}, 3)
 				resultCh <- types.GenAIResponse{Err: err}
 				return
 			}
@@ -268,7 +264,7 @@ func (l *ServiceImpl) streamingGeneralPOIWorker(wg *sync.WaitGroup,
 								Data:      map[string]string{"partial_poi_data": responseText.String()},
 								Timestamp: time.Now(),
 								EventID:   uuid.New().String(),
-							})
+							}, 3)
 						}
 					}
 				}
@@ -285,7 +281,7 @@ func (l *ServiceImpl) streamingGeneralPOIWorker(wg *sync.WaitGroup,
 				Error:     fmt.Sprintf("failed to generate general POIs: %v", err),
 				Timestamp: time.Now(),
 				EventID:   uuid.New().String(),
-			})
+			}, 3)
 			resultCh <- types.GenAIResponse{Err: err}
 			return
 		}
@@ -303,7 +299,7 @@ func (l *ServiceImpl) streamingGeneralPOIWorker(wg *sync.WaitGroup,
 			Data:      map[string]string{"partial_poi_data": responseText.String()},
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 	}
 
 	fullText := responseText.String()
@@ -315,7 +311,7 @@ func (l *ServiceImpl) streamingGeneralPOIWorker(wg *sync.WaitGroup,
 			Error:     err.Error(),
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -338,7 +334,7 @@ func (l *ServiceImpl) streamingGeneralPOIWorker(wg *sync.WaitGroup,
 			Error:     fmt.Sprintf("failed to save general POI interaction: %v", err),
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -354,7 +350,7 @@ func (l *ServiceImpl) streamingGeneralPOIWorker(wg *sync.WaitGroup,
 			Error:     fmt.Sprintf("failed to parse general POI JSON: %v", err),
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -368,7 +364,7 @@ func (l *ServiceImpl) streamingGeneralPOIWorker(wg *sync.WaitGroup,
 		Data:      result.GeneralPOI,
 		Timestamp: time.Now(),
 		EventID:   uuid.New().String(),
-	})
+	}, 3)
 	resultCh <- result
 }
 
@@ -388,7 +384,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorker(wg *sync.WaitGroup, ctx con
 		Data:      map[string]interface{}{"status": "generating_personalized_pois", "progress": 50},
 		Timestamp: time.Now(),
 		EventID:   uuid.New().String(),
-	})
+	}, 3)
 
 	startTime := time.Now()
 	prompt := getPersonalizedPOI(interestNames, cityName, tagsPromptPart, userPrefs)
@@ -405,7 +401,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorker(wg *sync.WaitGroup, ctx con
 					Error:     fmt.Sprintf("streaming personalized POI error: %v", err),
 					Timestamp: time.Now(),
 					EventID:   uuid.New().String(),
-				})
+				}, 3)
 				resultCh <- types.GenAIResponse{Err: err}
 				return
 			}
@@ -419,7 +415,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorker(wg *sync.WaitGroup, ctx con
 								Data:      map[string]string{"partial_poi_data": responseText.String()},
 								Timestamp: time.Now(),
 								EventID:   uuid.New().String(),
-							})
+							}, 3)
 						}
 					}
 				}
@@ -436,7 +432,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorker(wg *sync.WaitGroup, ctx con
 				Error:     fmt.Sprintf("failed to generate personalized POIs: %v", err),
 				Timestamp: time.Now(),
 				EventID:   uuid.New().String(),
-			})
+			}, 3)
 			resultCh <- types.GenAIResponse{Err: err}
 			return
 		}
@@ -454,7 +450,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorker(wg *sync.WaitGroup, ctx con
 			Data:      map[string]string{"partial_poi_data": responseText.String()},
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 	}
 
 	fullText := responseText.String()
@@ -466,7 +462,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorker(wg *sync.WaitGroup, ctx con
 			Error:     err.Error(),
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -489,7 +485,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorker(wg *sync.WaitGroup, ctx con
 			Error:     fmt.Sprintf("failed to save personalized POI interaction: %v", err),
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -507,7 +503,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorker(wg *sync.WaitGroup, ctx con
 			Error:     fmt.Sprintf("failed to parse personalized POI JSON: %v", err),
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -524,7 +520,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorker(wg *sync.WaitGroup, ctx con
 		Data:      result,
 		Timestamp: time.Now(),
 		EventID:   uuid.New().String(),
-	})
+	}, 3)
 	resultCh <- result
 }
 
@@ -549,7 +545,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorkerWithSemantics(wg *sync.WaitG
 		},
 		Timestamp: time.Now(),
 		EventID:   uuid.New().String(),
-	})
+	}, 3)
 
 	startTime := time.Now()
 	prompt := l.getPersonalizedPOIWithSemanticContext(interestNames, cityName, tagsPromptPart, userPrefs, semanticPOIs)
@@ -566,7 +562,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorkerWithSemantics(wg *sync.WaitG
 					Error:     fmt.Sprintf("streaming semantic personalized POI error: %v", err),
 					Timestamp: time.Now(),
 					EventID:   uuid.New().String(),
-				})
+				}, 3)
 				resultCh <- types.GenAIResponse{Err: err}
 				return
 			}
@@ -584,7 +580,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorkerWithSemantics(wg *sync.WaitG
 								},
 								Timestamp: time.Now(),
 								EventID:   uuid.New().String(),
-							})
+							}, 3)
 						}
 					}
 				}
@@ -601,7 +597,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorkerWithSemantics(wg *sync.WaitG
 				Error:     fmt.Sprintf("failed to generate semantic personalized POIs: %v", err),
 				Timestamp: time.Now(),
 				EventID:   uuid.New().String(),
-			})
+			}, 3)
 			resultCh <- types.GenAIResponse{Err: err}
 			return
 		}
@@ -623,7 +619,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorkerWithSemantics(wg *sync.WaitG
 			},
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 	}
 
 	fullText := responseText.String()
@@ -635,7 +631,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorkerWithSemantics(wg *sync.WaitG
 			Error:     err.Error(),
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -658,7 +654,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorkerWithSemantics(wg *sync.WaitG
 			Error:     fmt.Sprintf("failed to save semantic personalized POI interaction: %v", err),
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -676,7 +672,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorkerWithSemantics(wg *sync.WaitG
 			Error:     fmt.Sprintf("failed to parse semantic personalized POI JSON: %v", err),
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -697,7 +693,7 @@ func (l *ServiceImpl) streamingPersonalizedPOIWorkerWithSemantics(wg *sync.WaitG
 		},
 		Timestamp: time.Now(),
 		EventID:   uuid.New().String(),
-	})
+	}, 3)
 	resultCh <- result
 }
 
@@ -749,7 +745,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 			Data:      map[string]string{"session_id": sessionID.String()},
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 
 		// Fetch user data
 		l.sendEvent(ctx, eventCh, types.StreamEvent{
@@ -757,7 +753,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 			Data:      map[string]interface{}{"status": "fetching_user_data", "progress": 5},
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 		interests, searchProfile, tags, err := l.FetchUserData(ctx, userID, profileID)
 		if err != nil {
 			span.RecordError(err)
@@ -766,7 +762,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 				Error:     fmt.Sprintf("failed to fetch user data: %v", err),
 				Timestamp: time.Now(),
 				EventID:   uuid.New().String(),
-			})
+			}, 3)
 			return
 		}
 
@@ -778,7 +774,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 			Data:      map[string]interface{}{"status": "generating_semantic_context", "progress": 10},
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 
 		var semanticPOIs []types.POIDetailedInfo
 		if len(interestNames) > 0 {
@@ -794,7 +790,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 						Data:      map[string]interface{}{"status": "semantic_context_failed", "progress": 12},
 						Timestamp: time.Now(),
 						EventID:   uuid.New().String(),
-					})
+					}, 3)
 				} else {
 					l.logger.InfoContext(ctx, "Enhanced streaming session with semantic POI context",
 						slog.Int("semantic_pois_count", len(semanticPOIs)))
@@ -807,7 +803,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 						},
 						Timestamp: time.Now(),
 						EventID:   uuid.New().String(),
-					})
+					}, 3)
 				}
 			}
 		}
@@ -875,7 +871,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 					Error:     ctx.Err().Error(),
 					Timestamp: time.Now(),
 					EventID:   uuid.New().String(),
-				})
+				}, 3)
 				return
 			}
 		}
@@ -888,7 +884,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 				Error:     err.Error(),
 				Timestamp: time.Now(),
 				EventID:   uuid.New().String(),
-			})
+			}, 3)
 			return
 		}
 
@@ -898,7 +894,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 			Data:      map[string]interface{}{"status": "saving_data", "progress": 80},
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 
 		cityID, err := l.HandleCityData(ctx, itinerary.GeneralCityData)
 		if err != nil {
@@ -908,7 +904,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 				Error:     fmt.Sprintf("failed to save city data: %v", err),
 				Timestamp: time.Now(),
 				EventID:   uuid.New().String(),
-			})
+			}, 3)
 			return
 		}
 
@@ -921,7 +917,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 				Error:     fmt.Sprintf("failed to save personalised POIs: %v", err),
 				Timestamp: time.Now(),
 				EventID:   uuid.New().String(),
-			})
+			}, 3)
 			return
 		}
 		itinerary.AIItineraryResponse.PointsOfInterest = sortedPOIs
@@ -942,7 +938,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 				Error:     fmt.Sprintf("failed to update session: %v", err),
 				Timestamp: time.Now(),
 				EventID:   uuid.New().String(),
-			})
+			}, 3)
 			return
 		}
 
@@ -951,7 +947,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 			Data:      itinerary,
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
-		})
+		}, 3)
 
 		l.sendEvent(ctx, eventCh, types.StreamEvent{
 			Type:      types.EventTypeComplete,
@@ -959,7 +955,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
 			IsFinal:   true,
-		})
+		}, 3)
 
 		l.logger.InfoContext(ctx, "New session created and streamed",
 			slog.String("session_id", sessionID.String()),
@@ -975,6 +971,7 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 }
 
 // ContinueSessionStreamed handles subsequent messages in an existing session and streams responses/updates.
+// Only returns error for critical setup failures
 func (l *ServiceImpl) ContinueSessionStreamed(
 	ctx context.Context, sessionID uuid.UUID,
 	message string, userLocation *types.UserLocation,
@@ -992,15 +989,15 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 	session, err := l.llmInteractionRepo.GetSession(ctx, sessionID)
 	if err != nil {
 		err = fmt.Errorf("failed to get session %s: %w", sessionID, err)
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true}, 3)
 		return err
 	}
 	if session.Status != types.StatusActive {
 		err = fmt.Errorf("session %s is not active (status: %s) %w", sessionID, session.Status, err)
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true}, 3)
 		return err
 	}
-	l.sendEvent(ctx, eventCh, types.StreamEvent{Type: "session_validated", Data: map[string]string{"status": "active"}})
+	l.sendEvent(ctx, eventCh, types.StreamEvent{Type: "session_validated", Data: map[string]string{"status": "active"}}, 3)
 
 	// --- 2. Fetch City ID ---
 	cityData, err := l.cityRepo.FindCityByNameAndCountry(ctx, session.SessionContext.CityName, "")
@@ -1010,11 +1007,11 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 		} else {
 			err = fmt.Errorf("failed to find city '%s' for session %s: %w", session.SessionContext.CityName, sessionID, err)
 		}
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true}, 3)
 		return err
 	}
 	cityID := cityData.ID
-	l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: map[string]interface{}{"status": "context_loaded", "city_id": cityID.String()}})
+	l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: map[string]interface{}{"status": "context_loaded", "city_id": cityID.String()}}, 3)
 
 	// --- 3. Add User Message to History ---
 	userMessage := types.ConversationMessage{
@@ -1030,17 +1027,17 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 	intent, err := l.intentClassifier.Classify(ctx, message)
 	if err != nil {
 		err = fmt.Errorf("failed to classify intent for message '%s': %w", message, err)
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true}, 3)
 		return err
 	}
 	l.logger.InfoContext(ctx, "Intent classified", slog.String("intent", string(intent)))
-	l.sendEvent(ctx, eventCh, types.StreamEvent{Type: "intent_classified", Data: map[string]string{"intent": string(intent)}})
+	l.sendEvent(ctx, eventCh, types.StreamEvent{Type: "intent_classified", Data: map[string]string{"intent": string(intent)}}, 3)
 
 	// --- 5. Enhance with Semantic POI Recommendations ---
 	l.sendEvent(ctx, eventCh, types.StreamEvent{
 		Type: types.EventTypeProgress,
 		Data: map[string]interface{}{"status": "generating_semantic_context", "progress": 20},
-	})
+	}, 3)
 
 	semanticPOIs, err := l.generateSemanticPOIRecommendations(ctx, message, cityID, session.UserID, userLocation, 0.6)
 	if err != nil {
@@ -1048,7 +1045,7 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 		l.sendEvent(ctx, eventCh, types.StreamEvent{
 			Type: types.EventTypeProgress,
 			Data: map[string]interface{}{"status": "semantic_context_failed", "progress": 22},
-		})
+		}, 3)
 	} else {
 		l.logger.InfoContext(ctx, "Generated semantic POI recommendations for streaming session",
 			slog.Int("semantic_recommendations", len(semanticPOIs)))
@@ -1059,7 +1056,7 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 				"semantic_recommendations_count": len(semanticPOIs),
 				"progress":                       25,
 			},
-		})
+		}, 3)
 	}
 
 	// --- 5. Handle Intent and Generate Response ---
@@ -1069,7 +1066,7 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 
 	switch intent { // Align with ContinueSession's string-based intents
 	case types.IntentAddPOI:
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Adding Point of Interest with semantic enhancement..."})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Adding Point of Interest with semantic enhancement..."}, 3)
 		var genErr error
 		finalResponseMessage, genErr = l.handleSemanticAddPOIStreamed(ctx, message, session, semanticPOIs, userLocation, cityID, eventCh)
 		if genErr != nil {
@@ -1080,14 +1077,14 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 		}
 
 	case types.IntentRemovePOI:
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Removing Point of Interest with semantic understanding..."})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Removing Point of Interest with semantic understanding..."}, 3)
 		finalResponseMessage = l.handleSemanticRemovePOI(ctx, message, session)
 		if strings.Contains(finalResponseMessage, "I've removed") {
 			itineraryModifiedByThisTurn = true
 		}
 
 	case types.IntentAskQuestion:
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Answering your question with semantic context..."})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Answering your question with semantic context..."}, 3)
 		finalResponseMessage = "I’m here to help! For now, I’ll assume you’re asking about your trip. What specifically would you like to know?"
 
 		// questionPrompt := fmt.Sprintf(
@@ -1137,7 +1134,7 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 		//}
 
 	case "replace_poi":
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Replacing Point of Interest..."})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Replacing Point of Interest..."}, 3)
 		if matches := regexp.MustCompile(`replace\s+(.+?)\s+with\s+(.+?)(?:\s+in\s+my\s+itinerary)?`).FindStringSubmatch(strings.ToLower(message)); len(matches) == 3 {
 			oldPOI := matches[1]
 			newPOIName := matches[2]
@@ -1164,7 +1161,7 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 		}
 
 	default: // modify_itinerary
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Updating itinerary..."})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Updating itinerary..."}, 3)
 		if matches := regexp.MustCompile(`replace\s+(.+?)\s+with\s+(.+?)(?:\s+in\s+my\s+itinerary)?`).FindStringSubmatch(strings.ToLower(message)); len(matches) == 3 {
 			oldPOI := matches[1]
 			newPOIName := matches[2]
@@ -1192,7 +1189,7 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 
 	// --- 6. Post-Modification Processing (Sorting, Saving Session) ---
 	if itineraryModifiedByThisTurn && userLocation != nil && userLocation.UserLat != 0 && userLocation.UserLon != 0 && session.CurrentItinerary != nil {
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Sorting updated POIs by distance..."})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Sorting updated POIs by distance..."}, 3)
 		// Save new POIs to DB to ensure they have valid IDs
 		for i, poi := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
 			if poi.ID == uuid.Nil {
@@ -1239,7 +1236,7 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 	session.ExpiresAt = time.Now().Add(24 * time.Hour)
 	if err := l.llmInteractionRepo.UpdateSession(ctx, *session); err != nil {
 		err = fmt.Errorf("failed to update session %s: %w", sessionID, err)
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true}, 3)
 		return err
 	}
 
@@ -1249,8 +1246,8 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 		Data:      session.CurrentItinerary,
 		Message:   finalResponseMessage,
 		Timestamp: time.Now(),
-	})
-	l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeComplete, Data: "Turn completed.", IsFinal: true})
+	}, 3)
+	l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeComplete, Data: "Turn completed.", IsFinal: true}, 3)
 
 	l.logger.InfoContext(ctx, "Streamed session continued", slog.String("sessionID", sessionID.String()), slog.String("intent", string(intent)))
 	return nil
@@ -1273,7 +1270,7 @@ func (l *ServiceImpl) generatePOIDataStream(
 	var responseTextBuilder strings.Builder
 	iter, err := l.aiClient.GenerateContentStream(ctx, prompt, config)
 	if err != nil {
-		l.sendEventWithRetry(ctx, eventCh, types.StreamEvent{
+		l.sendEvent(ctx, eventCh, types.StreamEvent{
 			Type:      types.EventTypeError,
 			Error:     fmt.Sprintf("Failed to generate POI data for '%s': %v", poiName, err),
 			Timestamp: time.Now(),
@@ -1282,7 +1279,7 @@ func (l *ServiceImpl) generatePOIDataStream(
 		return types.POIDetailedInfo{}, fmt.Errorf("AI stream init failed for POI '%s': %w", poiName, err)
 	}
 
-	l.sendEventWithRetry(ctx, eventCh, types.StreamEvent{
+	l.sendEvent(ctx, eventCh, types.StreamEvent{
 		Type:      types.EventTypeProgress,
 		Data:      map[string]string{"status": fmt.Sprintf("Getting details for %s...", poiName)},
 		Timestamp: time.Now(),
@@ -1291,7 +1288,7 @@ func (l *ServiceImpl) generatePOIDataStream(
 
 	for resp, err := range iter {
 		if err != nil {
-			l.sendEventWithRetry(ctx, eventCh, types.StreamEvent{
+			l.sendEvent(ctx, eventCh, types.StreamEvent{
 				Type:      types.EventTypeError,
 				Error:     fmt.Sprintf("Streaming failed for POI '%s': %v", poiName, err),
 				Timestamp: time.Now(),
@@ -1304,7 +1301,7 @@ func (l *ServiceImpl) generatePOIDataStream(
 				for _, part := range cand.Content.Parts {
 					if part.Text != "" {
 						responseTextBuilder.WriteString(string(part.Text))
-						l.sendEventWithRetry(ctx, eventCh, types.StreamEvent{
+						l.sendEvent(ctx, eventCh, types.StreamEvent{
 							Type:      "poi_detail_chunk",
 							Data:      map[string]string{"poi_name": poiName, "chunk": string(part.Text)},
 							Timestamp: time.Now(),
@@ -1317,7 +1314,7 @@ func (l *ServiceImpl) generatePOIDataStream(
 	}
 
 	if ctx.Err() != nil {
-		l.sendEventWithRetry(ctx, eventCh, types.StreamEvent{
+		l.sendEvent(ctx, eventCh, types.StreamEvent{
 			Type:      types.EventTypeError,
 			Error:     ctx.Err().Error(),
 			Timestamp: time.Now(),
@@ -1328,7 +1325,7 @@ func (l *ServiceImpl) generatePOIDataStream(
 
 	fullText := responseTextBuilder.String()
 	if fullText == "" {
-		l.sendEventWithRetry(ctx, eventCh, types.StreamEvent{
+		l.sendEvent(ctx, eventCh, types.StreamEvent{
 			Type:      types.EventTypeError,
 			Error:     fmt.Sprintf("Empty response for POI '%s'", poiName),
 			Timestamp: time.Now(),
@@ -1347,7 +1344,7 @@ func (l *ServiceImpl) generatePOIDataStream(
 	}
 	llmInteractionID, err := l.saveCityInteraction(ctx, interaction)
 	if err != nil {
-		l.sendEventWithRetry(ctx, eventCh, types.StreamEvent{
+		l.sendEvent(ctx, eventCh, types.StreamEvent{
 			Type:      types.EventTypeError,
 			Error:     fmt.Sprintf("Failed to save LLM interaction for POI '%s': %v", poiName, err),
 			Timestamp: time.Now(),
@@ -1379,7 +1376,7 @@ func (l *ServiceImpl) generatePOIDataStream(
 	if err != nil {
 		l.logger.WarnContext(ctx, "Failed to save POI to database", slog.Any("error", err))
 		span.RecordError(err)
-		l.sendEventWithRetry(ctx, eventCh, types.StreamEvent{
+		l.sendEvent(ctx, eventCh, types.StreamEvent{
 			Type:      types.EventTypeError,
 			Error:     fmt.Sprintf("Failed to save POI '%s' to database: %v", poiName, err),
 			Timestamp: time.Now(),
@@ -1400,7 +1397,7 @@ func (l *ServiceImpl) generatePOIDataStream(
 		}
 	}
 
-	l.sendEventWithRetry(ctx, eventCh, types.StreamEvent{
+	l.sendEvent(ctx, eventCh, types.StreamEvent{
 		Type:      "poi_detail_complete",
 		Data:      poiData,
 		Timestamp: time.Now(),
@@ -1503,7 +1500,7 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 				"status":           "analyzing_semantic_matches",
 				"semantic_options": len(semanticPOIs),
 			},
-		})
+		}, 3)
 
 		// Check if any semantic POI matches what user is asking for
 		for _, semanticPOI := range semanticPOIs[:min(3, len(semanticPOIs))] {
@@ -1524,7 +1521,7 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 						"poi_category":   semanticPOI.Category,
 						"semantic_match": true,
 					},
-				})
+				}, 3)
 
 				// Add semantic POI to itinerary
 				session.CurrentItinerary.AIItineraryResponse.PointsOfInterest = append(
@@ -1554,7 +1551,7 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 					return names
 				}(),
 			},
-		})
+		}, 3)
 
 		return fmt.Sprintf("I found some great options matching your request, but they're already in your itinerary. Here are some suggestions: %s",
 			strings.Join(func() []string {
@@ -1573,7 +1570,7 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 	l.sendEvent(ctx, eventCh, types.StreamEvent{
 		Type: types.EventTypeProgress,
 		Data: map[string]interface{}{"status": "extracting_poi_name"},
-	})
+	}, 3)
 
 	poiName := extractPOIName(message)
 	if poiName == "" {
@@ -1594,7 +1591,7 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 			"status":   "generating_poi_data",
 			"poi_name": poiName,
 		},
-	})
+	}, 3)
 
 	newPOI, err := l.generatePOIDataStream(ctx, poiName, session.SessionContext.CityName, userLocation, session.UserID, cityID, eventCh)
 	if err != nil {
@@ -1613,7 +1610,7 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 			"poi_category":   newPOI.Category,
 			"semantic_match": false,
 		},
-	})
+	}, 3)
 
 	return fmt.Sprintf("I've added %s to your itinerary.", poiName), nil
 }
@@ -1633,7 +1630,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 	extractedCity, cleanedMessage, err := l.extractCityFromMessage(ctx, message)
 	if err != nil {
 		span.RecordError(err)
-		l.sendEventSimple(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error()})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error()}, 3)
 		return fmt.Errorf("failed to parse message: %w", err)
 	}
 	if extractedCity != "" {
@@ -1650,7 +1647,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 	_, searchProfile, _, err := l.FetchUserData(ctx, userID, profileID)
 	if err != nil {
 		span.RecordError(err)
-		l.sendEventSimple(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error()})
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error()}, 3)
 		return fmt.Errorf("failed to fetch user data: %w", err)
 	}
 	basePreferences := getUserPreferencesPrompt(searchProfile)
@@ -1687,7 +1684,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 	var wg sync.WaitGroup
 	var closeOnce sync.Once
 
-	l.sendEventSimple(ctx, eventCh, types.StreamEvent{
+	l.sendEvent(ctx, eventCh, types.StreamEvent{
 		Type: types.EventTypeStart,
 		Data: map[string]interface{}{
 			"domain": string(domain), 
@@ -1695,7 +1692,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			"session_id": sessionID.String(),
 			"cache_key": cacheKey,
 		},
-	})
+	}, 3)
 
 	// Step 5: Collect responses for saving interaction
 	responses := make(map[string]*strings.Builder)
@@ -1717,7 +1714,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			}
 			responsesMutex.Unlock()
 		}
-		l.sendEventSimple(ctx, eventCh, event)
+		l.sendEvent(ctx, eventCh, event, 3)
 	}
 
 	// Step 6: Spawn streaming workers based on domain with cache support
@@ -1785,10 +1782,10 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 	go func() {
 		wg.Wait()             // Wait for all workers to complete
 		if ctx.Err() == nil { // Only send completion event if context is still active
-			l.sendEventSimple(ctx, eventCh, types.StreamEvent{
+			l.sendEvent(ctx, eventCh, types.StreamEvent{
 				Type: types.EventTypeComplete,
 				Data: map[string]interface{}{"session_id": sessionID.String()},
-			})
+			}, 3)
 		}
 		closeOnce.Do(func() {
 			close(eventCh) // Close the channel only once
@@ -1844,10 +1841,10 @@ func (l *ServiceImpl) streamWorker(ctx context.Context, prompt, partType string,
 	iter, err := l.aiClient.GenerateContentStream(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)})
 	if err != nil {
 		if ctx.Err() == nil {
-			l.sendEventSimple(ctx, eventCh, types.StreamEvent{
+			l.sendEvent(ctx, eventCh, types.StreamEvent{
 				Type:  types.EventTypeError,
 				Error: fmt.Sprintf("%s worker failed: %v", partType, err),
-			})
+			}, 3)
 		}
 		return
 	}
@@ -1859,10 +1856,10 @@ func (l *ServiceImpl) streamWorker(ctx context.Context, prompt, partType string,
 		}
 		if err != nil {
 			if ctx.Err() == nil {
-				l.sendEventSimple(ctx, eventCh, types.StreamEvent{
+				l.sendEvent(ctx, eventCh, types.StreamEvent{
 					Type:  types.EventTypeError,
 					Error: fmt.Sprintf("%s streaming error: %v", partType, err),
-				})
+				}, 3)
 			}
 			return
 		}
@@ -1872,14 +1869,14 @@ func (l *ServiceImpl) streamWorker(ctx context.Context, prompt, partType string,
 					if part.Text != "" {
 						chunk := string(part.Text)
 						fullResponse.WriteString(chunk)
-						l.sendEventSimple(ctx, eventCh, types.StreamEvent{
+						l.sendEvent(ctx, eventCh, types.StreamEvent{
 							Type: types.EventTypeChunk,
 							Data: map[string]interface{}{
 								"part":   partType,
 								"chunk":  chunk,
 								"domain": string(domain),
 							},
-						})
+						}, 3)
 					}
 				}
 			}
@@ -1957,21 +1954,3 @@ func extractTextFromGenAIResponse(resp *genai.GenerateContentResponse) string {
 }
 
 // sendEventSimple sends events with context check
-func (l *ServiceImpl) sendEventSimple(ctx context.Context, ch chan<- types.StreamEvent, event types.StreamEvent) {
-	if ctx.Err() != nil {
-		return // Skip send if context is canceled
-	}
-	if event.EventID == "" {
-		event.EventID = uuid.New().String()
-	}
-	if event.Timestamp.IsZero() {
-		event.Timestamp = time.Now()
-	}
-
-	select {
-	case ch <- event:
-		// Sent successfully
-	case <-ctx.Done():
-		// Context canceled, do not send
-	}
-}
