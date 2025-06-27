@@ -26,7 +26,7 @@ var _ Service = (*ServiceImpl)(nil)
 // Service defines the business logic contract for POI operations.
 type Service interface {
 	AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) (uuid.UUID, error)
-	RemovePoiFromFavourites(ctx context.Context, poiID uuid.UUID, userID uuid.UUID) error
+	RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) error
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
 
@@ -112,12 +112,20 @@ func (s *ServiceImpl) AddPoiToFavourites(ctx context.Context, userID, poiID uuid
 
 	return id, nil
 }
-func (s *ServiceImpl) RemovePoiFromFavourites(ctx context.Context, poiID uuid.UUID, userID uuid.UUID) error {
-	if err := s.poiRepository.RemovePoiFromFavourites(ctx, poiID, userID); err != nil {
-		s.logger.Error("failed to remove POI from favourites", "error", err)
-		return err
+func (s *ServiceImpl) RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) error {
+	if isLLMGenerated {
+		err := s.poiRepository.RemoveLLMPoiFromFavourite(ctx, userID, poiID)
+		if err != nil {
+			s.logger.Error("failed to remove LLM POI from favourites", "error", err)
+			return err
+		}
+	} else {
+		err := s.poiRepository.RemovePoiFromFavourites(ctx, userID, poiID)
+		if err != nil {
+			s.logger.Error("failed to remove POI from favourites", "error", err)
+			return err
+		}
 	}
-
 	return nil
 }
 func (s *ServiceImpl) GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error) {

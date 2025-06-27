@@ -181,7 +181,7 @@ func (h *HandlerImpl) RemovePoiFromFavourites(w http.ResponseWriter, r *http.Req
 		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid POI ID format")
 		return
 	}
-	if err := h.poiService.RemovePoiFromFavourites(ctx, poiID, userID); err != nil {
+	if err := h.poiService.RemovePoiFromFavourites(ctx, userID, poiID, true); err != nil {
 		l.ErrorContext(ctx, "Failed to remove POI from favourites", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to remove POI from favourites: %s", err.Error()))
 		return

@@ -95,7 +95,7 @@ func (r *RepositoryImpl) SaveInteraction(ctx context.Context, interaction types.
 
 	interactionQuery := `
         INSERT INTO llm_interactions (
-            user_id, prompt, response_text, model_used, latency_ms, city_name
+            user_id, prompt, response, model_used, latency_ms, city_name
         ) VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
     `
@@ -437,7 +437,7 @@ func (r *RepositoryImpl) GetInteractionByID(ctx context.Context, interactionID u
 
 	query := `
 		SELECT 
-			id, user_id, prompt, response_text, model_used, latency_ms,
+			id, user_id, prompt, response, model_used, latency_ms,
 			prompt_tokens, completion_tokens, total_tokens,
 			request_payload, response_payload
 		FROM llm_interactions
@@ -608,7 +608,7 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
                     json_build_object(
                         'id', id,
                         'prompt', prompt,
-                        'response_text', response_text,
+                        'response', response,
                         'created_at', created_at,
                         'city_name', city_name,
                         'session_id', session_id,
@@ -693,7 +693,7 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 					Timestamp: parseTimeFromInterface(interaction["created_at"]),
 				})
 			}
-			if response, ok := interaction["response_text"].(string); ok {
+			if response, ok := interaction["response"].(string); ok {
 				if response == "" {
 					response = fmt.Sprintf("I provided recommendations for %s", cityName)
 				} else {
@@ -1358,7 +1358,7 @@ func (r *RepositoryImpl) GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetai
 
 // 	interactionQuery := `
 //         INSERT INTO llm_interactions (
-//             user_id, prompt, response_text, model_used, latency_ms, city_name, prompt_embedding
+//             user_id, prompt, response, model_used, latency_ms, city_name, prompt_embedding
 //         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
 //         RETURNING id
 //     `

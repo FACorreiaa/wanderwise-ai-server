@@ -88,16 +88,6 @@ func (h *HandlerImpl) StartChatSessionStreamHandler(w http.ResponseWriter, r *ht
 		prompt = getDefaultPromptForContext(req.ContextType, req.CityName)
 	}
 
-	// Start streaming with context support
-	//streamResp, err := h.llmInteractionService.StartNewSessionStreamedWithContext(ctx, userID, profileID, req.CityName, prompt, userLocation, req.ContextType)
-	// if err != nil {
-	// 	// Fallback to original method for backward compatibility
-	// 	streamResp, err = h.llmInteractionService.StartNewSessionStreamed(ctx, userID, profileID, req.CityName, prompt, userLocation)
-	// 	if err != nil {
-	// 		h.writeSSEError(w, fmt.Sprintf("Failed to start session: %v", err))
-	// 		return
-	// 	}
-	// }
 	streamResp, err := h.llmInteractionService.StartNewSessionStreamed(ctx, userID, profileID, req.CityName, prompt, req.UserLocation)
 	defer streamResp.Cancel()
 

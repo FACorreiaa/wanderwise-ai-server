@@ -48,15 +48,17 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 	l := r.logger.With(slog.String("method", "GetUserRecentInteractions"))
 
 	query := `
-		SELECT DISTINCT 
-			city_name,
-			MAX(created_at) as last_activity,
-			COUNT(*) as interaction_count
-		FROM llm_interactions 
+		SELECT DISTINCT
+			l.city_name,
+			MAX(l.created_at) as last_activity,
+			COUNT(*) as interaction_count,
+			l.session_id,
+			l.title
+		FROM llm_interactions l 
 		WHERE user_id = $1 
 			AND city_name != '' 
 			AND city_name IS NOT NULL
-		GROUP BY city_name 
+		GROUP BY l.city_name, l.session_id, l.title 
 		ORDER BY last_activity DESC 
 		LIMIT $2
 	`
@@ -75,8 +77,10 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 		var cityName string
 		var lastActivity time.Time
 		var interactionCount int
+		var sessionID uuid.UUID
+		var title string
 
-		err := rows.Scan(&cityName, &lastActivity, &interactionCount)
+		err := rows.Scan(&cityName, &lastActivity, &interactionCount, &sessionID, &title)
 		if err != nil {
 			l.ErrorContext(ctx, "Failed to scan city row", slog.Any("error", err))
 			continue
@@ -85,8 +89,8 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 		// Get detailed interactions for this city
 		interactions, err := r.getCityInteractions(ctx, userID, cityName)
 		if err != nil {
-			l.WarnContext(ctx, "Failed to get interactions for city", 
-				slog.String("city", cityName), 
+			l.WarnContext(ctx, "Failed to get interactions for city",
+				slog.String("city", cityName),
 				slog.Any("error", err))
 			continue
 		}
@@ -94,8 +98,8 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 		// Count POIs for this city
 		poiCount, err := r.getCityPOICount(ctx, userID, cityName)
 		if err != nil {
-			l.WarnContext(ctx, "Failed to get POI count for city", 
-				slog.String("city", cityName), 
+			l.WarnContext(ctx, "Failed to get POI count for city",
+				slog.String("city", cityName),
 				slog.Any("error", err))
 			poiCount = 0
 		}
@@ -105,6 +109,8 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 			Interactions: interactions,
 			POICount:     poiCount,
 			LastActivity: lastActivity,
+			SessionID:    sessionID,
+			Title:        title,
 		})
 	}
 
@@ -115,7 +121,7 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 	}
 
 	total := len(cities)
-	l.InfoContext(ctx, "Successfully retrieved recent interactions", 
+	l.InfoContext(ctx, "Successfully retrieved recent interactions",
 		slog.Int("cities_count", total),
 		slog.String("user_id", userID.String()))
 
@@ -137,7 +143,7 @@ func (r *RepositoryImpl) getCityInteractions(ctx context.Context, userID uuid.UU
 			city_name,
 			city_id,
 			prompt,
-			response_text,
+			response,
 			model_used,
 			latency_ms,
 			created_at
@@ -308,7 +314,7 @@ func (r *RepositoryImpl) GetCityPOIsByInteraction(ctx context.Context, userID uu
 		return nil, fmt.Errorf("error iterating POI rows: %w", err)
 	}
 
-	l.InfoContext(ctx, "Successfully retrieved city POIs", 
+	l.InfoContext(ctx, "Successfully retrieved city POIs",
 		slog.String("city_name", cityName),
 		slog.Int("poi_count", len(pois)))
 
@@ -418,7 +424,7 @@ func (r *RepositoryImpl) GetCityHotelsByInteraction(ctx context.Context, userID 
 		return nil, fmt.Errorf("error iterating hotel rows: %w", err)
 	}
 
-	l.InfoContext(ctx, "Successfully retrieved city hotels", 
+	l.InfoContext(ctx, "Successfully retrieved city hotels",
 		slog.String("city_name", cityName),
 		slog.Int("hotel_count", len(hotels)))
 
@@ -524,7 +530,7 @@ func (r *RepositoryImpl) GetCityRestaurantsByInteraction(ctx context.Context, us
 		return nil, fmt.Errorf("error iterating restaurant rows: %w", err)
 	}
 
-	l.InfoContext(ctx, "Successfully retrieved city restaurants", 
+	l.InfoContext(ctx, "Successfully retrieved city restaurants",
 		slog.String("city_name", cityName),
 		slog.Int("restaurant_count", len(restaurants)))
 

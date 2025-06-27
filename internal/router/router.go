@@ -179,21 +179,15 @@ func profilesRoutes(HandlerImpl *profiles.HandlerImpl) http.Handler {
 func LLMInteractionRoutes(HandlerImpl *llmChat.HandlerImpl) http.Handler {
 	r := chi.NewRouter()
 
-	// Legacy chat endpoints (maintain backward compatibility)
-	//r.Post("/prompt-response/chat/sessions/{profileID}", HandlerImpl.StartChatSessionHandler)
-	//r.Post("/prompt-response/chat/sessions/stream/{profileID}", HandlerImpl.StartChatSessionStreamHandler)
-	//r.Post("/prompt-response/chat/sessions/{sessionID}/messages", HandlerImpl.ContinueChatSessionHandler)
-	//r.Post("/prompt-response/chat/sessions/{sessionID}/messages/stream", HandlerImpl.ContinueSessionStreamHandler)
-
-	// Unified chat endpoints
-	r.Post("/prompt-response/chat/sessions/{profileID}", HandlerImpl.ProcessUnifiedChatMessage)
+	// Unified chat endpoints - more specific routes first
 	r.Post("/prompt-response/chat/sessions/stream/{profileID}", HandlerImpl.ProcessUnifiedChatMessageStream)
+	r.Post("/prompt-response/chat/sessions/{sessionID}/continue", HandlerImpl.ContinueChatSessionHandler) // POST http://localhost:8000/api/v1/llm/prompt-response/chat/sessions/{sessionID}/continue
+	r.Post("/prompt-response/chat/sessions/{profileID}", HandlerImpl.ProcessUnifiedChatMessage)
 
 	// Chat session management
 	r.Get("/prompt-response/chat/sessions/user/{profileID}", HandlerImpl.GetUserChatSessions)
 
 	// LLM interaction routes
-	//r.Post("/prompt-response/profile/{profileID}", HandlerImpl.GetPrompResponse)        // GET http://localhost:8000/api/v1/user/interests
 	r.Get("/prompt-response/poi/details", HandlerImpl.GetPOIDetails)                    // GET http://localhost:8000/api/v1/llm/prompt-response/{interactionID}
 	r.Post("/prompt-response/bookmark", HandlerImpl.SaveItenerary)                      // POST http://localhost:8000/api/v1/llm/prompt-response
 	r.Delete("/prompt-response/bookmark/{itineraryID}", HandlerImpl.RemoveItenerary)    // DELETE http://localhost:8000/api/v1/llm/bookmark/{bookmarkID}

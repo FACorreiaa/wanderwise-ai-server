@@ -20,7 +20,7 @@ type LlmInteraction struct {
 	CityName           string          `json:"city_name,omitempty"` // The city context for this interaction
 	Prompt             string          `json:"prompt"`
 	RequestPayload     json.RawMessage `json:"request_payload"`
-	ResponseText       string          `json:"response_text"`
+	ResponseText       string          `json:"response"`
 	ResponsePayload    json.RawMessage `json:"response_payload"`
 	ModelUsed          string          `json:"model_used"`
 	PromptTokens       int             `json:"prompt_tokens"`
@@ -333,7 +333,7 @@ type RecentInteraction struct {
 	CityName     string                   `json:"city_name"`
 	CityID       *uuid.UUID               `json:"city_id,omitempty"`
 	Prompt       string                   `json:"prompt"`
-	ResponseText string                   `json:"response_text,omitempty"`
+	ResponseText string                   `json:"response,omitempty"`
 	ModelUsed    string                   `json:"model_used"`
 	LatencyMs    int                      `json:"latency_ms"`
 	CreatedAt    time.Time                `json:"created_at"`
@@ -355,4 +355,6 @@ type CityInteractions struct {
 	Interactions []RecentInteraction `json:"interactions"`
 	POICount     int                 `json:"poi_count"`
 	LastActivity time.Time           `json:"last_activity"`
+	SessionID    uuid.UUID           `json:"session_id"`
+	Title        string              `json:"title"`
 }

@@ -34,9 +34,11 @@ type Repository interface {
 	//GetPOIsByLocationAndDistanceWithFilters(ctx context.Context, lat, lon, radiusMeters float64, filters map[string]string) ([]types.POIDetailedInfo, error)
 	AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID) (uuid.UUID, error)
 	AddLLMPoiToFavourite(ctx context.Context, userID uuid.UUID, llmPoiID uuid.UUID) (uuid.UUID, error)
+	RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID) error
+
+	RemoveLLMPoiFromFavourite(ctx context.Context, userID, llmPoiID uuid.UUID) error
 	CheckPoiExists(ctx context.Context, poiID uuid.UUID) (bool, error)
 	CheckLlmPoiExists(ctx context.Context, llmPoiID uuid.UUID) (bool, error)
-	RemovePoiFromFavourites(ctx context.Context, poiID uuid.UUID, userID uuid.UUID) error
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
 
@@ -301,29 +303,33 @@ func (r *RepositoryImpl) AddLLMPoiToFavourite(ctx context.Context, userID uuid.U
 	return id, nil
 }
 
-func (r *RepositoryImpl) RemovePoiFromFavourites(ctx context.Context, poiID uuid.UUID, userID uuid.UUID) error {
-	tx, err := r.pgpool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
+func (r *RepositoryImpl) RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID) error {
 	query := `
 		DELETE FROM user_favorite_pois
-		WHERE poi_id = $1 AND user_id = $2
+		WHERE user_id = $1 AND poi_id = $2
 	`
-	result, err := tx.Exec(ctx, query, poiID, userID)
+	result, err := r.pgpool.Exec(ctx, query, userID, poiID)
 	if err != nil {
-		return fmt.Errorf("failed to delete favourite POI: %w", err)
+		return fmt.Errorf("failed to remove POI from favourites: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("no favourite POI found for deletion")
+		return fmt.Errorf("no favourite POI found to remove")
 	}
+	return nil
+}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+func (r *RepositoryImpl) RemoveLLMPoiFromFavourite(ctx context.Context, userID, llmPoiID uuid.UUID) error {
+	query := `
+		DELETE FROM user_favorite_llm_pois
+		WHERE user_id = $1 AND llm_poi_id = $2
+	`
+	result, err := r.pgpool.Exec(ctx, query, userID, llmPoiID)
+	if err != nil {
+		return fmt.Errorf("failed to remove LLM POI from favourites: %w", err)
 	}
-	r.logger.Info("Favourite POI removed successfully", slog.String("poiID", poiID.String()), slog.String("userID", userID.String()))
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("no favourite LLM POI found to remove")
+	}
 	return nil
 }
 
