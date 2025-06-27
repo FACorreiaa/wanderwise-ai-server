@@ -68,8 +68,6 @@ func (l *ServiceImpl) processDeadLetterQueue() {
 	}
 }
 
-
-
 // getPersonalizedPOI generates a prompt for personalized POIs
 func getPersonalizedPOI(interestNames []string, cityName, tagsPromptPart, userPrefs string) string {
 	prompt := fmt.Sprintf(`
@@ -162,11 +160,11 @@ func (l *ServiceImpl) streamingCityDataWorker(wg *sync.WaitGroup,
 	if err != nil {
 		span.RecordError(err)
 		l.sendEvent(ctxWorker, eventCh, types.StreamEvent{
-				Type:      types.EventTypeError,
-				Error:     fmt.Sprintf("failed to save city data interaction: %v", err),
-				Timestamp: time.Now(),
-				EventID:   uuid.New().String(),
-			}, 3)
+			Type:      types.EventTypeError,
+			Error:     fmt.Sprintf("failed to save city data interaction: %v", err),
+			Timestamp: time.Now(),
+			EventID:   uuid.New().String(),
+		}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -183,11 +181,11 @@ func (l *ServiceImpl) streamingCityDataWorker(wg *sync.WaitGroup,
 	if err := json.Unmarshal([]byte(cleanTxt), &cityData); err != nil {
 		span.RecordError(err)
 		l.sendEvent(ctxWorker, eventCh, types.StreamEvent{
-				Type:      types.EventTypeError,
-				Error:     fmt.Sprintf("failed to parse city data JSON: %v", err),
-				Timestamp: time.Now(),
-				EventID:   uuid.New().String(),
-			}, 3)
+			Type:      types.EventTypeError,
+			Error:     fmt.Sprintf("failed to parse city data JSON: %v", err),
+			Timestamp: time.Now(),
+			EventID:   uuid.New().String(),
+		}, 3)
 		resultCh <- types.GenAIResponse{Err: err}
 		return
 	}
@@ -362,162 +360,6 @@ func (l *ServiceImpl) streamingGeneralPOIWorker(wg *sync.WaitGroup,
 	l.sendEvent(ctx, eventCh, types.StreamEvent{
 		Type:      types.EventTypeGeneralPOI,
 		Data:      result.GeneralPOI,
-		Timestamp: time.Now(),
-		EventID:   uuid.New().String(),
-	}, 3)
-	resultCh <- result
-}
-
-// streamingPersonalizedPOIWorker generates personalized POIs with streaming updates
-func (l *ServiceImpl) streamingPersonalizedPOIWorker(wg *sync.WaitGroup, ctx context.Context, cityName string, userID, profileID uuid.UUID, resultCh chan<- types.GenAIResponse, eventCh chan<- types.StreamEvent, interestNames []string, tagsPromptPart, userPrefs string) {
-	defer wg.Done()
-
-	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "streamingPersonalizedPOIWorker", trace.WithAttributes(
-		attribute.String("city.name", cityName),
-		attribute.String("user.id", userID.String()),
-		attribute.String("profile.id", profileID.String()),
-	))
-	defer span.End()
-
-	l.sendEvent(ctx, eventCh, types.StreamEvent{
-		Type:      types.EventTypeProgress,
-		Data:      map[string]interface{}{"status": "generating_personalized_pois", "progress": 50},
-		Timestamp: time.Now(),
-		EventID:   uuid.New().String(),
-	}, 3)
-
-	startTime := time.Now()
-	prompt := getPersonalizedPOI(interestNames, cityName, tagsPromptPart, userPrefs)
-	var responseText strings.Builder
-
-	// Try streaming
-	iter, err := l.aiClient.GenerateContentStream(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)})
-	if err == nil {
-		for resp, err := range iter {
-			if err != nil {
-				span.RecordError(err)
-				l.sendEvent(ctx, eventCh, types.StreamEvent{
-					Type:      types.EventTypeError,
-					Error:     fmt.Sprintf("streaming personalized POI error: %v", err),
-					Timestamp: time.Now(),
-					EventID:   uuid.New().String(),
-				}, 3)
-				resultCh <- types.GenAIResponse{Err: err}
-				return
-			}
-			for _, cand := range resp.Candidates {
-				if cand.Content != nil {
-					for _, part := range cand.Content.Parts {
-						if part.Text != "" {
-							responseText.WriteString(string(part.Text))
-							l.sendEvent(ctx, eventCh, types.StreamEvent{
-								Type:      types.EventTypePersonalizedPOI,
-								Data:      map[string]string{"partial_poi_data": responseText.String()},
-								Timestamp: time.Now(),
-								EventID:   uuid.New().String(),
-							}, 3)
-						}
-					}
-				}
-			}
-		}
-	} else {
-		// Fallback to non-streaming
-		l.logger.WarnContext(ctx, "Streaming personalized POIs failed, falling back to non-streaming", slog.Any("error", err))
-		response, err := l.aiClient.GenerateResponse(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)})
-		if err != nil {
-			span.RecordError(err)
-			l.sendEvent(ctx, eventCh, types.StreamEvent{
-				Type:      types.EventTypeError,
-				Error:     fmt.Sprintf("failed to generate personalized POIs: %v", err),
-				Timestamp: time.Now(),
-				EventID:   uuid.New().String(),
-			}, 3)
-			resultCh <- types.GenAIResponse{Err: err}
-			return
-		}
-		for _, cand := range response.Candidates {
-			if cand.Content != nil {
-				for _, part := range cand.Content.Parts {
-					if part.Text != "" {
-						responseText.WriteString(string(part.Text))
-					}
-				}
-			}
-		}
-		l.sendEvent(ctx, eventCh, types.StreamEvent{
-			Type:      types.EventTypePersonalizedPOI,
-			Data:      map[string]string{"partial_poi_data": responseText.String()},
-			Timestamp: time.Now(),
-			EventID:   uuid.New().String(),
-		}, 3)
-	}
-
-	fullText := responseText.String()
-	if fullText == "" {
-		err := fmt.Errorf("empty personalized POI response")
-		span.RecordError(err)
-		l.sendEvent(ctx, eventCh, types.StreamEvent{
-			Type:      types.EventTypeError,
-			Error:     err.Error(),
-			Timestamp: time.Now(),
-			EventID:   uuid.New().String(),
-		}, 3)
-		resultCh <- types.GenAIResponse{Err: err}
-		return
-	}
-
-	// Save LLM interaction
-	latencyMs := int(time.Since(startTime).Milliseconds())
-	interaction := types.LlmInteraction{
-		UserID:       userID,
-		Prompt:       prompt,
-		ResponseText: fullText,
-		ModelUsed:    model,
-		LatencyMs:    latencyMs,
-		CityName:     cityName,
-	}
-	savedInteractionID, err := l.llmInteractionRepo.SaveInteraction(ctx, interaction)
-	if err != nil {
-		span.RecordError(err)
-		l.sendEvent(ctx, eventCh, types.StreamEvent{
-			Type:      types.EventTypeError,
-			Error:     fmt.Sprintf("failed to save personalized POI interaction: %v", err),
-			Timestamp: time.Now(),
-			EventID:   uuid.New().String(),
-		}, 3)
-		resultCh <- types.GenAIResponse{Err: err}
-		return
-	}
-
-	cleanTxt := cleanJSONResponse(fullText)
-	var itineraryData struct {
-		ItineraryName      string                  `json:"itinerary_name"`
-		OverallDescription string                  `json:"overall_description"`
-		PointsOfInterest   []types.POIDetailedInfo `json:"points_of_interest"`
-	}
-	if err := json.Unmarshal([]byte(cleanTxt), &itineraryData); err != nil {
-		span.RecordError(err)
-		l.sendEvent(ctx, eventCh, types.StreamEvent{
-			Type:      types.EventTypeError,
-			Error:     fmt.Sprintf("failed to parse personalized POI JSON: %v", err),
-			Timestamp: time.Now(),
-			EventID:   uuid.New().String(),
-		}, 3)
-		resultCh <- types.GenAIResponse{Err: err}
-		return
-	}
-
-	result := types.GenAIResponse{
-		ItineraryName:        itineraryData.ItineraryName,
-		ItineraryDescription: itineraryData.OverallDescription,
-		PersonalisedPOI:      itineraryData.PointsOfInterest,
-		LlmInteractionID:     savedInteractionID,
-	}
-
-	l.sendEvent(ctx, eventCh, types.StreamEvent{
-		Type:      types.EventTypePersonalizedPOI,
-		Data:      result,
 		Timestamp: time.Now(),
 		EventID:   uuid.New().String(),
 	}, 3)
@@ -718,8 +560,10 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 
 	// Initialize session
 	session := types.ChatSession{
-		ID:     sessionID,
-		UserID: userID,
+		ID:        sessionID,
+		UserID:    userID,
+		ProfileID: profileID,
+		CityName:  cityName,
 		ConversationHistory: []types.ConversationMessage{
 			{Role: "user", Content: message, Timestamp: time.Now()},
 		},
@@ -971,7 +815,6 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 }
 
 // ContinueSessionStreamed handles subsequent messages in an existing session and streams responses/updates.
-// Only returns error for critical setup failures
 func (l *ServiceImpl) ContinueSessionStreamed(
 	ctx context.Context, sessionID uuid.UUID,
 	message string, userLocation *types.UserLocation,
@@ -1002,13 +845,17 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 	// --- 2. Fetch City ID ---
 	cityData, err := l.cityRepo.FindCityByNameAndCountry(ctx, session.SessionContext.CityName, "")
 	if err != nil || cityData == nil {
-		if err == nil {
-			err = fmt.Errorf("city '%s' not found for session %s %w", session.SessionContext.CityName, sessionID, err)
-		} else {
-			err = fmt.Errorf("failed to find city '%s' for session %s: %w", session.SessionContext.CityName, sessionID, err)
+		// If the city is not found, try a fuzzy match
+		cityData, err = l.cityRepo.FindCityByFuzzyName(ctx, session.SessionContext.CityName)
+		if err != nil || cityData == nil {
+			if err == nil {
+				err = fmt.Errorf("city '%s' not found for session %s %w", session.SessionContext.CityName, sessionID, err)
+			} else {
+				err = fmt.Errorf("failed to find city '%s' for session %s: %w", session.SessionContext.CityName, sessionID, err)
+			}
+			l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true}, 3)
+			return err
 		}
-		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error(), IsFinal: true}, 3)
-		return err
 	}
 	cityID := cityData.ID
 	l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: map[string]interface{}{"status": "context_loaded", "city_id": cityID.String()}}, 3)
@@ -1086,52 +933,6 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 	case types.IntentAskQuestion:
 		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Answering your question with semantic context..."}, 3)
 		finalResponseMessage = "I’m here to help! For now, I’ll assume you’re asking about your trip. What specifically would you like to know?"
-
-		// questionPrompt := fmt.Sprintf(
-		// 	"The user is continuing a conversation about their trip to %s. Their current itinerary summary is: '%s'. Their current question/message is: '%s'. Provide a helpful and concise answer in a conversational tone. If the message isn't a clear question, infer what information they might be seeking or offer to help with itinerary modifications.",
-		// 	session.SessionContext.CityName,
-		// 	l.summarizeCurrentItinerary(session.CurrentItinerary),
-		// 	message,
-		// )
-		// iter, err := l.aiClient.GenerateContentStream(ctx, questionPrompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](0.6)})
-		// if err != nil {
-		// 	finalResponseMessage = "I'm sorry, I had trouble processing your question right now."
-		// 	assistantMessageType = types.TypeError
-		// 	l.sendEvent(types.StreamEvent{Type: types.EventTypeError, Error: err.Error()})
-		// } else {
-		// 	var answerBuilder strings.Builder
-		// 	iterErr := iter(func(chunk *genai.GenerateContentResponse) bool {
-		// 		select {
-		// 		case <-ctx.Done():
-		// 			return false
-		// 		default:
-		// 		}
-		// 		chunkContent := ""
-		// 		for _, cand := range chunk.Candidates {
-		// 			if cand.Content != nil {
-		// 				for _, part := range cand.Content.Parts {
-		// 					if textPart, ok := part.(genai.Text); ok {
-		// 						chunkContent = string(textPart)
-		// 					}
-		// 				}
-		// 			}
-		// 		}
-		// 		if chunkContent != "" {
-		// 			answerBuilder.WriteString(chunkContent)
-		// 			l.sendEvent(types.StreamEvent{Type: EventTypeMessage, Data: chunkContent})
-		// 		}
-		// 		return true
-		// 	})
-		// 	if iterErr != nil && iterErr != iterator.Done {
-		// 		l.logger.WarnContext(ctx, "Error streaming question response", slog.Any("error", iterErr))
-		// 		l.sendEvent(types.StreamEvent{Type: types.EventTypeError, Error: iterErr.Error()})
-		// 	}
-		// 	finalResponseMessage = answerBuilder.String()
-		// 	if finalResponseMessage == "" {
-		// 		finalResponseMessage = "I'm not sure how to respond to that. Could you rephrase or ask something else about your trip?"
-		// 		assistantMessageType = types.TypeClarification
-		// 	}
-		//}
 
 	case "replace_poi":
 		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Processing: Replacing Point of Interest..."}, 3)
@@ -1492,6 +1293,9 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "handleSemanticAddPOIStreamed")
 	defer span.End()
 
+	// Ensure the session has an initialized itinerary
+	l.ensureItineraryExists(session)
+
 	// Try semantic matching first - look for POIs semantically similar to the user's request
 	if len(semanticPOIs) > 0 {
 		l.sendEvent(ctx, eventCh, types.StreamEvent{
@@ -1666,20 +1470,44 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 
 	// Step 4: Cache Integration - Generate cache key based on session parameters
 	sessionID := uuid.New()
-	
+
+	// Initialize session
+	session := types.ChatSession{
+		ID:        sessionID,
+		UserID:    userID,
+		ProfileID: profileID,
+		CityName:  cityName,
+		ConversationHistory: []types.ConversationMessage{
+			{Role: "user", Content: message, Timestamp: time.Now()},
+		},
+		SessionContext: types.SessionContext{
+			CityName:            cityName,
+			ConversationSummary: fmt.Sprintf("Trip plan for %s", cityName),
+		},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+		Status:    "active",
+	}
+	if err := l.llmInteractionRepo.CreateSession(ctx, session); err != nil {
+		span.RecordError(err)
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error()}, 3)
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+
 	// Generate cache key based on session parameters
 	cacheKeyData := map[string]interface{}{
-		"user_id":       userID.String(),
-		"profile_id":    profileID.String(),
-		"city":          cityName,
-		"message":       cleanedMessage,
-		"domain":        string(domain),
-		"preferences":   basePreferences,
+		"user_id":     userID.String(),
+		"profile_id":  profileID.String(),
+		"city":        cityName,
+		"message":     cleanedMessage,
+		"domain":      string(domain),
+		"preferences": basePreferences,
 	}
 	cacheKeyBytes, _ := json.Marshal(cacheKeyData)
 	hash := md5.Sum(cacheKeyBytes)
 	cacheKey := hex.EncodeToString(hash[:])
-	
+
 	// Step 5: Fan-in Fan-out Setup
 	var wg sync.WaitGroup
 	var closeOnce sync.Once
@@ -1687,10 +1515,10 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 	l.sendEvent(ctx, eventCh, types.StreamEvent{
 		Type: types.EventTypeStart,
 		Data: map[string]interface{}{
-			"domain": string(domain), 
-			"city": cityName, 
+			"domain":     string(domain),
+			"city":       cityName,
 			"session_id": sessionID.String(),
-			"cache_key": cacheKey,
+			"cache_key":  cacheKey,
 		},
 	}, 3)
 
@@ -1793,7 +1621,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		})
 	}()
 
-	// Step 8: Save interaction asynchronously after completion
+	// Step 8: Save interaction and process structured data asynchronously after completion
 	go func() {
 		wg.Wait() // Wait for all workers to complete
 
@@ -1803,6 +1631,10 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		// Combine all responses into a single response text
 		var fullResponseBuilder strings.Builder
 		responsesMutex.Lock()
+		cityDataContent := ""
+		if responses["city_data"] != nil {
+			cityDataContent = responses["city_data"].String()
+		}
 		for partType, builder := range responses {
 			if builder != nil && builder.Len() > 0 {
 				fullResponseBuilder.WriteString(fmt.Sprintf("[%s]\n%s\n\n", partType, builder.String()))
@@ -1813,6 +1645,24 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		fullResponse := fullResponseBuilder.String()
 		if fullResponse == "" {
 			fullResponse = fmt.Sprintf("Processed %s request for %s", domain, cityName)
+		}
+
+		// Process and save city data if available
+		if cityDataContent != "" && domain == types.DomainItinerary {
+			// Parse city data from the response
+			if parsedCityData, parseErr := l.parseCityDataFromResponse(asyncCtx, cityDataContent); parseErr == nil && parsedCityData != nil {
+				// Save city data to the cities table
+				if _, handleErr := l.HandleCityData(asyncCtx, *parsedCityData); handleErr != nil {
+					l.logger.WarnContext(asyncCtx, "Failed to save city data during unified stream processing",
+						slog.String("city", cityName), slog.Any("error", handleErr))
+				} else {
+					l.logger.InfoContext(asyncCtx, "Successfully saved city data during unified stream processing",
+						slog.String("city", cityName))
+				}
+			} else if parseErr != nil {
+				l.logger.WarnContext(asyncCtx, "Failed to parse city data from unified stream response",
+					slog.String("city", cityName), slog.Any("error", parseErr))
+			}
 		}
 
 		interaction := types.LlmInteraction{
@@ -1836,57 +1686,56 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 	return nil
 }
 
-// streamWorker handles streaming for a single worker with context checks
-func (l *ServiceImpl) streamWorker(ctx context.Context, prompt, partType string, eventCh chan<- types.StreamEvent, domain types.DomainType) {
-	iter, err := l.aiClient.GenerateContentStream(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)})
-	if err != nil {
-		if ctx.Err() == nil {
-			l.sendEvent(ctx, eventCh, types.StreamEvent{
-				Type:  types.EventTypeError,
-				Error: fmt.Sprintf("%s worker failed: %v", partType, err),
-			}, 3)
+// ensureItineraryExists initializes the session's CurrentItinerary if it's nil
+func (l *ServiceImpl) ensureItineraryExists(session *types.ChatSession) {
+	if session.CurrentItinerary == nil {
+		session.CurrentItinerary = &types.AiCityResponse{
+			AIItineraryResponse: types.AIItineraryResponse{
+				ItineraryName:      fmt.Sprintf("Trip to %s", session.SessionContext.CityName),
+				OverallDescription: fmt.Sprintf("Exploring %s", session.SessionContext.CityName),
+				PointsOfInterest:   []types.POIDetailedInfo{},
+			},
 		}
-		return
 	}
-
-	var fullResponse strings.Builder
-	for resp, err := range iter {
-		if ctx.Err() != nil {
-			return // Stop if context is canceled
-		}
-		if err != nil {
-			if ctx.Err() == nil {
-				l.sendEvent(ctx, eventCh, types.StreamEvent{
-					Type:  types.EventTypeError,
-					Error: fmt.Sprintf("%s streaming error: %v", partType, err),
-				}, 3)
-			}
-			return
-		}
-		for _, cand := range resp.Candidates {
-			if cand.Content != nil {
-				for _, part := range cand.Content.Parts {
-					if part.Text != "" {
-						chunk := string(part.Text)
-						fullResponse.WriteString(chunk)
-						l.sendEvent(ctx, eventCh, types.StreamEvent{
-							Type: types.EventTypeChunk,
-							Data: map[string]interface{}{
-								"part":   partType,
-								"chunk":  chunk,
-								"domain": string(domain),
-							},
-						}, 3)
-					}
-				}
-			}
-		}
+	if session.CurrentItinerary.AIItineraryResponse.PointsOfInterest == nil {
+		session.CurrentItinerary.AIItineraryResponse.PointsOfInterest = []types.POIDetailedInfo{}
 	}
 }
 
-// streamWorkerWithResponse handles streaming for a single worker with response capture
-func (l *ServiceImpl) streamWorkerWithResponse(ctx context.Context, prompt, partType string, sendEvent func(types.StreamEvent), domain types.DomainType) {
-	l.streamWorkerWithResponseAndCache(ctx, prompt, partType, sendEvent, domain, "")
+// parseCityDataFromResponse extracts and parses city data from streamed response content
+func (l *ServiceImpl) parseCityDataFromResponse(ctx context.Context, responseContent string) (*types.GeneralCityData, error) {
+	// Clean the response by extracting JSON content between ```json and ```
+	cleanedResponse := responseContent
+
+	// Look for JSON blocks in the response
+	if strings.Contains(responseContent, "```json") {
+		start := strings.Index(responseContent, "```json")
+		if start != -1 {
+			start += len("```json")
+			end := strings.Index(responseContent[start:], "```")
+			if end != -1 {
+				cleanedResponse = strings.TrimSpace(responseContent[start : start+end])
+			}
+		}
+	}
+
+	// Validate JSON
+	if !json.Valid([]byte(cleanedResponse)) {
+		return nil, fmt.Errorf("invalid JSON in city data response")
+	}
+
+	// Try to parse as GeneralCityData
+	var generalCity types.GeneralCityData
+	if err := json.Unmarshal([]byte(cleanedResponse), &generalCity); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal city data: %w", err)
+	}
+
+	// Validate that we have minimum required city data
+	if generalCity.City == "" {
+		return nil, fmt.Errorf("parsed city data is missing city name")
+	}
+
+	return &generalCity, nil
 }
 
 // streamWorkerWithResponseAndCache handles streaming for a single worker with response capture and cache support
@@ -1938,19 +1787,3 @@ func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prom
 		}
 	}
 }
-
-func extractTextFromGenAIResponse(resp *genai.GenerateContentResponse) string {
-	var text strings.Builder
-	for _, cand := range resp.Candidates {
-		if cand.Content != nil {
-			for _, part := range cand.Content.Parts {
-				if part.Text != "" {
-					text.WriteString(string(part.Text))
-				}
-			}
-		}
-	}
-	return text.String()
-}
-
-// sendEventSimple sends events with context check

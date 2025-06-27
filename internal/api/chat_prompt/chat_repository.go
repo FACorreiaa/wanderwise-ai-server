@@ -95,13 +95,14 @@ func (r *RepositoryImpl) SaveInteraction(ctx context.Context, interaction types.
 
 	interactionQuery := `
         INSERT INTO llm_interactions (
-            user_id, prompt, response, model_used, latency_ms, city_name
-        ) VALUES ($1, $2, $3, $4, $5, $6)
+            user_id, session_id, prompt, response, model_name, latency_ms, city_name
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
     `
 	var interactionID uuid.UUID
 	err = tx.QueryRow(ctx, interactionQuery,
 		interaction.UserID,
+		interaction.SessionID,
 		interaction.Prompt,
 		interaction.ResponseText,
 		interaction.ModelUsed,
@@ -437,7 +438,7 @@ func (r *RepositoryImpl) GetInteractionByID(ctx context.Context, interactionID u
 
 	query := `
 		SELECT 
-			id, user_id, prompt, response, model_used, latency_ms,
+			id, user_id, prompt, response, model_name, latency_ms,
 			prompt_tokens, completion_tokens, total_tokens,
 			request_payload, response_payload
 		FROM llm_interactions
@@ -532,29 +533,42 @@ func (r *RepositoryImpl) RemoveChatFromBookmark(ctx context.Context, userID, iti
 
 // sessions
 func (r *RepositoryImpl) CreateSession(ctx context.Context, session types.ChatSession) error {
+	tx, err := r.pgpool.Begin(ctx)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to begin transaction for session creation", slog.Any("error", err))
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	query := `
         INSERT INTO chat_sessions (
-            id, user_id, current_itinerary, conversation_history, session_context,
+            id, user_id, profile_id, city_name, current_itinerary, conversation_history, session_context,
             created_at, updated_at, expires_at, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     `
 	itineraryJSON, _ := json.Marshal(session.CurrentItinerary)
 	historyJSON, _ := json.Marshal(session.ConversationHistory)
 	contextJSON, _ := json.Marshal(session.SessionContext)
 
-	_, err := r.pgpool.Exec(ctx, query, session.ID, session.UserID, itineraryJSON, historyJSON, contextJSON,
-		session.CreatedAt, session.UpdatedAt, session.ExpiresAt, session.Status)
+	_, err = tx.Exec(ctx, query, session.ID, session.UserID, session.ProfileID, session.CityName,
+		itineraryJSON, historyJSON, contextJSON, session.CreatedAt, session.UpdatedAt, session.ExpiresAt, session.Status)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "Failed to create session", slog.Any("error", err))
 		return fmt.Errorf("failed to create session: %w", err)
 	}
+
+	if err = tx.Commit(ctx); err != nil {
+		r.logger.ErrorContext(ctx, "Failed to commit session creation transaction", slog.Any("error", err))
+		return fmt.Errorf("failed to commit session creation: %w", err)
+	}
+
 	return nil
 }
 
 // GetSession retrieves a session by ID
 func (r *RepositoryImpl) GetSession(ctx context.Context, sessionID uuid.UUID) (*types.ChatSession, error) {
 	query := `
-        SELECT id, user_id, current_itinerary, conversation_history, session_context,
+        SELECT id, user_id, profile_id, city_name, current_itinerary, conversation_history, session_context,
                created_at, updated_at, expires_at, status
         FROM chat_sessions WHERE id = $1
     `
@@ -562,8 +576,8 @@ func (r *RepositoryImpl) GetSession(ctx context.Context, sessionID uuid.UUID) (*
 
 	var session types.ChatSession
 	var itineraryJSON, historyJSON, contextJSON []byte
-	err := row.Scan(&session.ID, &session.UserID, &itineraryJSON, &historyJSON, &contextJSON,
-		&session.CreatedAt, &session.UpdatedAt, &session.ExpiresAt, &session.Status)
+	err := row.Scan(&session.ID, &session.UserID, &session.ProfileID, &session.CityName,
+		&itineraryJSON, &historyJSON, &contextJSON, &session.CreatedAt, &session.UpdatedAt, &session.ExpiresAt, &session.Status)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("session %s not found", sessionID)
@@ -603,7 +617,7 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
                 SUM(prompt_tokens) as total_prompt_tokens,
                 SUM(completion_tokens) as total_completion_tokens,
                 SUM(latency_ms) as total_latency_ms,
-                array_agg(DISTINCT model_used) FILTER (WHERE model_used IS NOT NULL) as models_used,
+                array_agg(DISTINCT model_name) FILTER (WHERE model_name IS NOT NULL) as models_used,
                 json_agg(
                     json_build_object(
                         'id', id,
@@ -612,7 +626,7 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
                         'created_at', created_at,
                         'city_name', city_name,
                         'session_id', session_id,
-                        'model_used', model_used,
+                        'model_name', model_name,
                         'latency_ms', latency_ms,
                         'total_tokens', total_tokens,
                         'prompt_tokens', prompt_tokens,
@@ -1358,7 +1372,7 @@ func (r *RepositoryImpl) GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetai
 
 // 	interactionQuery := `
 //         INSERT INTO llm_interactions (
-//             user_id, prompt, response, model_used, latency_ms, city_name, prompt_embedding
+//             user_id, prompt, response, model_name, latency_ms, city_name, prompt_embedding
 //         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
 //         RETURNING id
 //     `

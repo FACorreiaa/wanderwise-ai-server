@@ -22,7 +22,7 @@ type LlmInteraction struct {
 	RequestPayload     json.RawMessage `json:"request_payload"`
 	ResponseText       string          `json:"response"`
 	ResponsePayload    json.RawMessage `json:"response_payload"`
-	ModelUsed          string          `json:"model_used"`
+	ModelUsed          string          `json:"model_name"`
 	PromptTokens       int             `json:"prompt_tokens"`
 	CompletionTokens   int             `json:"completion_tokens"`
 	TotalTokens        int             `json:"total_tokens"`
@@ -334,7 +334,7 @@ type RecentInteraction struct {
 	CityID       *uuid.UUID               `json:"city_id,omitempty"`
 	Prompt       string                   `json:"prompt"`
 	ResponseText string                   `json:"response,omitempty"`
-	ModelUsed    string                   `json:"model_used"`
+	ModelUsed    string                   `json:"model_name"`
 	LatencyMs    int                      `json:"latency_ms"`
 	CreatedAt    time.Time                `json:"created_at"`
 	POIs         []POIDetailedInfo        `json:"pois,omitempty"`

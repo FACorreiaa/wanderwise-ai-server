@@ -22,6 +22,7 @@ var _ Repository = (*RepositoryImpl)(nil)
 type Repository interface {
 	SaveCity(ctx context.Context, city types.CityDetail) (uuid.UUID, error)
 	FindCityByNameAndCountry(ctx context.Context, city, country string) (*types.CityDetail, error)
+	FindCityByFuzzyName(ctx context.Context, cityName string) (*types.CityDetail, error)
 	GetCityIDByName(ctx context.Context, cityName string) (uuid.UUID, error)
 	GetAllCities(ctx context.Context) ([]types.CityDetail, error)
 
@@ -186,6 +187,83 @@ func (r *RepositoryImpl) FindCityByNameAndCountry(ctx context.Context, cityName,
 	}
 
 	return &cityDetail, nil
+}
+
+// LevenshteinDistance calculates the Levenshtein distance between two strings.
+func LevenshteinDistance(a, b string) int {
+	// Create a 2D slice to store the distances
+	d := make([][]int, len(a)+1)
+	for i := range d {
+		d[i] = make([]int, len(b)+1)
+	}
+
+	// Initialize the first row and column
+	for i := 0; i <= len(a); i++ {
+		d[i][0] = i
+	}
+	for j := 0; j <= len(b); j++ {
+		d[0][j] = j
+	}
+
+	// Fill the rest of the matrix
+	for i := 1; i <= len(a); i++ {
+		for j := 1; j <= len(b); j++ {
+			cost := 0
+			if a[i-1] != b[j-1] {
+				cost = 1
+			}
+			d[i][j] = min(
+				d[i-1][j]+1,      // Deletion
+				d[i][j-1]+1,      // Insertion
+				d[i-1][j-1]+cost, // Substitution
+			)
+		}
+	}
+
+	// Return the final distance
+	return d[len(a)][len(b)]
+}
+
+func min(a, b, c int) int {
+	if a < b {
+		if a < c {
+			return a
+		}
+	} else {
+		if b < c {
+			return b
+		}
+	}
+	return c
+}
+
+// FindCityByFuzzyName finds the city with the most similar name using Levenshtein distance.
+func (r *RepositoryImpl) FindCityByFuzzyName(ctx context.Context, cityName string) (*types.CityDetail, error) {
+	// Get all cities from the database
+	cities, err := r.GetAllCities(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all cities: %w", err)
+	}
+
+	// Find the city with the minimum Levenshtein distance
+	var bestMatch *types.CityDetail
+	minDistance := -1
+
+	for i, city := range cities {
+		distance := LevenshteinDistance(strings.ToLower(cityName), strings.ToLower(city.Name))
+		if minDistance == -1 || distance < minDistance {
+			minDistance = distance
+			bestMatch = &cities[i]
+		}
+	}
+
+	// You can set a threshold for the maximum allowed distance
+	// For example, if the distance is too large, you might not want to return a match
+	// if minDistance > 3 {
+	// 	return nil, nil
+	// }
+
+	return bestMatch, nil
 }
 
 // GetCityIDByName retrieves a city ID by its name

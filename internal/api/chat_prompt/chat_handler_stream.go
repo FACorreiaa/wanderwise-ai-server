@@ -31,98 +31,6 @@ func NewStreamingHandler(llmService LlmInteractiontService, logger *slog.Logger)
 	}
 }
 
-func (h *HandlerImpl) StartChatSessionStreamHandler(w http.ResponseWriter, r *http.Request) {
-	// Set SSE headers
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		api.ErrorResponse(w, r, http.StatusInternalServerError, "Streaming not supported")
-		return
-	}
-
-	ctx := r.Context()
-
-	// Authentication
-	userIDStr, ok := auth.GetUserIDFromContext(ctx)
-	if !ok || userIDStr == "" {
-		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
-		return
-	}
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
-		return
-	}
-
-	profileIDStr := chi.URLParam(r, "profileID")
-	profileID, err := uuid.Parse(profileIDStr)
-	if err != nil {
-		h.writeSSEError(w, "Invalid profile ID format")
-		return
-	}
-
-	// Support both legacy and new request formats
-	var req struct {
-		CityName       string                `json:"city_name"`
-		ContextType    types.ChatContextType `json:"context_type,omitempty"`
-		InitialMessage string                `json:"initial_message,omitempty"`
-		UserLocation   *types.UserLocation   `json:"user_location,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeSSEError(w, "Invalid request body")
-		return
-	}
-
-	// Default to general context for backward compatibility
-	if req.ContextType == "" {
-		req.ContextType = types.ContextGeneral
-	}
-
-	// Prepare prompt
-	prompt := req.InitialMessage
-	if prompt == "" {
-		prompt = getDefaultPromptForContext(req.ContextType, req.CityName)
-	}
-
-	streamResp, err := h.llmInteractionService.StartNewSessionStreamed(ctx, userID, profileID, req.CityName, prompt, req.UserLocation)
-	defer streamResp.Cancel()
-
-	h.logger.InfoContext(ctx, "Started streaming session",
-		slog.String("session_id", streamResp.SessionID.String()),
-		slog.String("city_name", req.CityName))
-
-	// Stream events
-	for {
-		select {
-
-		case event, ok := <-streamResp.Stream:
-			if !ok {
-				h.logger.InfoContext(ctx, "Stream closed", slog.String("session_id", streamResp.SessionID.String()))
-				return
-			}
-
-			data, err := json.Marshal(event)
-			if err != nil {
-				h.logger.ErrorContext(ctx, "Failed to marshal event", slog.Any("error", err))
-				continue
-			}
-
-			fmt.Fprintf(w, "id: %s\n", event.EventID)
-			fmt.Fprintf(w, "event: %s\n", event.Type)
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-
-		case <-ctx.Done():
-			h.logger.InfoContext(ctx, "Client disconnected", slog.String("session_id", streamResp.SessionID.String()))
-			return
-		}
-	}
-}
-
 func (h *HandlerImpl) writeSSEError(w http.ResponseWriter, errorMsg string) {
 	event := types.StreamEvent{
 		Type:      types.EventTypeError,
@@ -200,8 +108,6 @@ func (h *HandlerImpl) ContinueSessionStreamHandler(w http.ResponseWriter, r *htt
 
 	// Start the service in a goroutine with context support
 	go func() {
-		// Try context-aware method first, fallback for backward compatibility
-		//err := h.llmInteractionService.ContinueSessionStreamedWithContext(ctx, sessionID, req.Message, req.UserLocation, req.ContextType, eventCh)
 		err := h.llmInteractionService.ContinueSessionStreamed(ctx, sessionID, req.Message, req.UserLocation, eventCh)
 		if err != nil {
 			// Fallback to original method
@@ -338,70 +244,6 @@ func (h *HandlerImpl) ProcessUnifiedChatMessageStream(w http.ResponseWriter, r *
 	// Create event channel
 	eventCh := make(chan types.StreamEvent, 100)
 
-	// Start processing in a goroutine
-	// go func() {
-	// 	err := h.llmInteractionService.ProcessUnifiedChatMessageStream(ctx, userID, profileID, "", req.Message, userLocation, eventCh)
-	// 	if err != nil {
-	// 		l.ErrorContext(ctx, "Failed to process unified chat message stream", slog.Any("error", err))
-	// 		span.RecordError(err)
-
-	// 		// Safely send error event, check if context is still active
-	// 		select {
-	// 		case eventCh <- types.StreamEvent{
-	// 			Type:      types.EventTypeError,
-	// 			Error:     err.Error(),
-	// 			Timestamp: time.Now(),
-	// 			EventID:   uuid.New().String(),
-	// 		}:
-	// 			// Event sent successfully
-	// 		case <-ctx.Done():
-	// 			// Context cancelled, don't send event
-	// 			return
-	// 		}
-	// 	}
-	// }()
-
-	// Stream events to client
-	// flusher, ok := w.(http.Flusher)
-	// if !ok {
-	// 	l.ErrorContext(ctx, "Response writer does not support flushing")
-	// 	span.SetStatus(codes.Error, "Streaming not supported")
-	// 	api.ErrorResponse(w, r, http.StatusInternalServerError, "Streaming not supported")
-	// 	return
-	// }
-
-	// for {
-	// 	select {
-	// 	case event, ok := <-eventCh:
-	// 		if !ok {
-	// 			l.InfoContext(ctx, "Event channel closed, ending stream")
-	// 			span.SetStatus(codes.Ok, "Stream completed")
-	// 			return
-	// 		}
-
-	// 		eventData, err := json.Marshal(event)
-	// 		if err != nil {
-	// 			l.ErrorContext(ctx, "Failed to marshal event", slog.Any("error", err))
-	// 			span.RecordError(err)
-	// 			continue
-	// 		}
-
-	// 		fmt.Fprintf(w, "data: %s\n\n", eventData)
-	// 		flusher.Flush()
-
-	// 		if event.Type == types.EventTypeComplete || event.Type == types.EventTypeError {
-	// 			l.InfoContext(ctx, "Stream completed", slog.String("eventType", event.Type))
-	// 			span.SetStatus(codes.Ok, "Stream completed")
-	// 			return
-	// 		}
-
-	// 	case <-r.Context().Done():
-	// 		l.InfoContext(ctx, "Client disconnected")
-	// 		span.SetStatus(codes.Ok, "Client disconnected")
-	// 		return
-	// 	}
-	// }
-	// Start processing in a goroutine
 	go func() {
 		err := h.llmInteractionService.ProcessUnifiedChatMessageStream(
 			ctx, userID, profileID, "", req.Message, req.UserLocation, eventCh,
@@ -464,6 +306,95 @@ func (h *HandlerImpl) ProcessUnifiedChatMessageStream(w http.ResponseWriter, r *
 		case <-r.Context().Done():
 			l.InfoContext(ctx, "Client disconnected")
 			span.SetStatus(codes.Ok, "Client disconnected")
+			return
+		}
+	}
+}
+
+func (h *HandlerImpl) ContinueChatSessionHandlerStream(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	sessionIDStr := chi.URLParam(r, "sessionID")
+	sessionID, err := uuid.Parse(sessionIDStr)
+	if err != nil {
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid session ID")
+		return
+	}
+
+	// Support both legacy and new request formats
+	var req struct {
+		Message      string                `json:"message"`
+		CityName     string                `json:"city_name,omitempty"`
+		ContextType  types.ChatContextType `json:"context_type,omitempty"`
+		UserLocation *types.UserLocation   `json:"user_location,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Default to general context for backward compatibility
+	if req.ContextType == "" {
+		req.ContextType = types.ContextGeneral
+	}
+
+	// Set up SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
+
+	// Create event channel
+	eventCh := make(chan types.StreamEvent, 100)
+
+	// Start processing in a goroutine
+	go func() {
+		err := h.llmInteractionService.ContinueSessionStreamed(ctx, sessionID, req.Message, req.UserLocation, eventCh)
+		if err != nil {
+			// Safely send error event, check if context is still active
+			select {
+			case eventCh <- types.StreamEvent{
+				Type:      types.EventTypeError,
+				Error:     err.Error(),
+				Timestamp: time.Now(),
+				EventID:   uuid.New().String(),
+			}:
+				// Event sent successfully
+			case <-ctx.Done():
+				// Context cancelled, don't send event
+				return
+			}
+		}
+	}()
+
+	// Set up flusher for real-time streaming
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Streaming not supported")
+		return
+	}
+
+	// Process events in real-time as they arrive
+	for {
+		select {
+		case event, ok := <-eventCh:
+			if !ok {
+				return
+			}
+
+			eventData, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+
+			fmt.Fprintf(w, "data: %s\n\n", eventData)
+			flusher.Flush() // Send immediately to client
+
+			if event.Type == types.EventTypeComplete || event.Type == types.EventTypeError {
+				return
+			}
+
+		case <-r.Context().Done():
 			return
 		}
 	}

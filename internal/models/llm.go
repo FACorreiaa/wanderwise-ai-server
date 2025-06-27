@@ -16,7 +16,7 @@ type LLMInteraction struct {
 	RequestPayload   json.RawMessage `json:"request_payload" db:"request_payload"`
 	ResponseText     string          `json:"response" db:"response"`
 	ResponsePayload  json.RawMessage `json:"response_payload" db:"response_payload"`
-	ModelUsed        string          `json:"model_used" db:"model_used"`
+	ModelUsed        string          `json:"model_name" db:"model_name"`
 	PromptTokens     int             `json:"prompt_tokens" db:"prompt_tokens"`
 	CompletionTokens int             `json:"completion_tokens" db:"completion_tokens"`
 	TotalTokens      int             `json:"total_tokens" db:"total_tokens"`

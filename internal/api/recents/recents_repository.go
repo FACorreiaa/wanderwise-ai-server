@@ -53,12 +53,16 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 			MAX(l.created_at) as last_activity,
 			COUNT(*) as interaction_count,
 			l.session_id,
-			l.title
+			CASE 
+				WHEN l.city_name IS NOT NULL AND l.city_name != '' 
+				THEN 'Trip to ' || l.city_name
+				ELSE 'Travel Planning'
+			END as title
 		FROM llm_interactions l 
 		WHERE user_id = $1 
 			AND city_name != '' 
 			AND city_name IS NOT NULL
-		GROUP BY l.city_name, l.session_id, l.title 
+		GROUP BY l.city_name, l.session_id 
 		ORDER BY last_activity DESC 
 		LIMIT $2
 	`
@@ -144,7 +148,7 @@ func (r *RepositoryImpl) getCityInteractions(ctx context.Context, userID uuid.UU
 			city_id,
 			prompt,
 			response,
-			model_used,
+			model_name,
 			latency_ms,
 			created_at
 		FROM llm_interactions 
