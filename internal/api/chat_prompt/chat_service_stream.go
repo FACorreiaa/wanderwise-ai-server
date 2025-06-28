@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -799,6 +800,15 @@ func (l *ServiceImpl) StartNewSessionStreamed(ctx context.Context, userID, profi
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
 			IsFinal:   true,
+			Navigation: &types.NavigationData{
+				URL:       fmt.Sprintf("/itinerary?sessionId=%s&cityName=%s&domain=itinerary", sessionID.String(), url.QueryEscape(cityName)),
+				RouteType: "itinerary",
+				QueryParams: map[string]string{
+					"sessionId": sessionID.String(),
+					"cityName":  cityName,
+					"domain":    "itinerary",
+				},
+			},
 		}, 3)
 
 		l.logger.InfoContext(ctx, "New session created and streamed",
@@ -1048,7 +1058,20 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 		Message:   finalResponseMessage,
 		Timestamp: time.Now(),
 	}, 3)
-	l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeComplete, Data: "Turn completed.", IsFinal: true}, 3)
+	l.sendEvent(ctx, eventCh, types.StreamEvent{
+		Type:    types.EventTypeComplete,
+		Data:    "Turn completed.",
+		IsFinal: true,
+		Navigation: &types.NavigationData{
+			URL:       fmt.Sprintf("/itinerary?sessionId=%s&cityName=%s&domain=itinerary", sessionID.String(), url.QueryEscape(session.CityName)),
+			RouteType: "itinerary",
+			QueryParams: map[string]string{
+				"sessionId": sessionID.String(),
+				"cityName":  session.CityName,
+				"domain":    "itinerary",
+			},
+		},
+	}, 3)
 
 	l.logger.InfoContext(ctx, "Streamed session continued", slog.String("sessionID", sessionID.String()), slog.String("intent", string(intent)))
 	return nil
@@ -1613,9 +1636,36 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 	go func() {
 		wg.Wait()             // Wait for all workers to complete
 		if ctx.Err() == nil { // Only send completion event if context is still active
+			// Determine route type based on domain
+			var routeType string
+			var baseURL string
+			switch domain {
+			case types.DomainAccommodation:
+				routeType = "hotels"
+				baseURL = "/hotels"
+			case types.DomainDining:
+				routeType = "restaurants"
+				baseURL = "/restaurants"
+			case types.DomainActivities:
+				routeType = "activities"
+				baseURL = "/activities"
+			default:
+				routeType = "itinerary"
+				baseURL = "/itinerary"
+			}
+			
 			l.sendEvent(ctx, eventCh, types.StreamEvent{
 				Type: types.EventTypeComplete,
 				Data: map[string]interface{}{"session_id": sessionID.String()},
+				Navigation: &types.NavigationData{
+					URL:       fmt.Sprintf("%s?sessionId=%s&cityName=%s&domain=%s", baseURL, sessionID.String(), url.QueryEscape(cityName), routeType),
+					RouteType: routeType,
+					QueryParams: map[string]string{
+						"sessionId": sessionID.String(),
+						"cityName":  cityName,
+						"domain":    routeType,
+					},
+				},
 			}, 3)
 		}
 		closeOnce.Do(func() {

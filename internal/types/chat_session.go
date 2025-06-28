@@ -184,13 +184,21 @@ const (
 
 // StreamEvent represents different types of streaming events
 type StreamEvent struct {
-	Type      string      `json:"type"`
-	Message   string      `json:"message"`
-	Data      interface{} `json:"data,omitempty"`
-	Error     string      `json:"error,omitempty"`
-	Timestamp time.Time   `json:"timestamp"`
-	EventID   string      `json:"event_id"`
-	IsFinal   bool        `json:"is_final,omitempty"`
+	Type       string            `json:"type"`
+	Message    string            `json:"message"`
+	Data       interface{}       `json:"data,omitempty"`
+	Error      string            `json:"error,omitempty"`
+	Timestamp  time.Time         `json:"timestamp"`
+	EventID    string            `json:"event_id"`
+	IsFinal    bool              `json:"is_final,omitempty"`
+	Navigation *NavigationData   `json:"navigation,omitempty"`
+}
+
+// NavigationData contains information for URL navigation
+type NavigationData struct {
+	URL         string            `json:"url"`
+	RouteType   string            `json:"route_type"`   // "itinerary", "restaurants", "activities", "hotels"
+	QueryParams map[string]string `json:"query_params"` // sessionId, cityName, domain, etc.
 }
 
 // StreamEventType constants
