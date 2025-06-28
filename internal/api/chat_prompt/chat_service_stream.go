@@ -1323,6 +1323,9 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 					Data: map[string]interface{}{
 						"poi_name":       semanticPOI.Name,
 						"poi_category":   semanticPOI.Category,
+						"latitude":       semanticPOI.Latitude,
+						"longitude":      semanticPOI.Longitude,
+						"description":    semanticPOI.DescriptionPOI,
 						"semantic_match": true,
 					},
 				}, 3)

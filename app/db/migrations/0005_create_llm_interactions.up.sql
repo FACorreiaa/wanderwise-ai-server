@@ -55,11 +55,8 @@ CREATE TABLE llm_suggested_pois (
 -- CONSTRAINT fk_llm_suggested_pois_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, -- Assuming you have a users table
 -- CONSTRAINT fk_llm_suggested_pois_profile FOREIGN KEY (search_profile_id) REFERENCES user_search_profiles(id) ON DELETE SET NULL,
 
-
 created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-CONSTRAINT unique_name_lat_long UNIQUE (name, latitude, longitude)
-
+updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Indexes
