@@ -36,19 +36,44 @@ func cleanJSONResponse(response string) string {
 	response = strings.TrimSpace(response)
 
 	// Extract JSON from response that might contain explanatory text
-	// Look for the first { and last } to extract the JSON object
+	// Look for the first { and find the matching closing brace
 	firstBrace := strings.Index(response, "{")
 	if firstBrace == -1 {
 		return response // No JSON found, return as is
 	}
 
-	lastBrace := strings.LastIndex(response, "}")
-	if lastBrace == -1 || lastBrace <= firstBrace {
-		return response // No valid JSON structure found
+	// Find the matching closing brace by counting braces
+	braceCount := 0
+	var lastValidBrace int
+	for i := firstBrace; i < len(response); i++ {
+		switch response[i] {
+		case '{':
+			braceCount++
+		case '}':
+			braceCount--
+			if braceCount == 0 {
+				lastValidBrace = i
+				break
+			}
+		}
+	}
+
+	if braceCount != 0 {
+		// Fallback to last brace method if brace counting fails
+		lastBrace := strings.LastIndex(response, "}")
+		if lastBrace == -1 || lastBrace <= firstBrace {
+			return response // No valid JSON structure found
+		}
+		lastValidBrace = lastBrace
 	}
 
 	// Extract the JSON portion
-	jsonPortion := response[firstBrace : lastBrace+1]
+	jsonPortion := response[firstBrace : lastValidBrace+1]
+	
+	// Remove any remaining backticks that might be within the JSON content
+	// This handles cases where the AI includes markdown formatting within JSON strings
+	jsonPortion = strings.ReplaceAll(jsonPortion, "`", "")
+	
 	return strings.TrimSpace(jsonPortion)
 }
 

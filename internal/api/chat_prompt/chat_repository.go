@@ -1264,6 +1264,25 @@ func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, s
 func parsePOIsFromResponse(responseText string, logger *slog.Logger) ([]types.POIDetailedInfo, error) {
 	cleanedResponse := cleanJSONResponse(responseText)
 
+	// Debug logging to see the actual cleaned response
+	logger.Debug("parsePOIsFromResponse: Cleaned response debug",
+		"originalLength", len(responseText),
+		"cleanedLength", len(cleanedResponse),
+		"cleanedPreview", cleanedResponse[:min(500, len(cleanedResponse))],
+		"cleanedSuffix", func() string {
+			start := len(cleanedResponse) - 200
+			if start < 0 {
+				start = 0
+			}
+			return cleanedResponse[start:]
+		}())
+
+	// Check if this looks like an itinerary response instead of a POI response
+	if strings.Contains(cleanedResponse, "itinerary_name") {
+		logger.Debug("parsePOIsFromResponse: Response appears to be an itinerary, not POI data")
+		return []types.POIDetailedInfo{}, nil
+	}
+
 	// First try to parse as unified chat response format with "data" wrapper
 	var unifiedResponse struct {
 		Data types.AiCityResponse `json:"data"`
@@ -1282,6 +1301,8 @@ func parsePOIsFromResponse(responseText string, logger *slog.Logger) ([]types.PO
 			logger.Debug("parsePOIsFromResponse: Parsed as unified chat response", "poiCount", len(allPOIs))
 			return allPOIs, nil
 		}
+	} else {
+		logger.Debug("parsePOIsFromResponse: Failed to parse as unified response", "error", err.Error())
 	}
 
 	// Second, try to parse as a full AiCityResponse (for legacy responses)
@@ -1290,6 +1311,8 @@ func parsePOIsFromResponse(responseText string, logger *slog.Logger) ([]types.PO
 	if err == nil && parsedResponse.PointsOfInterest != nil {
 		logger.Debug("parsePOIsFromResponse: Parsed as AiCityResponse", "poiCount", len(parsedResponse.PointsOfInterest))
 		return parsedResponse.PointsOfInterest, nil
+	} else {
+		logger.Debug("parsePOIsFromResponse: Failed to parse as AiCityResponse", "error", err.Error())
 	}
 
 	// Third, try to parse as a single POI (for individual POI additions)

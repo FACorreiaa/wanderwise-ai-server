@@ -94,6 +94,7 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Mount("/pois", POIRoutes(cfg.PointsOfInterestHandler)) // Points of Interest routes
 			r.Mount("/itineraries", ItineraryListRoutes(cfg.ItineraryListHandler))
 			r.Mount("/recents", RecentsRoutes(cfg.RecentsHandler)) // Recent interactions routes
+
 			// r.Mount("/pois", POIRoutes(cfg.HandlerImpl))   // Example for POI routes
 		})
 

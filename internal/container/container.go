@@ -112,6 +112,7 @@ func NewContainer(cfg *config.Config, logger *slog.Logger) (*Container, error) {
 	recentsRepository := recents.NewRepository(pool, logger)
 	recentsService := recents.NewService(recentsRepository, logger)
 	recentsHandler := recents.NewHandler(recentsService, logger)
+
 	return &Container{
 		Config:                    cfg,
 		Logger:                    logger,
