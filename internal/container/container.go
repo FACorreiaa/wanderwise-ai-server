@@ -17,6 +17,7 @@ import (
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/poi"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/profiles"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/recents"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/statistics"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/tags"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/user"
 )
@@ -36,6 +37,7 @@ type Container struct {
 	ItineraryListHandler      *itineraryList.HandlerImpl
 	CityHandler               *city.Handler
 	RecentsHandler            *recents.HandlerImpl
+	StatisticsHandler         *statistics.HandlerImpl
 	// Add other HandlerImpls, services, and repositories as needed
 }
 
@@ -113,6 +115,10 @@ func NewContainer(cfg *config.Config, logger *slog.Logger) (*Container, error) {
 	recentsService := recents.NewService(recentsRepository, logger)
 	recentsHandler := recents.NewHandler(recentsService, logger)
 
+	// Initialize statistics components
+	statisticsRepository := statistics.NewRepository(logger, pool)
+	statisticsHandler := statistics.NewHandler(statisticsRepository, logger, cfg.JWT)
+
 	return &Container{
 		Config:                    cfg,
 		Logger:                    logger,
@@ -127,6 +133,7 @@ func NewContainer(cfg *config.Config, logger *slog.Logger) (*Container, error) {
 		ItineraryListHandler:      itineraryListHandler,
 		CityHandler:               cityHandler,
 		RecentsHandler:            recentsHandler,
+		StatisticsHandler:         statisticsHandler,
 		// Add other HandlerImpls, services, and repositories as needed
 	}, nil
 }

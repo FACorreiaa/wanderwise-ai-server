@@ -1,7 +1,6 @@
 package llmChat
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -404,24 +403,4 @@ func (h *HandlerImpl) ContinueChatSessionHandlerStream(w http.ResponseWriter, r 
 			return
 		}
 	}
-}
-
-// ProcessUnifiedChatMessageStreamInternal handles unified chat processing without HTTP dependencies
-// This method is designed to be called from GraphQL resolvers or other internal services
-func (h *HandlerImpl) ProcessUnifiedChatMessageStreamInternal(
-	ctx context.Context,
-	userID, profileID uuid.UUID,
-	cityName, message string,
-	userLocation *types.UserLocation,
-	eventCh chan<- types.StreamEvent,
-) error {
-	h.logger.DebugContext(ctx, "Processing internal unified chat message stream",
-		slog.String("userID", userID.String()),
-		slog.String("profileID", profileID.String()),
-		slog.String("message", message))
-
-	// Call the existing service method directly
-	return h.llmInteractionService.ProcessUnifiedChatMessageStream(
-		ctx, userID, profileID, cityName, message, userLocation, eventCh,
-	)
 }

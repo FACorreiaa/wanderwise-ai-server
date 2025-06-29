@@ -267,139 +267,21 @@ func (s *ServiceImpl) CreateSearchProfileCC(ctx context.Context, userID uuid.UUI
 }
 
 // CreateSearchProfile userProfiles/service.go
-func (s *ServiceImpl) CreateSearchProfile(ctx context.Context, userID uuid.UUID, params types.CreateUserPreferenceProfileParams) (*types.UserPreferenceProfileResponse, error) {
-	ctx, span := otel.Tracer("PreferenceService").Start(ctx, "CreateSearchProfile", trace.WithAttributes(
-		attribute.String("user.id", userID.String()),
-		attribute.String("profile.name", params.ProfileName),
-	))
+func (s *ServiceImpl) CreateSearchProfile(ctx context.Context, userID uuid.UUID, p types.CreateUserPreferenceProfileParams) (*types.UserPreferenceProfileResponse, error) {
+	ctx, span := otel.Tracer("ProfilesService").Start(ctx, "CreateSearchProfile")
 	defer span.End()
 
-	l := s.logger.With(slog.String("method", "CreateSearchProfile"), slog.String("userID", userID.String()), slog.String("profileName", params.ProfileName))
-	l.DebugContext(ctx, "Creating user preference profile with associations", slog.Any("tags", params.Tags), slog.Any("interests", params.Interests))
-
-	// Validate input
-	if params.ProfileName == "" {
-		l.WarnContext(ctx, "Profile name is required")
-		span.SetStatus(codes.Error, "Profile name is required")
-		return nil, fmt.Errorf("%w: profile name cannot be empty", types.ErrBadRequest)
-	}
-
-	// Pre-validate interests
-	var interestObjects []types.Interest
-	for _, interestID := range params.Interests {
-		interest, err := s.intRepo.GetInterest(ctx, interestID)
-		if err != nil {
-			l.ErrorContext(ctx, "Failed to validate interest", slog.String("interestID", interestID.String()), slog.Any("error", err))
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "Interest validation failed")
-			return nil, fmt.Errorf("invalid interest %s: %w", interestID, types.ErrNotFound)
-		}
-		interestObjects = append(interestObjects, *interest)
-	}
-
-	// Pre-validate tags
-	var tagObjects []types.Tags
-	for _, tagID := range params.Tags {
-		tag, err := s.tagRepo.Get(ctx, userID, tagID)
-		if err != nil {
-			l.ErrorContext(ctx, "Failed to validate tag", slog.String("tagID", tagID.String()), slog.Any("error", err))
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "Tag validation failed")
-			return nil, fmt.Errorf("invalid tag %s: %w", tagID, types.ErrNotFound)
-		}
-		tagObjects = append(tagObjects, *tag)
-	}
-
-	// Begin a transaction
-	tx, err := s.prefRepo.(*RepositoryImpl).pgpool.Begin(ctx)
+	// If this is the first profile for the user, set it as default
+	profiles, err := s.prefRepo.GetSearchProfiles(ctx, userID)
 	if err != nil {
-		l.ErrorContext(ctx, "Failed to begin transaction", slog.Any("error", err))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Transaction begin failed")
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("error checking existing profiles: %w", err)
 	}
-	defer tx.Rollback(ctx)
-
-	// Create the base profile
-	profile, err := s.prefRepo.CreateSearchProfile(ctx, userID, params)
-	if err != nil {
-		l.ErrorContext(ctx, "Failed to create base profile", slog.Any("error", err))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Profile creation failed")
-		return nil, fmt.Errorf("failed to create profile: %w", err)
+	if len(profiles) == 0 {
+		defaultValue := true
+		p.IsDefault = &defaultValue
 	}
 
-	// TODO Fix later this logic
-	// Link interests to profile
-	//for _, interestID := range params.Interests {
-	//	if err := s.intRepo.AddInterestToProfile(ctx, profile.ID, interestID); err != nil {
-	//		l.ErrorContext(ctx, "Failed to link interest to profile", slog.String("interestID", interestID.String()), slog.Any("error", err))
-	//		span.RecordError(err)
-	//		span.SetStatus(codes.Error, "Interest linking failed")
-	//		return nil, fmt.Errorf("failed to link interest %s to profile: %w", interestID, err)
-	//	}
-	//}
-	//
-	//// Link tags to profile
-	//for _, tagID := range params.Tags {
-	//	if err := s.tagRepo.LinkPersonalTagToProfile(ctx, userID, profile.ID, tagID); err != nil {
-	//		l.ErrorContext(ctx, "Failed to link tag to profile", slog.String("tagID", tagID.String()), slog.Any("error", err))
-	//		span.RecordError(err)
-	//		span.SetStatus(codes.Error, "Tag linking failed")
-	//		return nil, fmt.Errorf("failed to link tag %s to profile: %w", tagID, err)
-	//	}
-	//}
-
-	// Fetch linked interests and tags
-	fetchedInterests, err := s.intRepo.GetInterestsForProfile(ctx, profile.ID)
-	if err != nil {
-		l.ErrorContext(ctx, "Failed to fetch linked interests", slog.Any("error", err))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Fetch interests failed")
-		return nil, fmt.Errorf("failed to fetch linked interests: %w", err)
-	}
-
-	fetchedTags, err := s.tagRepo.GetTagsForProfile(ctx, profile.ID)
-	if err != nil {
-		l.ErrorContext(ctx, "Failed to fetch linked tags", slog.Any("error", err))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Fetch tags failed")
-		return nil, fmt.Errorf("failed to fetch linked tags: %w", err)
-	}
-
-	// Commit the transaction
-	if err := tx.Commit(ctx); err != nil {
-		l.ErrorContext(ctx, "Failed to commit transaction", slog.Any("error", err))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Transaction commit failed")
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	// Assemble the response
-	response := &types.UserPreferenceProfileResponse{
-		ID:                   profile.ID,
-		UserID:               profile.UserID,
-		ProfileName:          profile.ProfileName,
-		IsDefault:            profile.IsDefault,
-		SearchRadiusKm:       profile.SearchRadiusKm,
-		PreferredTime:        profile.PreferredTime,
-		BudgetLevel:          profile.BudgetLevel,
-		PreferredPace:        profile.PreferredPace,
-		PreferAccessiblePOIs: profile.PreferAccessiblePOIs,
-		PreferOutdoorSeating: profile.PreferOutdoorSeating,
-		PreferDogFriendly:    profile.PreferDogFriendly,
-		PreferredVibes:       profile.PreferredVibes,
-		PreferredTransport:   profile.PreferredTransport,
-		DietaryNeeds:         profile.DietaryNeeds,
-		Interests:            fetchedInterests,
-		Tags:                 fetchedTags,
-		CreatedAt:            profile.CreatedAt,
-		UpdatedAt:            profile.UpdatedAt,
-	}
-
-	l.InfoContext(ctx, "User preference profile created successfully", slog.String("profileID", profile.ID.String()), slog.Int("interestCount", len(fetchedInterests)), slog.Int("tagCount", len(fetchedTags)))
-	span.SetStatus(codes.Ok, "Profile created with associations")
-	return response, nil
+	return s.prefRepo.CreateSearchProfile(ctx, userID, p)
 }
 
 // DeleteSearchProfile deletes a preference profile.

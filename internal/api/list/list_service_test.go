@@ -25,12 +25,12 @@ func (m *MockListRepository) CreateList(ctx context.Context, list types.List) er
 	return args.Error(0)
 }
 
-func (m *MockListRepository) GetList(ctx context.Context, listID uuid.UUID) (types.List, error) {
+func (m *MockListRepository) GetList(ctx context.Context, listID uuid.UUID) (*types.List, error) {
 	args := m.Called(ctx, listID)
 	if args.Get(0) == nil {
-		return types.List{}, args.Error(1)
+		return nil, args.Error(1)
 	}
-	return args.Get(0).(types.List), args.Error(1)
+	return args.Get(0).(*types.List), args.Error(1)
 }
 
 func (m *MockListRepository) UpdateList(ctx context.Context, list types.List) error {

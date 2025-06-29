@@ -71,6 +71,14 @@ func (m *MockCityRepository) GetCityIDByName(ctx context.Context, cityName strin
 	return args.Get(0).(uuid.UUID), args.Error(1)
 }
 
+func (m *MockCityRepository) FindCityByFuzzyName(ctx context.Context, name string) (*types.CityDetail, error) {
+	args := m.Called(ctx, name)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*types.CityDetail), args.Error(1)
+}
+
 func (m *MockCityRepository) GetAllCities(ctx context.Context) ([]types.CityDetail, error) {
 	args := m.Called(ctx)
 	if args.Get(0) == nil {
@@ -126,7 +134,12 @@ func (m *MockPOIRepository) AddPoiToFavourites(ctx context.Context, userID, poiI
 	return args.Get(0).(uuid.UUID), args.Error(1)
 }
 
-func (m *MockPOIRepository) RemovePoiFromFavourites(ctx context.Context, poiID uuid.UUID, userID uuid.UUID) error {
+func (m *MockPOIRepository) AddLLMPoiToFavourite(ctx context.Context, userID uuid.UUID, llmPoiID uuid.UUID) (uuid.UUID, error) {
+	args := m.Called(ctx, userID, llmPoiID)
+	return args.Get(0).(uuid.UUID), args.Error(1)
+}
+
+func (m *MockPOIRepository) RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID) error {
 	args := m.Called(ctx, poiID, userID)
 	return args.Error(0)
 }

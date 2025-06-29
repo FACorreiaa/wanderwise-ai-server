@@ -301,7 +301,7 @@ func TestProfilesServiceImpl_UpdateSearchProfile(t *testing.T) {
 		err := service.UpdateSearchProfile(ctx, userID, profileID, params)
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, repoErr))
-		assert.Contains(t, err.Error(), "error updating user preference profile:")
+								assert.Contains(t, err.Error(), "error setting default user preference profile: db error updating profile")
 		mockPrefRepo.AssertExpectations(t)
 	})
 }

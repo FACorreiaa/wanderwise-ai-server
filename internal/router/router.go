@@ -16,6 +16,7 @@ import (
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/poi"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/profiles"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/recents"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/statistics"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/tags"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/user"
 )
@@ -34,6 +35,7 @@ type Config struct {
 	ItineraryListHandler    *itineraryList.HandlerImpl
 	CityHandler             *city.Handler
 	RecentsHandler          *recents.HandlerImpl
+	StatisticsHandler       *statistics.HandlerImpl
 }
 
 // SetupRouter initializes and configures the main application router.
@@ -69,6 +71,8 @@ func SetupRouter(cfg *Config) chi.Router {
 
 			// Public city routes
 			r.Mount("/cities", CityRoutes(cfg.CityHandler))
+			r.Mount("/statistics", StatisticsRoutes(cfg.StatisticsHandler)) // Statistics routes (public for main page stats)
+
 		})
 
 		// --- Protected Routes ---
@@ -260,6 +264,16 @@ func RecentsRoutes(h *recents.HandlerImpl) http.Handler {
 
 	r.Get("/", h.GetUserRecentInteractions)            // GET http://localhost:8000/api/v1/recents
 	r.Get("/city/{cityName}", h.GetCityDetailsForUser) // GET http://localhost:8000/api/v1/recents/city/{cityName}
+
+	return r
+}
+
+func StatisticsRoutes(h *statistics.HandlerImpl) http.Handler {
+	r := chi.NewRouter()
+
+	r.Get("/main-page", h.GetMainPageStatisticsHandler)       // GET http://localhost:8000/api/v1/statistics/main-page
+	r.Get("/main-page/stream", h.StatisticsSSEHandler)        // GET http://localhost:8000/api/v1/statistics/main-page/stream (SSE)
+	r.Get("/poi/detailed", h.GetDetailedPOIStatisticsHandler) // GET http://localhost:8000/api/v1/statistics/poi/detailed
 
 	return r
 }

@@ -913,6 +913,16 @@ func (l *ServiceImpl) HandlePersonalisedPOIs(ctx context.Context, pois []types.P
 	if err != nil {
 		return nil, fmt.Errorf("failed to save personalised POIs: %w", err)
 	}
+
+	itineraryID, err := l.poiRepo.SaveItinerary(ctx, userID, cityID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to save itinerary: %w", err)
+	}
+
+	if err := l.poiRepo.SaveItineraryPOIs(ctx, itineraryID, pois); err != nil {
+		return nil, fmt.Errorf("failed to save itinerary POIs: %w", err)
+	}
+
 	sortedPois, err := l.llmInteractionRepo.GetLlmSuggestedPOIsByInteractionSortedByDistance(ctx, llmInteractionID, cityID, *userLocation)
 	if err != nil {
 		l.logger.ErrorContext(ctx, "Failed to fetch sorted POIs", slog.Any("error", err))

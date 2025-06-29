@@ -140,6 +140,53 @@ func GetUserSubStatusFromContext(ctx context.Context) (string, bool) {
 	return status, ok
 }
 
+// ValidateJWTToken validates a JWT token string and returns the claims
+func ValidateJWTToken(tokenString string, jwtCfg config.JWTConfig) (*types.Claims, error) {
+	secretKey := []byte(jwtCfg.SecretKey)
+	
+	claims := &types.Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return secretKey, nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse token: %w", err)
+	}
+
+	if !token.Valid {
+		return nil, errors.New("invalid token")
+	}
+
+	// Validate expiration
+	if claims.ExpiresAt != nil && time.Now().After(claims.ExpiresAt.Time) {
+		return nil, errors.New("token has expired")
+	}
+
+	// Validate issuer if configured
+	if jwtCfg.Issuer != "" && claims.Issuer != jwtCfg.Issuer {
+		return nil, errors.New("invalid token issuer")
+	}
+
+	// Validate audience if configured
+	if jwtCfg.Audience != "" {
+		validAudience := false
+		for _, aud := range claims.Audience {
+			if aud == jwtCfg.Audience {
+				validAudience = true
+				break
+			}
+		}
+		if !validAudience {
+			return nil, errors.New("invalid token audience")
+		}
+	}
+
+	return claims, nil
+}
+
 // RequirePlanStatus checks if the user in the context has the required plan(s) and status.
 // Runs AFTER the Authenticate middleware.
 func RequirePlanStatus(logger *slog.Logger, allowedPlans []string, requiredStatus string) func(next http.Handler) http.Handler {

@@ -1701,22 +1701,39 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		}
 
 		// Process and save city data if available
-		if cityDataContent != "" && domain == types.DomainItinerary {
+		var cityID uuid.UUID
+		if cityDataContent != "" {
 			// Parse city data from the response
 			if parsedCityData, parseErr := l.parseCityDataFromResponse(asyncCtx, cityDataContent); parseErr == nil && parsedCityData != nil {
 				// Save city data to the cities table
-				if _, handleErr := l.HandleCityData(asyncCtx, *parsedCityData); handleErr != nil {
+				if savedCityID, handleErr := l.HandleCityData(asyncCtx, *parsedCityData); handleErr != nil {
 					l.logger.WarnContext(asyncCtx, "Failed to save city data during unified stream processing",
 						slog.String("city", cityName), slog.Any("error", handleErr))
 				} else {
 					l.logger.InfoContext(asyncCtx, "Successfully saved city data during unified stream processing",
 						slog.String("city", cityName))
+					cityID = savedCityID
 				}
 			} else if parseErr != nil {
 				l.logger.WarnContext(asyncCtx, "Failed to parse city data from unified stream response",
 					slog.String("city", cityName), slog.Any("error", parseErr))
 			}
 		}
+
+		// If we don't have a cityID from the response, try to get it from the database
+		if cityID == uuid.Nil {
+			if existingCity, err := l.cityRepo.FindCityByNameAndCountry(asyncCtx, cityName, ""); err == nil && existingCity != nil {
+				cityID = existingCity.ID
+			} else {
+				l.logger.WarnContext(asyncCtx, "Could not find or save city data, skipping POI processing",
+					slog.String("city", cityName))
+				return
+			}
+		}
+
+		// Always try to process and save POI data regardless of domain
+		// since responses may contain POI data in different formats
+		l.ProcessAndSaveUnifiedResponse(asyncCtx, responses, userID, profileID, cityID, sessionID, userLocation)
 
 		interaction := types.LlmInteraction{
 			ID:           uuid.New(),

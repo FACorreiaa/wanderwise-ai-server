@@ -482,7 +482,8 @@ Generate a comprehensive travel response in JSON format with the following struc
                 "description_poi": "",
                 "address": "",
                 "website": "",
-                "opening_hours": ""
+                "opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+
             }
         ],
         "itinerary_response": {
@@ -497,7 +498,8 @@ Generate a comprehensive travel response in JSON format with the following struc
                     "description_poi": "",
                     "address": "",
                     "website": "",
-                    "opening_hours": ""
+                    "opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+
                 }
             ]
         }
@@ -527,7 +529,7 @@ Generate a hotel response in JSON format:
             "address": "",
             "phone_number": null,
             "website": null,
-            "opening_hours": null,
+            "opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
             "price_range": null,
             "rating": 0,
             "tags": null,
@@ -559,7 +561,8 @@ Generate a restaurant response in JSON format:
             "address": "Complete address",
             "website": "Official website URL (if available)",
             "phone_number": "Phone number (if available)",
-            "opening_hours": "Operating hours",
+                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)",
+
             "price_level": "$|$$|$$$|$$$$",
             "cuisine_type": "Cuisine type",
             "tags": ["tag1", "tag2"],
@@ -591,7 +594,8 @@ Generate an activities response in JSON format:
             "description": "Description matching user activity preferences",
             "address": "Complete address",
             "website": "Official website URL (if available)",
-            "opening_hours": "Operating hours",
+                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)",
+
             "price_range": "Free|$|$$|$$$",
             "rating": 0,
             "tags": ["tag1", "tag2"],
@@ -648,7 +652,8 @@ Respond with JSON:
             "description_poi": "",
             "address": "",
             "website": "",
-            "opening_hours": ""
+                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+
         }
     ]
 }`, cityName)
@@ -672,7 +677,8 @@ Respond with JSON:
             "description_poi": "",
             "address": "",
             "website": "",
-            "opening_hours": "",
+                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+,
             "distance": <float>
         }
     ]
@@ -697,7 +703,7 @@ Respond with JSON:
             "address": "",
             "phone_number": null,
             "website": null,
-            "opening_hours": null,
+                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)",
             "price_range": null,
             "rating": 0,
             "tags": null,
@@ -726,7 +732,8 @@ Respond with JSON:
             "address": "",
             "website": "",
             "phone_number": "",
-            "opening_hours": "",
+                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+,
             "price_level": "$|$$|$$$|$$$$",
             "cuisine_type": "",
             "tags": [],
@@ -755,7 +762,8 @@ Respond with JSON:
             "description": "Description matching preferences",
             "address": "",
             "website": "",
-            "opening_hours": "",
+                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+,
             "price_range": "Free|$|$$|$$$",
             "rating": 0,
             "tags": [],

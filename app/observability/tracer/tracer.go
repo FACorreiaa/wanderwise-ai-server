@@ -17,7 +17,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.26.0" // Use consistent version
+	semconv "go.opentelemetry.io/otel/semconv/v1.34.0"
 )
 
 // InitOtelProviders initializes OpenTelemetry tracing and metrics providers.

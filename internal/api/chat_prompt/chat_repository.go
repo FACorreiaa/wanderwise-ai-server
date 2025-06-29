@@ -43,6 +43,7 @@ type Repository interface {
 	SaveSinglePOI(ctx context.Context, poi types.POIDetailedInfo, userID, cityID uuid.UUID, llmInteractionID uuid.UUID) (uuid.UUID, error)
 	GetPOIsBySessionSortedByDistance(ctx context.Context, sessionID, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error)
 	GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetailedInfo types.POIDetailedInfo, cityID uuid.UUID, sourceInteractionID uuid.UUID) (uuid.UUID, error)
+	SaveItineraryPOIs(ctx context.Context, itineraryID uuid.UUID, pois []types.POIDetailedInfo) error
 
 	// RAG
 	//SaveInteractionWithEmbedding(ctx context.Context, interaction types.LlmInteraction, embedding []float32) (uuid.UUID, error)
@@ -1357,6 +1358,33 @@ func (r *RepositoryImpl) GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetai
 		return uuid.Nil, fmt.Errorf("GetOrCreatePOI: failed to query existing POI '%s': %w", POIDetailedInfo.Name, err)
 	}
 	return poiDBID, nil
+}
+
+func (r *RepositoryImpl) SaveItineraryPOIs(ctx context.Context, itineraryID uuid.UUID, pois []types.POIDetailedInfo) error {
+	batch := &pgx.Batch{}
+	for i, poi := range pois {
+		query := `
+            INSERT INTO itinerary_pois (itinerary_id, poi_id, order_index, ai_description)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (itinerary_id, poi_id) DO UPDATE SET
+                order_index = EXCLUDED.order_index,
+                ai_description = EXCLUDED.ai_description,
+                updated_at = NOW()
+        `
+		batch.Queue(query, itineraryID, poi.ID, i, poi.DescriptionPOI)
+	}
+
+	br := r.pgpool.SendBatch(ctx, batch)
+	defer br.Close()
+
+	for i := 0; i < len(pois); i++ {
+		_, err := br.Exec()
+		if err != nil {
+			return fmt.Errorf("failed to execute batch insert for itinerary_poi %d: %w", i, err)
+		}
+	}
+
+	return nil
 }
 
 // func (r *RepositoryImpl) SaveInteractionWithEmbedding(ctx context.Context, interaction types.LlmInteraction, embedding []float32) (uuid.UUID, error) {
