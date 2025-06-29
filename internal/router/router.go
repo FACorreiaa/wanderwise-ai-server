@@ -271,7 +271,7 @@ func RecentsRoutes(h *recents.HandlerImpl) http.Handler {
 func StatisticsRoutes(h *statistics.HandlerImpl) http.Handler {
 	r := chi.NewRouter()
 
-	r.Get("/main-page", h.GetMainPageStatisticsHandler)       // GET http://localhost:8000/api/v1/statistics/main-page
+	//.Get("/main-page", h.GetMainPageStatisticsHandler)       // GET http://localhost:8000/api/v1/statistics/main-page
 	r.Get("/main-page/stream", h.StatisticsSSEHandler)        // GET http://localhost:8000/api/v1/statistics/main-page/stream (SSE)
 	r.Get("/poi/detailed", h.GetDetailedPOIStatisticsHandler) // GET http://localhost:8000/api/v1/statistics/poi/detailed
 

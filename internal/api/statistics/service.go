@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
-	uuid "github.com/vgarvardt/pgx-google-uuid/v5"
+	"github.com/google/uuid"
 )
 
 var _ Service = (*ServiceImpl)(nil)

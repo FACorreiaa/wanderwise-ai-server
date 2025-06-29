@@ -8,12 +8,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/config"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/auth"
-	"github.com/google/uuid"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -66,8 +67,8 @@ func (h *HandlerImpl) GetMainPageStatisticsHandler(w http.ResponseWriter, r *htt
 		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
 		return
 	}
+
 	span.SetAttributes(semconv.EnduserIDKey.String(userID.String()))
-	l = l.With(slog.String("userID", userID.String()))
 
 	stats, err := h.service.GetMainPageStatistics(ctx, userID)
 	if err != nil {
@@ -127,16 +128,12 @@ func (h *HandlerImpl) StatisticsSSEHandler(w http.ResponseWriter, r *http.Reques
 		h.logger.InfoContext(ctx, "Successfully authenticated SSE connection", slog.String("userID", userIDStr))
 	}
 
-	googleUUID2, err := uuid.Parse(userIDStr)
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		h.logger.ErrorContext(ctx, "Invalid user ID format for SSE", slog.Any("error", err))
+		h.logger.ErrorContext(ctx, "Invalid user ID format", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
 		return
 	}
-
-	// Convert google UUID to pgx UUID for repository call
-	var userID2 [16]byte
-	copy(userID2[:], googleUUID2[:])
 
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -154,7 +151,7 @@ func (h *HandlerImpl) StatisticsSSEHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Send initial statistics immediately
-	if err := h.sendStatisticsEvent(ctx, w, flusher, userID2, "initial"); err != nil {
+	if err := h.sendStatisticsEvent(ctx, w, flusher, userID, "initial"); err != nil {
 		h.logger.ErrorContext(ctx, "Failed to send initial statistics", slog.Any("error", err))
 		return
 	}
@@ -182,7 +179,7 @@ func (h *HandlerImpl) StatisticsSSEHandler(w http.ResponseWriter, r *http.Reques
 			span.SetStatus(codes.Ok, "SSE connection closed")
 			return
 		case <-ticker.C:
-			if err := h.sendStatisticsEvent(ctx, w, flusher, userID2, "update"); err != nil {
+			if err := h.sendStatisticsEvent(ctx, w, flusher, userID, "update"); err != nil {
 				h.logger.ErrorContext(ctx, "Failed to send statistics update", slog.Any("error", err))
 				span.RecordError(err)
 				return
@@ -192,7 +189,7 @@ func (h *HandlerImpl) StatisticsSSEHandler(w http.ResponseWriter, r *http.Reques
 }
 
 // sendStatisticsEvent sends a statistics event via SSE
-func (h *HandlerImpl) sendStatisticsEvent(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, userID [16]byte, eventType string) error {
+func (h *HandlerImpl) sendStatisticsEvent(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, userID uuid.UUID, eventType string) error {
 	stats, err := h.service.GetMainPageStatistics(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get statistics: %w", err)
@@ -241,18 +238,14 @@ func (h *HandlerImpl) GetDetailedPOIStatisticsHandler(w http.ResponseWriter, r *
 		return
 	}
 
-	googleUUID3, err := uuid.Parse(userIDStr)
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "Invalid user ID format", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
 		return
 	}
 
-	// Convert google UUID to pgx UUID for repository call
-	var userID3 [16]byte
-	copy(userID3[:], googleUUID3[:])
-
-	stats, err := h.service.GetDetailedPOIStatistics(ctx, userID3)
+	stats, err := h.service.GetDetailedPOIStatistics(ctx, userID)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "Failed to get detailed POI statistics", slog.Any("error", err))
 		span.RecordError(err)

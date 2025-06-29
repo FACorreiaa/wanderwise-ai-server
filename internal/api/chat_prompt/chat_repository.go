@@ -1302,7 +1302,7 @@ func parsePOIsFromResponse(responseText string, logger *slog.Logger) ([]types.PO
 			logger.Debug("parsePOIsFromResponse: Parsed as unified chat response", "poiCount", len(allPOIs))
 			return allPOIs, nil
 		}
-	} else {
+	} else if err != nil {
 		logger.Debug("parsePOIsFromResponse: Failed to parse as unified response", "error", err.Error())
 	}
 
@@ -1312,7 +1312,7 @@ func parsePOIsFromResponse(responseText string, logger *slog.Logger) ([]types.PO
 	if err == nil && parsedResponse.PointsOfInterest != nil {
 		logger.Debug("parsePOIsFromResponse: Parsed as AiCityResponse", "poiCount", len(parsedResponse.PointsOfInterest))
 		return parsedResponse.PointsOfInterest, nil
-	} else {
+	} else if err != nil {
 		logger.Debug("parsePOIsFromResponse: Failed to parse as AiCityResponse", "error", err.Error())
 	}
 
