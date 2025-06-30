@@ -33,6 +33,12 @@ func NewRepository(logger *slog.Logger, pgpool *pgxpool.Pool) *RepositoryImpl {
 func (r *RepositoryImpl) GetMainPageStatistics(ctx context.Context, userID uuid.UUID) (*types.MainPageStatistics, error) {
 	r.logger.InfoContext(ctx, "Getting main page statistics for user")
 
+	// Check if this is a request for aggregate statistics (system user)
+	systemUserID := uuid.MustParse("00000000-0000-0000-0000-000000000000")
+	if userID == systemUserID {
+		return r.GetAggregateStatistics(ctx)
+	}
+
 	query := `
 		WITH user_unique_pois AS (
 			-- POIs from poi_details
@@ -81,8 +87,8 @@ func (r *RepositoryImpl) GetMainPageStatistics(ctx context.Context, userID uuid.
 			WHERE li.user_id = $1
 		),
 		user_itineraries AS (
-			-- Count saved itineraries for the user
-			SELECT COUNT(*) as itinerary_count
+			-- Count saved/bookmarked itineraries for the user
+			SELECT COUNT(*) as saved_itinerary_count
 			FROM user_saved_itineraries usi
 			WHERE usi.user_id = $1
 		),
@@ -94,7 +100,7 @@ func (r *RepositoryImpl) GetMainPageStatistics(ctx context.Context, userID uuid.
 		)
 		SELECT
 			(SELECT user_count FROM total_users) AS total_users_count,
-			(SELECT itinerary_count FROM user_itineraries) AS total_itineraries_created,
+			(SELECT saved_itinerary_count FROM user_itineraries) AS total_itineraries_saved,
 			COUNT(*) AS total_unique_pois
 		FROM user_unique_pois;
 	`
@@ -103,7 +109,7 @@ func (r *RepositoryImpl) GetMainPageStatistics(ctx context.Context, userID uuid.
 
 	err := r.pgpool.QueryRow(ctx, query, userID).Scan(
 		&stats.TotalUsersCount,
-		&stats.TotalItinerariesCreated,
+		&stats.TotalItinerariesSaved,
 		&stats.TotalUniquePOIs,
 	)
 
@@ -114,7 +120,93 @@ func (r *RepositoryImpl) GetMainPageStatistics(ctx context.Context, userID uuid.
 
 	r.logger.InfoContext(ctx, "Successfully retrieved main page statistics",
 		slog.Int64("total_users", stats.TotalUsersCount),
-		slog.Int64("user_itineraries", stats.TotalItinerariesCreated),
+		slog.Int64("user_itineraries", stats.TotalItinerariesSaved),
+		slog.Int64("unique_pois", stats.TotalUniquePOIs))
+
+	return &stats, nil
+}
+
+// GetAggregateStatistics returns system-wide aggregate statistics (public data)
+func (r *RepositoryImpl) GetAggregateStatistics(ctx context.Context) (*types.MainPageStatistics, error) {
+	r.logger.InfoContext(ctx, "Getting aggregate system statistics")
+
+	query := `
+		WITH all_unique_pois AS (
+			-- POIs from poi_details (all users)
+			SELECT DISTINCT 
+				pd.name,
+				pd.latitude,
+				pd.longitude,
+				'poi_details' as source_table
+			FROM poi_details pd
+			JOIN llm_interactions li ON pd.llm_interaction_id = li.id
+			
+			UNION
+			
+			-- POIs from llm_suggested_pois (all users)
+			SELECT DISTINCT
+				lsp.name,
+				lsp.latitude,
+				lsp.longitude,
+				'llm_suggested_pois' as source_table
+			FROM llm_suggested_pois lsp
+			
+			UNION
+			
+			-- POIs from hotel_details (all users)
+			SELECT DISTINCT
+				hd.name,
+				hd.latitude,
+				hd.longitude,
+				'hotel_details' as source_table
+			FROM hotel_details hd
+			JOIN llm_interactions li ON hd.llm_interaction_id = li.id
+			
+			UNION
+			
+			-- POIs from restaurant_details (all users)
+			SELECT DISTINCT
+				rd.name,
+				rd.latitude,
+				rd.longitude,
+				'restaurant_details' as source_table
+			FROM restaurant_details rd
+			JOIN llm_interactions li ON rd.llm_interaction_id = li.id
+		),
+		total_itineraries AS (
+			-- Count all saved itineraries across all users
+			SELECT COUNT(*) as itinerary_count
+			FROM user_saved_itineraries usi
+		),
+		total_users AS (
+			-- Count total active users in the system
+			SELECT COUNT(*) as user_count
+			FROM users u
+			WHERE u.is_active = true
+		)
+		SELECT
+			(SELECT user_count FROM total_users) AS total_users_count,
+			(SELECT itinerary_count FROM total_itineraries) AS total_itineraries_saved,
+			COUNT(*) AS total_unique_pois
+		FROM all_unique_pois;
+	`
+
+	var stats types.MainPageStatistics
+
+	err := r.pgpool.QueryRow(ctx, query).Scan(
+		&stats.TotalUsersCount,
+		&stats.TotalItinerariesSaved,
+		&stats.TotalUniquePOIs,
+	)
+
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to get aggregate statistics", slog.Any("error", err))
+		return nil, err
+	}
+
+	r.logger.InfoContext(ctx, "Successfully retrieved aggregate statistics",
+		slog.Int64("total_users", stats.TotalUsersCount),
+		slog.Int64("total_itineraries", stats.TotalItinerariesSaved),
 		slog.Int64("unique_pois", stats.TotalUniquePOIs))
 
 	return &stats, nil

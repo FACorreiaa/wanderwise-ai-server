@@ -1,9 +1,9 @@
 package types
 
 type MainPageStatistics struct {
-	TotalUsersCount         int64 `json:"total_users_count"`
-	TotalItinerariesCreated int64 `json:"total_itineraries_created"`
-	TotalUniquePOIs         int64 `json:"total_unique_pois"`
+	TotalUsersCount        int64 `json:"total_users_count"`
+	TotalItinerariesSaved  int64 `json:"total_itineraries_saved"`
+	TotalUniquePOIs        int64 `json:"total_unique_pois"`
 }
 
 type DetailedPOIStatistics struct {

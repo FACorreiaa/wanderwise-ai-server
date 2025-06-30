@@ -81,7 +81,7 @@ func (h *HandlerImpl) GetMainPageStatisticsHandler(w http.ResponseWriter, r *htt
 
 	span.SetAttributes(
 		attribute.Int64("stats.total_users", stats.TotalUsersCount),
-		attribute.Int64("stats.total_itineraries", stats.TotalItinerariesCreated),
+		attribute.Int64("stats.total_itineraries", stats.TotalItinerariesSaved),
 		attribute.Int64("stats.total_pois", stats.TotalUniquePOIs),
 	)
 	span.SetStatus(codes.Ok, "Statistics retrieved successfully")
@@ -90,50 +90,16 @@ func (h *HandlerImpl) GetMainPageStatisticsHandler(w http.ResponseWriter, r *htt
 }
 
 // StatisticsSSEHandler handles Server-Sent Events for real-time statistics updates
+// This endpoint is public to provide real-time aggregate statistics like an airport counter
 func (h *HandlerImpl) StatisticsSSEHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("StatisticsHandler").Start(r.Context(), "StatisticsSSE")
 	defer span.End()
 
-	h.logger.InfoContext(ctx, "New SSE connection for statistics")
+	h.logger.InfoContext(ctx, "New public SSE connection for aggregate statistics")
 
-	// For SSE, try to get user ID from auth context first, then fallback to cookie/query param
-	userIDStr, ok := auth.GetUserIDFromContext(ctx)
-	if !ok || userIDStr == "" {
-		// Fallback 1: Try to get token from HttpOnly cookie (preferred for SSE)
-		var token string
-		if cookie, err := r.Cookie("access_token"); err == nil && cookie.Value != "" {
-			token = cookie.Value
-			h.logger.InfoContext(ctx, "Using token from HttpOnly cookie for SSE authentication")
-		} else {
-			// Fallback 2: Query parameter (less secure but necessary for EventSource limitations)
-			token = r.URL.Query().Get("token")
-			if token == "" {
-				h.logger.ErrorContext(ctx, "No authentication found for SSE (no cookie or query token)")
-				api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
-				return
-			}
-			h.logger.WarnContext(ctx, "Using token query parameter for SSE authentication - consider using HttpOnly cookies")
-		}
-
-		// Validate the JWT token
-		claims, err := auth.ValidateJWTToken(token, h.jwtCfg)
-		if err != nil {
-			h.logger.ErrorContext(ctx, "Invalid JWT token for SSE", slog.Any("error", err))
-			api.ErrorResponse(w, r, http.StatusUnauthorized, "Invalid token")
-			return
-		}
-
-		// Extract user ID from validated claims
-		userIDStr = claims.UserID
-		h.logger.InfoContext(ctx, "Successfully authenticated SSE connection", slog.String("userID", userIDStr))
-	}
-
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "Invalid user ID format", slog.Any("error", err))
-		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
-		return
-	}
+	// No authentication required for aggregate statistics - this is public data
+	// We'll use a default/system user ID for getting aggregate stats
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000000") // System/aggregate user
 
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -219,7 +185,7 @@ func (h *HandlerImpl) sendStatisticsEvent(ctx context.Context, w http.ResponseWr
 	h.logger.DebugContext(ctx, "Sent statistics SSE event",
 		slog.String("event_type", eventType),
 		slog.Int64("total_users", stats.TotalUsersCount),
-		slog.Int64("total_itineraries", stats.TotalItinerariesCreated),
+		slog.Int64("total_itineraries", stats.TotalItinerariesSaved),
 		slog.Int64("total_pois", stats.TotalUniquePOIs))
 
 	return nil
