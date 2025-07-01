@@ -230,6 +230,83 @@ func RequirePlanStatus(logger *slog.Logger, allowedPlans []string, requiredStatu
 	}
 }
 
+// OptionalAuthenticate is middleware that attempts to validate JWT access tokens
+// but allows the request to continue even if no valid token is provided.
+// This is useful for routes that can work for both authenticated and guest users.
+func OptionalAuthenticate(logger *slog.Logger, jwtCfg config.JWTConfig) func(next http.Handler) http.Handler {
+	secretKey := []byte(jwtCfg.SecretKey)
+	if len(secretKey) == 0 {
+		logger.Error("FATAL: JWT Secret Key is not configured!")
+		panic("JWT Secret Key cannot be empty")
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			l := logger.With(slog.String("middleware", "OptionalAuthenticate"))
+
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				l.DebugContext(ctx, "No Authorization header provided, continuing as guest")
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			headerParts := strings.Split(authHeader, " ")
+			if len(headerParts) != 2 || strings.ToLower(headerParts[0]) != "bearer" {
+				l.DebugContext(ctx, "Invalid Authorization header format, continuing as guest")
+				next.ServeHTTP(w, r)
+				return
+			}
+			tokenString := headerParts[1]
+
+			claims := &types.Claims{}
+			token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+					return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+				}
+				return secretKey, nil
+			})
+
+			if err != nil {
+				l.DebugContext(ctx, "Token parsing/validation failed, continuing as guest", slog.Any("error", err))
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if !token.Valid {
+				l.DebugContext(ctx, "Token marked as invalid, continuing as guest")
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			now := time.Now()
+			if claims.ExpiresAt == nil || now.Unix() > claims.ExpiresAt.Unix() {
+				l.DebugContext(ctx, "Token expired, continuing as guest")
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if claims.Issuer != jwtCfg.Issuer {
+				l.DebugContext(ctx, "Token issuer mismatch, continuing as guest")
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if jwtCfg.Audience != "" && !api.VerifyAudience(claims.Audience, jwtCfg.Audience) {
+				l.DebugContext(ctx, "Token audience mismatch, continuing as guest")
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Valid token - add user context
+			ctx = context.WithValue(ctx, UserIDKey, claims.UserID)
+			l.DebugContext(ctx, "Optional authentication successful, claims added to context", slog.String("userID", claims.UserID))
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
 // Add UserIDKey, UserRoleKey etc. used by Authenticate middleware
 // Assume Authenticate middleware adds these values like:
 // ctx = context.WithValue(ctx, UserPlanKey, claims.Plan)

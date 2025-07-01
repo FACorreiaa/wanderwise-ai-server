@@ -529,6 +529,37 @@ func (l *ServiceImpl) getPersonalizedPOIWithSemanticContext(interestNames []stri
 }
 
 func (l *ServiceImpl) FetchUserData(ctx context.Context, userID, profileID uuid.UUID) (interests []*types.Interest, searchProfile *types.UserPreferenceProfileResponse, tags []*types.Tags, err error) {
+	// Handle guest users (when userID is nil UUID)
+	if userID == uuid.Nil || profileID == uuid.Nil {
+		l.logger.DebugContext(ctx, "Guest user detected, using default preferences", 
+			slog.String("userID", userID.String()), 
+			slog.String("profileID", profileID.String()))
+		
+		// Return default guest preferences
+		defaultSearchProfile := &types.UserPreferenceProfileResponse{
+			ID:                   uuid.Nil,
+			UserID:               uuid.Nil,
+			ProfileName:          "Guest Profile",
+			IsDefault:            true,
+			SearchRadiusKm:       10.0, // 10km default radius
+			PreferredTime:        types.DayPreferenceAny,
+			BudgetLevel:          3, // Medium budget
+			PreferredPace:        types.SearchPaceModerate,
+			PreferAccessiblePOIs: false,
+			PreferOutdoorSeating: false,
+			PreferDogFriendly:    false,
+			PreferredVibes:       []string{},
+			PreferredTransport:   types.TransportPreferenceAny,
+			DietaryNeeds:         []string{},
+			UserLatitude:         nil,
+			UserLongitude:        nil,
+			Interests:            []*types.Interest{}, // Empty slice of Interest pointers
+			Tags:                 []*types.Tags{},     // Empty slice of Tag pointers
+		}
+		return []*types.Interest{}, defaultSearchProfile, []*types.Tags{}, nil
+	}
+	
+	// Authenticated user - fetch actual data
 	interests, err = l.interestRepo.GetInterestsForProfile(ctx, profileID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch user interests: %w", err)

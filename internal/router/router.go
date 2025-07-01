@@ -23,19 +23,20 @@ import (
 
 // Config contains dependencies needed for the router setup
 type Config struct {
-	AuthHandler             *authMiddleware.HandlerImpl
-	AuthenticateMiddleware  func(http.Handler) http.Handler // Function signature for auth middleware
-	Logger                  *slog.Logger
-	UserHandler             *user.HandlerImpl
-	InterestHandler         *interests.HandlerImpl
-	SearchProfileHandler    *profiles.HandlerImpl
-	TagsHandler             *tags.HandlerImpl
-	LLMInteractionHandler   *llmChat.HandlerImpl
-	PointsOfInterestHandler *poi.HandlerImpl
-	ItineraryListHandler    *itineraryList.HandlerImpl
-	CityHandler             *city.Handler
-	RecentsHandler          *recents.HandlerImpl
-	StatisticsHandler       *statistics.HandlerImpl
+	AuthHandler                    *authMiddleware.HandlerImpl
+	AuthenticateMiddleware         func(http.Handler) http.Handler // Function signature for auth middleware
+	OptionalAuthenticateMiddleware func(http.Handler) http.Handler // Function signature for optional auth middleware
+	Logger                         *slog.Logger
+	UserHandler                    *user.HandlerImpl
+	InterestHandler                *interests.HandlerImpl
+	SearchProfileHandler           *profiles.HandlerImpl
+	TagsHandler                    *tags.HandlerImpl
+	LLMInteractionHandler          *llmChat.HandlerImpl
+	PointsOfInterestHandler        *poi.HandlerImpl
+	ItineraryListHandler           *itineraryList.HandlerImpl
+	CityHandler                    *city.Handler
+	RecentsHandler                 *recents.HandlerImpl
+	StatisticsHandler              *statistics.HandlerImpl
 }
 
 // SetupRouter initializes and configures the main application router.
@@ -73,6 +74,13 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Mount("/cities", CityRoutes(cfg.CityHandler))
 			r.Mount("/statistics", StatisticsRoutes(cfg.StatisticsHandler)) // Statistics routes (public for main page stats)
 
+		})
+
+		// --- Guest Routes ---
+		// Routes that work without authentication
+		r.Group(func(r chi.Router) {
+			// Guest chat stream route - no authentication required, uses default preferences
+			r.Post("/llm/guest/chat/stream", cfg.LLMInteractionHandler.ProcessGuestChatMessageStream)
 		})
 
 		// --- Protected Routes ---
@@ -184,14 +192,13 @@ func profilesRoutes(HandlerImpl *profiles.HandlerImpl) http.Handler {
 func LLMInteractionRoutes(HandlerImpl *llmChat.HandlerImpl) http.Handler {
 	r := chi.NewRouter()
 
-	// Unified chat endpoints - more specific routes first
-	r.Post("/prompt-response/chat/sessions/stream/{profileID}", HandlerImpl.ProcessUnifiedChatMessageStream)
+	// Chat continuation endpoints - require authentication
 	r.Post("/prompt-response/chat/sessions/{sessionID}/continue", HandlerImpl.ContinueChatSessionHandlerStream) // POST http://localhost:8000/api/v1/llm/prompt-response/chat/sessions/{sessionID}/continue
 
-	// Chat session management
+	// Chat session management - require authentication
 	r.Get("/prompt-response/chat/sessions/user/{profileID}", HandlerImpl.GetUserChatSessions)
 
-	// LLM interaction routes
+	// LLM interaction routes - require authentication for user-specific actions
 	r.Get("/prompt-response/poi/details", HandlerImpl.GetPOIDetails)                    // GET http://localhost:8000/api/v1/llm/prompt-response/{interactionID}
 	r.Post("/prompt-response/bookmark", HandlerImpl.SaveItenerary)                      // POST http://localhost:8000/api/v1/llm/prompt-response
 	r.Delete("/prompt-response/bookmark/{itineraryID}", HandlerImpl.RemoveItenerary)    // DELETE http://localhost:8000/api/v1/llm/bookmark/{bookmarkID}

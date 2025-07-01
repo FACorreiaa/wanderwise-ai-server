@@ -181,29 +181,44 @@ func (h *HandlerImpl) ProcessUnifiedChatMessageStream(w http.ResponseWriter, r *
 	l := h.logger.With(slog.String("handler", "ProcessUnifiedChatMessageStream"))
 	l.DebugContext(ctx, "Processing unified chat message with streaming")
 
-	// Parse profile ID from URL
+	// Parse profile ID from URL - handle 'guest' as special case
 	profileIDStr := chi.URLParam(r, "profileID")
-	profileID, err := uuid.Parse(profileIDStr)
-	if err != nil {
-		l.ErrorContext(ctx, "Invalid profile ID", slog.String("profileID", profileIDStr), slog.Any("error", err))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Invalid profile ID")
-		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid profile ID")
-		return
+	var profileID uuid.UUID
+	var err error
+	
+	if profileIDStr == "guest" {
+		// Use nil UUID for guest users
+		profileID = uuid.Nil
+		l.DebugContext(ctx, "Guest profile detected", slog.String("profileID", profileIDStr))
+	} else {
+		profileID, err = uuid.Parse(profileIDStr)
+		if err != nil {
+			l.ErrorContext(ctx, "Invalid profile ID", slog.String("profileID", profileIDStr), slog.Any("error", err))
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "Invalid profile ID")
+			api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid profile ID")
+			return
+		}
 	}
 
-	// Get user ID from auth context
+	// Get user ID from auth context (optional for guest users)
+	var userID uuid.UUID
+	var isGuest bool
 	userIDStr, ok := auth.GetUserIDFromContext(ctx)
 	if !ok || userIDStr == "" {
-		l.ErrorContext(ctx, "User ID not found in context")
-		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
-		return
-	}
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		l.ErrorContext(ctx, "Invalid user ID format", slog.Any("error", err))
-		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
-		return
+		// Guest user - generate a temporary UUID or use nil UUID
+		l.DebugContext(ctx, "No user ID found in context, treating as guest user")
+		isGuest = true
+		userID = uuid.Nil // Use nil UUID for guest users
+	} else {
+		var err error
+		userID, err = uuid.Parse(userIDStr)
+		if err != nil {
+			l.ErrorContext(ctx, "Invalid user ID format", slog.Any("error", err))
+			api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+			return
+		}
+		isGuest = false
 	}
 
 	// Parse request body
@@ -232,6 +247,7 @@ func (h *HandlerImpl) ProcessUnifiedChatMessageStream(w http.ResponseWriter, r *
 		attribute.String("user.id", userID.String()),
 		attribute.String("profile.id", profileID.String()),
 		attribute.String("message", req.Message),
+		attribute.Bool("is_guest", isGuest),
 	)
 
 	// Set up SSE headers
@@ -249,7 +265,8 @@ func (h *HandlerImpl) ProcessUnifiedChatMessageStream(w http.ResponseWriter, r *
 			slog.String("userID", userID.String()),
 			slog.String("profileID", profileID.String()),
 			slog.String("cityName", ""),
-			slog.String("message", req.Message))
+			slog.String("message", req.Message),
+			slog.Bool("isGuest", isGuest))
 		err := h.llmInteractionService.ProcessUnifiedChatMessageStream(
 			ctx, userID, profileID, "", req.Message, req.UserLocation, eventCh,
 		)
@@ -400,6 +417,126 @@ func (h *HandlerImpl) ContinueChatSessionHandlerStream(w http.ResponseWriter, r 
 			}
 
 		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+// ProcessGuestChatMessageStream handles guest chat requests without authentication
+// Uses default preferences and doesn't require user profile
+func (h *HandlerImpl) ProcessGuestChatMessageStream(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "ProcessGuestChatMessageStream", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/llm/guest/chat/stream"),
+	))
+	defer span.End()
+
+	l := h.logger.With(slog.String("handler", "ProcessGuestChatMessageStream"))
+	l.DebugContext(ctx, "Processing guest chat message with streaming")
+
+	// Parse request body
+	var req struct {
+		Message      string              `json:"message"`
+		UserLocation *types.UserLocation `json:"user_location,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		l.ErrorContext(ctx, "Failed to decode request body", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid request body")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate required fields
+	if req.Message == "" {
+		l.ErrorContext(ctx, "Missing required fields", slog.String("message", req.Message))
+		span.SetStatus(codes.Error, "Missing required fields")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "message is required")
+		return
+	}
+
+	span.SetAttributes(
+		attribute.String("user.id", "guest"),
+		attribute.String("profile.id", "guest"),
+		attribute.String("message", req.Message),
+		attribute.Bool("is_guest", true),
+	)
+
+	// Set up SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
+
+	// Create event channel
+	eventCh := make(chan types.StreamEvent, 100)
+
+	go func() {
+		l.InfoContext(ctx, "Processing guest chat message",
+			slog.String("message", req.Message))
+		
+		// Use nil UUIDs for guest users (no user preferences will be loaded)
+		err := h.llmInteractionService.ProcessUnifiedChatMessageStream(
+			ctx, uuid.Nil, uuid.Nil, "", req.Message, req.UserLocation, eventCh,
+		)
+		if err != nil {
+			l.ErrorContext(ctx, "Failed to process guest chat message stream", slog.Any("error", err))
+			span.RecordError(err)
+
+			// Safely send error event
+			select {
+			case eventCh <- types.StreamEvent{
+				Type:      types.EventTypeError,
+				Error:     err.Error(),
+				Timestamp: time.Now(),
+				EventID:   uuid.New().String(),
+			}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Set up flusher for real-time streaming
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		l.ErrorContext(ctx, "Response writer does not support flushing")
+		span.SetStatus(codes.Error, "Streaming not supported")
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Streaming not supported")
+		return
+	}
+
+	// Process events in real-time as they arrive
+	for {
+		select {
+		case event, ok := <-eventCh:
+			if !ok {
+				l.InfoContext(ctx, "Event channel closed, ending guest stream")
+				span.SetStatus(codes.Ok, "Stream completed")
+				return
+			}
+
+			eventData, err := json.Marshal(event)
+			if err != nil {
+				l.ErrorContext(ctx, "Failed to marshal event", slog.Any("error", err))
+				span.RecordError(err)
+				continue
+			}
+
+			fmt.Fprintf(w, "data: %s\n\n", eventData)
+			flusher.Flush() // Send immediately to client
+
+			if event.Type == types.EventTypeComplete || event.Type == types.EventTypeError {
+				l.InfoContext(ctx, "Guest stream completed", slog.String("eventType", event.Type))
+				span.SetStatus(codes.Ok, "Stream completed")
+				return
+			}
+
+		case <-r.Context().Done():
+			l.InfoContext(ctx, "Guest client disconnected")
+			span.SetStatus(codes.Ok, "Client disconnected")
 			return
 		}
 	}
