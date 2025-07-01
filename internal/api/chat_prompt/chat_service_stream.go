@@ -76,7 +76,7 @@ func getPersonalizedPOI(interestNames []string, cityName, tagsPromptPart, userPr
         1. An itinerary name.
         2. An overall description.
         3. A list of points of interest with name, category, coordinates, and detailed description.
-		Max points of interest allowed by tokens. 
+		Max points of interest allowed by tokens.
         Format the response in JSON with the following structure:
         {
             "itinerary_name": "Name of the itinerary",
@@ -1653,7 +1653,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 				routeType = "itinerary"
 				baseURL = "/itinerary"
 			}
-			
+
 			l.sendEvent(ctx, eventCh, types.StreamEvent{
 				Type: types.EventTypeComplete,
 				Data: map[string]interface{}{"session_id": sessionID.String()},
@@ -1740,6 +1740,285 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			SessionID:    sessionID,
 			UserID:       userID,
 			ProfileID:    profileID,
+			CityName:     cityName,
+			Prompt:       fmt.Sprintf("Unified Chat Stream - Domain: %s, Message: %s", domain, cleanedMessage),
+			ResponseText: fullResponse,
+			ModelUsed:    model,
+			LatencyMs:    int(time.Since(startTime).Milliseconds()),
+			Timestamp:    startTime,
+		}
+		if _, err := l.llmInteractionRepo.SaveInteraction(asyncCtx, interaction); err != nil {
+			l.logger.ErrorContext(asyncCtx, "Failed to save stream interaction", slog.Any("error", err))
+		}
+	}()
+
+	span.SetStatus(codes.Ok, "Unified chat stream processed successfully")
+	return nil
+}
+
+func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityName, message string, userLocation *types.UserLocation, eventCh chan<- types.StreamEvent) error {
+	startTime := time.Now() // Track when processing starts
+	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "ProcessUnifiedChatMessageStream", trace.WithAttributes(
+		attribute.String("message", message),
+	))
+	defer span.End()
+
+	// Extract city and clean message
+	extractedCity, cleanedMessage, err := l.extractCityFromMessage(ctx, message)
+	if err != nil {
+		span.RecordError(err)
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error()}, 3)
+		return fmt.Errorf("failed to parse message: %w", err)
+	}
+	if extractedCity != "" {
+		cityName = extractedCity
+	}
+	span.SetAttributes(attribute.String("extracted.city", cityName), attribute.String("cleaned.message", cleanedMessage))
+
+	// Detect domain
+	domainDetector := &types.DomainDetector{}
+	domain := domainDetector.DetectDomain(ctx, cleanedMessage)
+	span.SetAttributes(attribute.String("detected.domain", string(domain)))
+
+	// Step 4: Cache Integration - Generate cache key based on session parameters
+	sessionID := uuid.New()
+
+	// Initialize session
+	session := types.ChatSession{
+		ID:       sessionID,
+		CityName: cityName,
+		ConversationHistory: []types.ConversationMessage{
+			{Role: "user", Content: message, Timestamp: time.Now()},
+		},
+		SessionContext: types.SessionContext{
+			CityName:            cityName,
+			ConversationSummary: fmt.Sprintf("Trip plan for %s", cityName),
+		},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+		Status:    "active",
+	}
+	if err := l.llmInteractionRepo.CreateSession(ctx, session); err != nil {
+		span.RecordError(err)
+		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeError, Error: err.Error()}, 3)
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+
+	// Generate cache key based on session parameters
+	cacheKeyData := map[string]interface{}{
+		"city":    cityName,
+		"message": cleanedMessage,
+		"domain":  string(domain),
+	}
+	cacheKeyBytes, _ := json.Marshal(cacheKeyData)
+	hash := md5.Sum(cacheKeyBytes)
+	cacheKey := hex.EncodeToString(hash[:])
+
+	// Step 5: Fan-in Fan-out Setup
+	var wg sync.WaitGroup
+	var closeOnce sync.Once
+
+	l.sendEvent(ctx, eventCh, types.StreamEvent{
+		Type: types.EventTypeStart,
+		Data: map[string]interface{}{
+			"domain":     string(domain),
+			"city":       cityName,
+			"session_id": sessionID.String(),
+			"cache_key":  cacheKey,
+		},
+	}, 3)
+
+	// Step 5: Collect responses for saving interaction
+	responses := make(map[string]*strings.Builder)
+	responsesMutex := sync.Mutex{}
+
+	// Modified sendEventWithResponse to capture responses
+	sendEventWithResponse := func(event types.StreamEvent) {
+		if event.Type == types.EventTypeChunk {
+			responsesMutex.Lock()
+			if data, ok := event.Data.(map[string]interface{}); ok {
+				if partType, exists := data["part"].(string); exists {
+					if chunk, chunkExists := data["chunk"].(string); chunkExists {
+						if responses[partType] == nil {
+							responses[partType] = &strings.Builder{}
+						}
+						responses[partType].WriteString(chunk)
+					}
+				}
+			}
+			responsesMutex.Unlock()
+		}
+		l.sendEvent(ctx, eventCh, event, 3)
+	}
+
+	// Step 6: Spawn streaming workers based on domain with cache support
+	switch domain {
+	case types.DomainItinerary, types.DomainGeneral:
+		wg.Add(3)
+
+		// Worker 1: Stream City Data with cache
+		go func() {
+			defer wg.Done()
+			prompt := getCityDataPrompt(cityName)
+			partCacheKey := cacheKey + "_city_data"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "city_data", sendEventWithResponse, domain, partCacheKey)
+		}()
+
+		// Worker 2: Stream General POIs with cache
+		go func() {
+			defer wg.Done()
+			prompt := getGeneralPOIPrompt(cityName)
+			partCacheKey := cacheKey + "_general_pois"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "general_pois", sendEventWithResponse, domain, partCacheKey)
+		}()
+
+		// Worker 3: Stream Personalized Itinerary with cache
+		go func() {
+			defer wg.Done()
+			prompt := getGeneralizedItineraryPrompt(cityName)
+			partCacheKey := cacheKey + "_itinerary"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "itinerary", sendEventWithResponse, domain, partCacheKey)
+		}()
+
+	case types.DomainAccommodation:
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			prompt := getGeneralAccommodationPrompt(cityName)
+			partCacheKey := cacheKey + "_hotels"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "hotels", sendEventWithResponse, domain, partCacheKey)
+		}()
+
+	case types.DomainDining:
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			prompt := getGeneralDiningPrompt(cityName)
+			partCacheKey := cacheKey + "_restaurants"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "restaurants", sendEventWithResponse, domain, partCacheKey)
+		}()
+
+	case types.DomainActivities:
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			prompt := getGeneralActivitiesPrompt(cityName)
+			partCacheKey := cacheKey + "_activities"
+			l.streamWorkerWithResponseAndCache(ctx, prompt, "activities", sendEventWithResponse, domain, partCacheKey)
+		}()
+
+	default:
+		sendEventWithResponse(types.StreamEvent{Type: types.EventTypeError, Error: fmt.Sprintf("unhandled domain: %s", domain)})
+		return fmt.Errorf("unhandled domain type: %s", domain)
+	}
+
+	// Step 7: Completion goroutine with sync.Once for channel closure
+	go func() {
+		wg.Wait()             // Wait for all workers to complete
+		if ctx.Err() == nil { // Only send completion event if context is still active
+			// Determine route type based on domain
+			var routeType string
+			var baseURL string
+			switch domain {
+			case types.DomainAccommodation:
+				routeType = "hotels"
+				baseURL = "/hotels"
+			case types.DomainDining:
+				routeType = "restaurants"
+				baseURL = "/restaurants"
+			case types.DomainActivities:
+				routeType = "activities"
+				baseURL = "/activities"
+			default:
+				routeType = "itinerary"
+				baseURL = "/itinerary"
+			}
+
+			l.sendEvent(ctx, eventCh, types.StreamEvent{
+				Type: types.EventTypeComplete,
+				Data: map[string]interface{}{"session_id": sessionID.String()},
+				Navigation: &types.NavigationData{
+					URL:       fmt.Sprintf("%s?sessionId=%s&cityName=%s&domain=%s", baseURL, sessionID.String(), url.QueryEscape(cityName), routeType),
+					RouteType: routeType,
+					QueryParams: map[string]string{
+						"sessionId": sessionID.String(),
+						"cityName":  cityName,
+						"domain":    routeType,
+					},
+				},
+			}, 3)
+		}
+		closeOnce.Do(func() {
+			close(eventCh) // Close the channel only once
+			l.logger.InfoContext(ctx, "Event channel closed by completion goroutine")
+		})
+	}()
+
+	// Step 8: Save interaction and process structured data asynchronously after completion
+	go func() {
+		wg.Wait() // Wait for all workers to complete
+
+		// Save interaction with complete response
+		asyncCtx := context.Background()
+
+		// Combine all responses into a single response text
+		var fullResponseBuilder strings.Builder
+		responsesMutex.Lock()
+		cityDataContent := ""
+		if responses["city_data"] != nil {
+			cityDataContent = responses["city_data"].String()
+		}
+		for partType, builder := range responses {
+			if builder != nil && builder.Len() > 0 {
+				fullResponseBuilder.WriteString(fmt.Sprintf("[%s]\n%s\n\n", partType, builder.String()))
+			}
+		}
+		responsesMutex.Unlock()
+
+		fullResponse := fullResponseBuilder.String()
+		if fullResponse == "" {
+			fullResponse = fmt.Sprintf("Processed %s request for %s", domain, cityName)
+		}
+
+		// Process and save city data if available
+		var cityID uuid.UUID
+		if cityDataContent != "" {
+			// Parse city data from the response
+			if parsedCityData, parseErr := l.parseCityDataFromResponse(asyncCtx, cityDataContent); parseErr == nil && parsedCityData != nil {
+				// Save city data to the cities table
+				if savedCityID, handleErr := l.HandleCityData(asyncCtx, *parsedCityData); handleErr != nil {
+					l.logger.WarnContext(asyncCtx, "Failed to save city data during unified stream processing",
+						slog.String("city", cityName), slog.Any("error", handleErr))
+				} else {
+					l.logger.InfoContext(asyncCtx, "Successfully saved city data during unified stream processing",
+						slog.String("city", cityName))
+					cityID = savedCityID
+				}
+			} else if parseErr != nil {
+				l.logger.WarnContext(asyncCtx, "Failed to parse city data from unified stream response",
+					slog.String("city", cityName), slog.Any("error", parseErr))
+			}
+		}
+
+		// If we don't have a cityID from the response, try to get it from the database
+		if cityID == uuid.Nil {
+			if existingCity, err := l.cityRepo.FindCityByNameAndCountry(asyncCtx, cityName, ""); err == nil && existingCity != nil {
+				cityID = existingCity.ID
+			} else {
+				l.logger.WarnContext(asyncCtx, "Could not find or save city data, skipping POI processing",
+					slog.String("city", cityName))
+				return
+			}
+		}
+
+		// Always try to process and save POI data regardless of domain
+		// since responses may contain POI data in different formats
+		l.ProcessAndSaveUnifiedResponseFree(asyncCtx, responses, cityID, sessionID, userLocation)
+
+		interaction := types.LlmInteraction{
+			ID:           uuid.New(),
+			SessionID:    sessionID,
 			CityName:     cityName,
 			Prompt:       fmt.Sprintf("Unified Chat Stream - Domain: %s, Message: %s", domain, cleanedMessage),
 			ResponseText: fullResponse,

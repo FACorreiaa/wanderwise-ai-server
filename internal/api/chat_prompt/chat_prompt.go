@@ -317,7 +317,7 @@ func getHotelsByPreferencesPrompt(city string, lat, lon float64, userPreferences
         - Number of Nights: %d
         - Number of Rooms: %d
         - Preferred Check-In Date: %s
-        - Preferred Check-Out Date: %s  
+        - Preferred Check-Out Date: %s
         - Distance: %0.2f km (if provided, otherwise use default radius of 5km)
         The result should be in the following JSON format:
         {
@@ -420,7 +420,7 @@ func generatedContinuedConversationPrompt(poi, city string) string {
         "cuisine_type": "string (for Restaurant)",
         "star_rating": "number (for Hotel/Hostel)"
     }
-    
+
     If the POI is not found, return: {"name": "", "latitude": 0, "longitude": 0, "category": "", "description_poi": ""}`,
 		poi, city)
 }
@@ -685,6 +685,30 @@ Respond with JSON:
 }`, cityName, basePreferences)
 }
 
+func getGeneralizedItineraryPrompt(cityName string) string {
+	return fmt.Sprintf(`
+You are a travel planning assistant. Create a personalized itinerary with a max of 5 results for %s with multi things to do and different activities.
+Respond with JSON:
+{
+    "itinerary_name": "Creative itinerary name",
+    "overall_description": "Detailed description (100-150 words)",
+    "points_of_interest": [
+        {
+            "name": "POI Name",
+            "latitude": <float>,
+            "longitude": <float>,
+            "category": "",
+            "description_poi": "",
+            "address": "",
+            "website": "",
+                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+,
+            "distance": <float>
+        }
+    ]
+}`, cityName)
+}
+
 func getAccommodationPrompt(cityName string, lat, lon float64, basePreferences string) string {
 	return fmt.Sprintf(`
 You are a hotel recommendation assistant. Find suitable accommodation in %s near coordinates %.4f, %.4f.
@@ -712,6 +736,33 @@ Respond with JSON:
         }
     ]
 }`, cityName, lat, lon, basePreferences, cityName)
+}
+
+func getGeneralAccommodationPrompt(cityName string) string {
+	return fmt.Sprintf(`
+You are a hotel recommendation assistant. Find a max of 5 suitable accommodation in %s.
+Respond with JSON:
+{
+    "hotels": [
+        {
+            "city": "%s",
+            "name": "Hotel Name",
+            "latitude": <float>,
+            "longitude": <float>,
+            "category": "Hotel|Hostel|Guesthouse|Apartment",
+            "description": "Description matching preferences",
+            "address": "",
+            "phone_number": null,
+            "website": null,
+                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)",
+            "price_range": null,
+            "rating": 0,
+            "tags": null,
+            "images": null,
+            "distance": <float>
+        }
+    ]
+}`, cityName, cityName)
 }
 
 func getDiningPrompt(cityName string, lat, lon float64, basePreferences string) string {
@@ -745,6 +796,37 @@ Respond with JSON:
 }`, cityName, lat, lon, basePreferences, cityName)
 }
 
+func getGeneralDiningPrompt(cityName string) string {
+	return fmt.Sprintf(`
+You are a restaurant recommendation assistant. Find a max of 5 dining options in %s.
+USER PREFERENCES:
+%s
+Respond with JSON:
+{
+    "restaurants": [
+        {
+            "city": "%s",
+            "name": "Restaurant Name",
+            "latitude": <float>,
+            "longitude": <float>,
+            "category": "Fine Dining|Casual Dining|Fast Food|Cafe|Bar",
+            "description": "Description matching preferences",
+            "address": "",
+            "website": "",
+            "phone_number": "",
+                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+,
+            "price_level": "$|$$|$$$|$$$$",
+            "cuisine_type": "",
+            "tags": [],
+            "images": [],
+            "rating": 0,
+            "distance": <float>
+        }
+    ]
+}`, cityName, cityName)
+}
+
 func getActivitiesPrompt(cityName string, lat, lon float64, basePreferences string) string {
 	return fmt.Sprintf(`
 You are an activity recommendation assistant. Find activities in %s near coordinates %.4f, %.4f.
@@ -772,4 +854,31 @@ Respond with JSON:
         }
     ]
 }`, cityName, lat, lon, basePreferences, cityName)
+}
+
+func getGeneralActivitiesPrompt(cityName string) string {
+	return fmt.Sprintf(`
+You are an activity recommendation assistant. Find a max of 5 activities in %s.
+Respond with JSON:
+{
+    "activities": [
+        {
+            "city": "%s",
+            "name": "Activity Name",
+            "latitude": <float>,
+            "longitude": <float>,
+            "category": "Museum|Outdoor Activity|Entertainment|Cultural|Sports",
+            "description": "Description matching preferences",
+            "address": "",
+            "website": "",
+                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+,
+            "price_range": "Free|$|$$|$$$",
+            "rating": 0,
+            "tags": [],
+            "images": [],
+            "distance": <float>
+        }
+    ]
+}`, cityName, cityName)
 }

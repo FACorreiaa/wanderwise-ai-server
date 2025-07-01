@@ -69,6 +69,7 @@ type LlmInteractiontService interface {
 	) error
 
 	ProcessUnifiedChatMessageStream(ctx context.Context, userID, profileID uuid.UUID, cityName, message string, userLocation *types.UserLocation, eventCh chan<- types.StreamEvent) error
+	ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityName, message string, userLocation *types.UserLocation, eventCh chan<- types.StreamEvent) error
 
 	// Chat session management
 	GetUserChatSessions(ctx context.Context, userID uuid.UUID) ([]types.ChatSession, error)
@@ -473,7 +474,7 @@ func (l *ServiceImpl) GeneratePersonalisedPOIWorkerWithSemantics(wg *sync.WaitGr
 // getPersonalizedPOIWithSemanticContext creates an enhanced prompt with semantic POI context
 func (l *ServiceImpl) getPersonalizedPOIWithSemanticContext(interestNames []string, cityName, tagsPromptPart, userPrefs string, semanticPOIs []types.POIDetailedInfo) string {
 	prompt := fmt.Sprintf(`
-        Generate a personalized trip itinerary for %s, tailored to user interests [%s]. 
+        Generate a personalized trip itinerary for %s, tailored to user interests [%s].
 
         **SEMANTIC CONTEXT - Consider these highly relevant POIs found via semantic search:**
         `, cityName, strings.Join(interestNames, ", "))
@@ -495,7 +496,7 @@ func (l *ServiceImpl) getPersonalizedPOIWithSemanticContext(interestNames []stri
         1. An itinerary name that reflects both user interests and semantic context.
         2. An overall description highlighting semantic relevance.
         3. A list of points of interest with name, category, coordinates, and detailed description.
-        Max points of interest allowed by tokens. 
+        Max points of interest allowed by tokens.
 
         **PRIORITIZATION:**
         - Highly weight POIs that align with the semantic context provided
@@ -1386,7 +1387,7 @@ func (l *ServiceImpl) getEnhancedPersonalizedPOIPrompt(cityName, enhancedPromptD
 		domainFocus = "Provide a balanced mix of attractions, dining, and activities based on all user preferences."
 	}
 
-	prompt := fmt.Sprintf(`You are a travel AI assistant creating a personalized itinerary for %s. 
+	prompt := fmt.Sprintf(`You are a travel AI assistant creating a personalized itinerary for %s.
 
 User Preferences and Filters:
 %s

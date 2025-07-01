@@ -57,6 +57,53 @@ func (l *ServiceImpl) ProcessAndSaveUnifiedResponse(
 	}
 }
 
+func (l *ServiceImpl) ProcessAndSaveUnifiedResponseFree(
+	ctx context.Context,
+	responses map[string]*strings.Builder,
+	cityID uuid.UUID,
+	llmInteractionID uuid.UUID,
+	userLocation *types.UserLocation,
+) {
+	l.logger.InfoContext(ctx, "Processing unified response for POI extraction",
+		slog.String("city_id", cityID.String()),
+		slog.Int("response_parts", len(responses)))
+
+	// Process general POIs if available
+	if poisContent, ok := responses["general_pois"]; ok && poisContent.Len() > 0 {
+		l.logger.InfoContext(ctx, "Processing general POIs from unified response",
+			slog.Int("content_length", poisContent.Len()))
+		l.handleGeneralPoisFromResponse(ctx, poisContent.String(), cityID)
+	}
+
+	// Process itinerary POIs if available
+	if itineraryContent, ok := responses["itinerary"]; ok && itineraryContent.Len() > 0 {
+		l.logger.InfoContext(ctx, "Processing itinerary POIs from unified response",
+			slog.Int("content_length", itineraryContent.Len()))
+		l.handleItineraryFromResponse(ctx, itineraryContent.String(), uuid.Nil, uuid.Nil, cityID, llmInteractionID, userLocation)
+	}
+
+	// Process activities POIs if available (for DomainActivities)
+	if activitiesContent, ok := responses["activities"]; ok && activitiesContent.Len() > 0 {
+		l.logger.InfoContext(ctx, "Processing activities POIs from unified response",
+			slog.Int("content_length", activitiesContent.Len()))
+		l.handleGeneralPoisFromResponse(ctx, activitiesContent.String(), cityID)
+	}
+
+	// Process hotel POIs if available (for DomainAccommodation)
+	if hotelsContent, ok := responses["hotels"]; ok && hotelsContent.Len() > 0 {
+		l.logger.InfoContext(ctx, "Processing hotels from unified response",
+			slog.Int("content_length", hotelsContent.Len()))
+		l.handleHotelsFromResponse(ctx, hotelsContent.String(), cityID, uuid.Nil, llmInteractionID)
+	}
+
+	// Process restaurant POIs if available (for DomainDining)
+	if restaurantsContent, ok := responses["restaurants"]; ok && restaurantsContent.Len() > 0 {
+		l.logger.InfoContext(ctx, "Processing restaurants from unified response",
+			slog.Int("content_length", restaurantsContent.Len()))
+		l.handleRestaurantsFromResponse(ctx, restaurantsContent.String(), cityID, uuid.Nil, llmInteractionID)
+	}
+}
+
 func (l *ServiceImpl) handleGeneralPoisFromResponse(ctx context.Context, content string, cityID uuid.UUID) {
 	var poiData struct {
 		PointsOfInterest []types.POIDetailedInfo `json:"points_of_interest"`
@@ -134,5 +181,3 @@ func (l *ServiceImpl) handleRestaurantsFromResponse(ctx context.Context, content
 	l.logger.InfoContext(ctx, "Saved restaurants from unified response",
 		slog.Int("restaurant_count", len(restaurantData.Restaurants)))
 }
-
-

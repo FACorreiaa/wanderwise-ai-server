@@ -316,6 +316,123 @@ func (h *HandlerImpl) ProcessUnifiedChatMessageStream(w http.ResponseWriter, r *
 	}
 }
 
+// ProcessUnifiedChatMessageStream handles unified chat requests with streaming
+func (h *HandlerImpl) ProcessUnifiedChatMessageStreamFree(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "ProcessUnifiedChatMessageStream", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/prompt-response/unified-chat/stream/free"),
+	))
+	defer span.End()
+
+	l := h.logger.With(slog.String("handler", "ProcessUnifiedChatMessageStream"))
+	l.DebugContext(ctx, "Processing unified chat message with streaming")
+
+	// Parse request body
+	var req struct {
+		Message      string              `json:"message"`
+		UserLocation *types.UserLocation `json:"user_location,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		l.ErrorContext(ctx, "Failed to decode request body", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid request body")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate required fields
+	if req.Message == "" {
+		l.ErrorContext(ctx, "Missing required fields", slog.String("message", req.Message))
+		span.SetStatus(codes.Error, "Missing required fields")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "message is required")
+		return
+	}
+
+	span.SetAttributes(
+		attribute.String("message", req.Message),
+	)
+
+	// Set up SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
+
+	// Create event channel
+	eventCh := make(chan types.StreamEvent, 100)
+
+	go func() {
+		l.InfoContext(ctx, "REST calling service with params",
+			slog.String("cityName", ""),
+			slog.String("message", req.Message))
+		err := h.llmInteractionService.ProcessUnifiedChatMessageStreamFree(
+			ctx, "", req.Message, req.UserLocation, eventCh,
+		)
+		if err != nil {
+			l.ErrorContext(ctx, "Failed to process unified chat message stream", slog.Any("error", err))
+			span.RecordError(err)
+
+			// Safely send error event, check if context is still active
+			select {
+			case eventCh <- types.StreamEvent{
+				Type:      types.EventTypeError,
+				Error:     err.Error(),
+				Timestamp: time.Now(),
+				EventID:   uuid.New().String(),
+			}:
+				// Event sent successfully
+			case <-ctx.Done():
+				// Context cancelled, don't send event
+				return
+			}
+		}
+	}()
+
+	// Set up flusher for real-time streaming
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		l.ErrorContext(ctx, "Response writer does not support flushing")
+		span.SetStatus(codes.Error, "Streaming not supported")
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Streaming not supported")
+		return
+	}
+
+	// Process events in real-time as they arrive
+	for {
+		select {
+		case event, ok := <-eventCh:
+			if !ok {
+				l.InfoContext(ctx, "Event channel closed, ending stream")
+				span.SetStatus(codes.Ok, "Stream completed")
+				return
+			}
+
+			eventData, err := json.Marshal(event)
+			if err != nil {
+				l.ErrorContext(ctx, "Failed to marshal event", slog.Any("error", err))
+				span.RecordError(err)
+				continue
+			}
+
+			fmt.Fprintf(w, "data: %s\n\n", eventData)
+			flusher.Flush() // Send immediately to client
+
+			if event.Type == types.EventTypeComplete || event.Type == types.EventTypeError {
+				l.InfoContext(ctx, "Stream completed", slog.String("eventType", event.Type))
+				span.SetStatus(codes.Ok, "Stream completed")
+				return
+			}
+
+		case <-r.Context().Done():
+			l.InfoContext(ctx, "Client disconnected")
+			span.SetStatus(codes.Ok, "Client disconnected")
+			return
+		}
+	}
+}
+
 func (h *HandlerImpl) ContinueChatSessionHandlerStream(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sessionIDStr := chi.URLParam(r, "sessionID")

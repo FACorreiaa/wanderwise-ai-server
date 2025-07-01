@@ -68,6 +68,7 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Get("/auth/google", cfg.AuthHandler.LoginWithGoogle)
 			r.Get("/auth/google/callback", cfg.AuthHandler.GoogleCallback)
 			r.Post("/auth/refresh", cfg.AuthHandler.RefreshToken) // Refresh tokens via HttpOnly cookie
+			r.Post("/llm/chat/stream/free", cfg.LLMInteractionHandler.ProcessUnifiedChatMessageStreamFree)
 
 			// Public city routes
 			r.Mount("/cities", CityRoutes(cfg.CityHandler))
