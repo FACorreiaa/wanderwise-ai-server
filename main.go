@@ -7,6 +7,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	_ "net/http/pprof" // Import pprof
 	"os"
 	"os/signal"
 	"syscall"
@@ -66,6 +67,38 @@ func init() {
 	)
 }
 
+// setupPprof initializes the pprof profiling server
+func setupPprof(logger *slog.Logger) {
+	pprofEnabled := os.Getenv("ENABLE_PPROF")
+	if pprofEnabled == "true" || pprofEnabled == "1" {
+		pprofPort := os.Getenv("PPROF_PORT")
+		if pprofPort == "" {
+			pprofPort = "6060"
+		}
+		
+		logger.Info("🔬 Starting pprof server", slog.String("port", pprofPort))
+		logger.Info("📊 pprof endpoints available:", 
+			slog.String("index", fmt.Sprintf("http://localhost:%s/debug/pprof/", pprofPort)),
+			slog.String("heap", fmt.Sprintf("http://localhost:%s/debug/pprof/heap", pprofPort)),
+			slog.String("goroutine", fmt.Sprintf("http://localhost:%s/debug/pprof/goroutine", pprofPort)),
+			slog.String("profile", fmt.Sprintf("http://localhost:%s/debug/pprof/profile", pprofPort)),
+			slog.String("trace", fmt.Sprintf("http://localhost:%s/debug/pprof/trace", pprofPort)))
+		
+		go func() {
+			pprofServer := &http.Server{
+				Addr:    fmt.Sprintf(":%s", pprofPort),
+				Handler: http.DefaultServeMux, // pprof registers itself on DefaultServeMux
+			}
+			
+			if err := pprofServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("pprof server failed", slog.Any("error", err))
+			}
+		}()
+	} else {
+		logger.Info("pprof disabled. Set ENABLE_PPROF=true to enable profiling")
+	}
+}
+
 func main() {
 	// --- Initial Loading ---
 	err := godotenv.Load()
@@ -100,6 +133,9 @@ func main() {
 	}()
 
 	metrics.InitAppMetrics()
+
+	// --- pprof Setup ---
+	setupPprof(logger)
 
 	// --- Application Context & Shutdown ---
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

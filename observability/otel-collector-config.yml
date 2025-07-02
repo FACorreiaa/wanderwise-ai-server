@@ -1,0 +1,111 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'go-ai-poi-api'
+          static_configs:
+            - targets: ['api:9090']
+          scrape_interval: 15s
+          metrics_path: /metrics
+        
+        - job_name: 'otel-collector'
+          static_configs:
+            - targets: ['localhost:8889']
+          scrape_interval: 15s
+        
+        - job_name: 'node-exporter'
+          static_configs:
+            - targets: ['node-exporter:9100']
+          scrape_interval: 15s
+        
+        - job_name: 'cadvisor'
+          static_configs:
+            - targets: ['cadvisor:8080']
+          scrape_interval: 15s
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+  
+  memory_limiter:
+    limit_mib: 512
+  
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 2s
+    override: false
+
+exporters:
+  # Prometheus metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: otel
+    const_labels:
+      service: go-ai-poi
+  
+  # Prometheus remote write
+  prometheusremotewrite:
+    endpoint: http://prometheus:9090/api/v1/write
+    tls:
+      insecure: true
+  
+  # Tempo tracing
+  otlp/tempo:
+    endpoint: http://tempo:4317
+    tls:
+      insecure: true
+  
+  # Jaeger tracing
+  jaeger:
+    endpoint: jaeger:14250
+    tls:
+      insecure: true
+  
+  # Loki logging
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    tenant_id: ""
+  
+  # Debug logging
+  logging:
+    loglevel: debug
+  
+  # File export for debugging
+  file:
+    path: /tmp/otel-data.json
+
+service:
+  pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [prometheus, prometheusremotewrite, logging]
+    
+    # Traces pipeline
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlp/tempo, jaeger, logging]
+    
+    # Logs pipeline
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [loki, logging]
+  
+  extensions: []
+  
+  telemetry:
+    logs:
+      level: "debug"
+    metrics:
+      address: 0.0.0.0:8889

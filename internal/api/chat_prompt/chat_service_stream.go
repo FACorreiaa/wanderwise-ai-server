@@ -1731,10 +1731,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			}
 		}
 
-		// Always try to process and save POI data regardless of domain
-		// since responses may contain POI data in different formats
-		l.ProcessAndSaveUnifiedResponse(asyncCtx, responses, userID, profileID, cityID, sessionID, userLocation)
-
+		// Create and save interaction first to get proper llmInteractionID
 		interaction := types.LlmInteraction{
 			ID:           uuid.New(),
 			SessionID:    sessionID,
@@ -1747,9 +1744,15 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			LatencyMs:    int(time.Since(startTime).Milliseconds()),
 			Timestamp:    startTime,
 		}
-		if _, err := l.llmInteractionRepo.SaveInteraction(asyncCtx, interaction); err != nil {
+		savedInteractionID, err := l.llmInteractionRepo.SaveInteraction(asyncCtx, interaction)
+		if err != nil {
 			l.logger.ErrorContext(asyncCtx, "Failed to save stream interaction", slog.Any("error", err))
+			return
 		}
+
+		// Always try to process and save POI data regardless of domain
+		// since responses may contain POI data in different formats
+		l.ProcessAndSaveUnifiedResponse(asyncCtx, responses, userID, profileID, cityID, savedInteractionID, userLocation)
 	}()
 
 	span.SetStatus(codes.Ok, "Unified chat stream processed successfully")
@@ -2012,10 +2015,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			}
 		}
 
-		// Always try to process and save POI data regardless of domain
-		// since responses may contain POI data in different formats
-		l.ProcessAndSaveUnifiedResponseFree(asyncCtx, responses, cityID, sessionID, userLocation)
-
+		// Create and save interaction first to get proper llmInteractionID
 		interaction := types.LlmInteraction{
 			ID:           uuid.New(),
 			SessionID:    sessionID,
@@ -2026,9 +2026,15 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			LatencyMs:    int(time.Since(startTime).Milliseconds()),
 			Timestamp:    startTime,
 		}
-		if _, err := l.llmInteractionRepo.SaveInteraction(asyncCtx, interaction); err != nil {
+		savedInteractionID, err := l.llmInteractionRepo.SaveInteraction(asyncCtx, interaction)
+		if err != nil {
 			l.logger.ErrorContext(asyncCtx, "Failed to save stream interaction", slog.Any("error", err))
+			return
 		}
+
+		// Always try to process and save POI data regardless of domain
+		// since responses may contain POI data in different formats
+		l.ProcessAndSaveUnifiedResponseFree(asyncCtx, responses, cityID, savedInteractionID, userLocation)
 	}()
 
 	span.SetStatus(codes.Ok, "Unified chat stream processed successfully")

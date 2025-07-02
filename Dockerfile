@@ -26,7 +26,7 @@ RUN go install github.com/air-verse/air@latest
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-EXPOSE 8080
+EXPOSE 8000 8080 9090 6060
 CMD ["air"]
 
 #FROM golang:1.23-alpine AS debug
