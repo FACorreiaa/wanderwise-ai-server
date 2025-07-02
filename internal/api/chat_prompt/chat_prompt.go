@@ -824,7 +824,7 @@ Respond with JSON:
             "distance": <float>
         }
     ]
-}`, cityName, cityName)
+}`, cityName)
 }
 
 func getActivitiesPrompt(cityName string, lat, lon float64, basePreferences string) string {
