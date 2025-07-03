@@ -99,7 +99,12 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Mount("/pois", POIRoutes(cfg.PointsOfInterestHandler)) // Points of Interest routes
 			r.Mount("/itineraries", ItineraryListRoutes(cfg.ItineraryListHandler))
 			r.Mount("/recents", RecentsRoutes(cfg.RecentsHandler)) // Recent interactions routes
-			r.Mount("/statistics", StatisticsProtectedRoutes(cfg.StatisticsHandler)) // Protected statistics routes
+			
+			// Mount protected statistics routes with different paths to avoid conflicts
+			r.Route("/user-statistics", func(r chi.Router) {
+				r.Get("/poi/detailed", cfg.StatisticsHandler.GetDetailedPOIStatisticsHandler)
+				r.Get("/landing-page", cfg.StatisticsHandler.GetLandingPageStatisticsHandler)
+			})
 
 			// r.Mount("/pois", POIRoutes(cfg.HandlerImpl))   // Example for POI routes
 		})
@@ -279,12 +284,3 @@ func StatisticsRoutes(h *statistics.HandlerImpl) http.Handler {
 	return r
 }
 
-func StatisticsProtectedRoutes(h *statistics.HandlerImpl) http.Handler {
-	r := chi.NewRouter()
-
-	// Protected statistics endpoints (authentication required)
-	r.Get("/poi/detailed", h.GetDetailedPOIStatisticsHandler) // GET http://localhost:8000/api/v1/statistics/poi/detailed
-	r.Get("/landing-page", h.GetLandingPageStatisticsHandler) // GET http://localhost:8000/api/v1/statistics/landing-page
-
-	return r
-}

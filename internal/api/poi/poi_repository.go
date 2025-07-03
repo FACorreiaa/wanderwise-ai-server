@@ -267,10 +267,10 @@ func (r *RepositoryImpl) CheckPoiExists(ctx context.Context, poiID uuid.UUID) (b
 
 func (r *RepositoryImpl) CheckLlmPoiExists(ctx context.Context, llmPoiID uuid.UUID) (bool, error) {
 	var exists bool
-	query := `SELECT EXISTS(SELECT 1 FROM llm_suggested_pois WHERE id = $1)`
+	query := `SELECT EXISTS(SELECT 1 FROM llm_poi WHERE id = $1)`
 	err := r.pgpool.QueryRow(ctx, query, llmPoiID).Scan(&exists)
 	if err != nil {
-		return false, fmt.Errorf("failed to query llm_suggested_pois: %w", err)
+		return false, fmt.Errorf("failed to query llm_poi: %w", err)
 	}
 	return exists, nil
 }
@@ -2266,8 +2266,11 @@ func (l *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDet
 	imagesJSON, _ := json.Marshal(poiData.Images)
 	openingHoursJSON, _ := json.Marshal(poiData.OpeningHours)
 	
-	// Use LLM interaction ID directly
-	llmInteractionID := poiData.LlmInteractionID
+	// Use LLM interaction ID directly, but handle invalid UUIDs
+	var llmInteractionID *uuid.UUID
+	if poiData.LlmInteractionID != uuid.Nil {
+		llmInteractionID = &poiData.LlmInteractionID
+	}
 	
 	now := time.Now()
 	_, err := l.pgpool.Exec(ctx, query,
