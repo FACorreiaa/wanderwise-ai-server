@@ -231,3 +231,46 @@ func (h *HandlerImpl) GetDetailedPOIStatisticsHandler(w http.ResponseWriter, r *
 
 	api.WriteJSONResponse(w, r, http.StatusOK, stats)
 }
+
+// GetLandingPageStatisticsHandler handles HTTP requests for user-specific landing page statistics
+func (h *HandlerImpl) GetLandingPageStatisticsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("StatisticsHandler").Start(r.Context(), "GetLandingPageStatistics")
+	defer span.End()
+
+	// Get user ID from auth context
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		h.logger.ErrorContext(ctx, "User ID not found in context")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	fmt.Printf("userID %v \n", userID)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "Invalid user ID format", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+
+	span.SetAttributes(semconv.EnduserIDKey.String(userID.String()))
+
+	stats, err := h.service.GetLandingPageStatistics(ctx, userID)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "Failed to get landing page statistics", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to get landing page statistics")
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to retrieve landing page statistics")
+		return
+	}
+
+	span.SetAttributes(
+		attribute.Int("stats.saved_places", stats.SavedPlaces),
+		attribute.Int("stats.itineraries", stats.Itineraries),
+		attribute.Int("stats.cities_explored", stats.CitiesExplored),
+		attribute.Int("stats.discoveries", stats.Discoveries),
+	)
+	span.SetStatus(codes.Ok, "Landing page statistics retrieved successfully")
+
+	api.WriteJSONResponse(w, r, http.StatusOK, stats)
+}

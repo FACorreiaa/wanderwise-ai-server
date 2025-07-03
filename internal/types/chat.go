@@ -140,12 +140,14 @@ type PaginatedUserItinerariesResponse struct {
 }
 
 type BookmarkRequest struct {
-	LlmInteractionID uuid.UUID `json:"llm_interaction_id"`
-	PrimaryCityID    uuid.UUID `json:"primary_city_id"`
-	Title            string    `json:"title"`
-	Description      *string   `json:"description"` // Optional
-	Tags             []string  `json:"tags"`        // Optional
-	IsPublic         *bool     `json:"is_public"`   // Optional
+	LlmInteractionID *uuid.UUID `json:"llm_interaction_id,omitempty"` // Optional - if provided, use this specific interaction
+	SessionID        *uuid.UUID `json:"session_id,omitempty"`         // Optional - if provided, use latest interaction from this session
+	PrimaryCityID    *uuid.UUID `json:"primary_city_id,omitempty"`    // Optional - if provided, use this
+	PrimaryCityName  string     `json:"primary_city_name"`            // City name to look up if PrimaryCityID not provided
+	Title            string     `json:"title"`
+	Description      *string    `json:"description"` // Optional
+	Tags             []string   `json:"tags"`        // Optional
+	IsPublic         *bool      `json:"is_public"`   // Optional
 }
 
 type ChatMessage struct {

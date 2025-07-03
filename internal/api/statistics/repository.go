@@ -16,6 +16,8 @@ type Repository interface {
 	GetMainPageStatistics(ctx context.Context, userID uuid.UUID) (*types.MainPageStatistics, error)
 	// GetDetailedPOIStatistics retrieves detailed POI statistics by type.
 	GetDetailedPOIStatistics(ctx context.Context, userID uuid.UUID) (*types.DetailedPOIStatistics, error)
+	// LandingPageStatistics retrieves user-specific landing page statistics.
+	LandingPageStatistics(ctx context.Context, userID uuid.UUID) (*types.LandingPageUserStats, error)
 }
 
 type RepositoryImpl struct {
@@ -42,7 +44,7 @@ func (r *RepositoryImpl) GetMainPageStatistics(ctx context.Context, userID uuid.
 	query := `
 		WITH user_unique_pois AS (
 			-- POIs from poi_details
-			SELECT DISTINCT 
+			SELECT DISTINCT
 				pd.name,
 				pd.latitude,
 				pd.longitude,
@@ -50,10 +52,10 @@ func (r *RepositoryImpl) GetMainPageStatistics(ctx context.Context, userID uuid.
 			FROM poi_details pd
 			JOIN llm_interactions li ON pd.llm_interaction_id = li.id
 			WHERE li.user_id = $1
-			
+
 			UNION
-			
-			-- POIs from llm_suggested_pois  
+
+			-- POIs from llm_suggested_pois
 			SELECT DISTINCT
 				lsp.name,
 				lsp.latitude,
@@ -61,9 +63,9 @@ func (r *RepositoryImpl) GetMainPageStatistics(ctx context.Context, userID uuid.
 				'llm_suggested_pois' as source_table
 			FROM llm_suggested_pois lsp
 			WHERE lsp.user_id = $1
-			
+
 			UNION
-			
+
 			-- Hotels
 			SELECT DISTINCT
 				hd.name,
@@ -73,9 +75,9 @@ func (r *RepositoryImpl) GetMainPageStatistics(ctx context.Context, userID uuid.
 			FROM hotel_details hd
 			JOIN llm_interactions li ON hd.llm_interaction_id = li.id
 			WHERE li.user_id = $1
-			
+
 			UNION
-			
+
 			-- Restaurants
 			SELECT DISTINCT
 				rd.name,
@@ -133,16 +135,16 @@ func (r *RepositoryImpl) GetAggregateStatistics(ctx context.Context) (*types.Mai
 	query := `
 		WITH all_unique_pois AS (
 			-- POIs from poi_details (all users)
-			SELECT DISTINCT 
+			SELECT DISTINCT
 				pd.name,
 				pd.latitude,
 				pd.longitude,
 				'poi_details' as source_table
 			FROM poi_details pd
 			JOIN llm_interactions li ON pd.llm_interaction_id = li.id
-			
+
 			UNION
-			
+
 			-- POIs from llm_suggested_pois (all users)
 			SELECT DISTINCT
 				lsp.name,
@@ -150,9 +152,9 @@ func (r *RepositoryImpl) GetAggregateStatistics(ctx context.Context) (*types.Mai
 				lsp.longitude,
 				'llm_suggested_pois' as source_table
 			FROM llm_suggested_pois lsp
-			
+
 			UNION
-			
+
 			-- POIs from hotel_details (all users)
 			SELECT DISTINCT
 				hd.name,
@@ -161,9 +163,9 @@ func (r *RepositoryImpl) GetAggregateStatistics(ctx context.Context) (*types.Mai
 				'hotel_details' as source_table
 			FROM hotel_details hd
 			JOIN llm_interactions li ON hd.llm_interaction_id = li.id
-			
+
 			UNION
-			
+
 			-- POIs from restaurant_details (all users)
 			SELECT DISTINCT
 				rd.name,
@@ -222,31 +224,31 @@ func (r *RepositoryImpl) GetDetailedPOIStatistics(ctx context.Context, userID uu
 			FROM poi_details pd
 			JOIN llm_interactions li ON pd.llm_interaction_id = li.id
 			WHERE li.user_id = $1
-			
+
 			UNION ALL
-			
-			-- POIs from llm_suggested_pois  
+
+			-- POIs from llm_suggested_pois
 			SELECT 'suggested_poi' as poi_type, COUNT(*) as count
 			FROM llm_suggested_pois lsp
 			WHERE lsp.user_id = $1
-			
+
 			UNION ALL
-			
+
 			-- Hotels
 			SELECT 'hotel' as poi_type, COUNT(*) as count
 			FROM hotel_details hd
 			JOIN llm_interactions li ON hd.llm_interaction_id = li.id
 			WHERE li.user_id = $1
-			
+
 			UNION ALL
-			
+
 			-- Restaurants
 			SELECT 'restaurant' as poi_type, COUNT(*) as count
 			FROM restaurant_details rd
 			JOIN llm_interactions li ON rd.llm_interaction_id = li.id
 			WHERE li.user_id = $1
 		)
-		SELECT 
+		SELECT
 			COALESCE(SUM(CASE WHEN poi_type = 'general_poi' THEN count END), 0) as general_pois,
 			COALESCE(SUM(CASE WHEN poi_type = 'suggested_poi' THEN count END), 0) as suggested_pois,
 			COALESCE(SUM(CASE WHEN poi_type = 'hotel' THEN count END), 0) as hotels,
@@ -276,6 +278,40 @@ func (r *RepositoryImpl) GetDetailedPOIStatistics(ctx context.Context, userID uu
 		slog.Int64("hotels", stats.Hotels),
 		slog.Int64("restaurants", stats.Restaurants),
 		slog.Int64("total_pois", stats.TotalPOIs))
+
+	return &stats, nil
+}
+
+func (r *RepositoryImpl) LandingPageStatistics(ctx context.Context, userID uuid.UUID) (*types.LandingPageUserStats, error) {
+	r.logger.InfoContext(ctx, "Getting LandingPageStatistics")
+
+	query := `
+	SELECT
+    (SELECT COUNT(id) FROM user_favorite_pois WHERE user_id = $1) AS saved_places,
+    (SELECT COUNT(id) FROM itineraries WHERE user_id = $1) AS itineraries,
+    (SELECT COUNT(DISTINCT city_id) FROM itineraries WHERE user_id = $1) AS cities_explored,
+    (SELECT COUNT(id) FROM chat_sessions WHERE user_id = $1) AS discoveries;
+	`
+
+	var stats types.LandingPageUserStats
+
+	err := r.pgpool.QueryRow(ctx, query, userID).Scan(
+		&stats.SavedPlaces,
+		&stats.Itineraries,
+		&stats.CitiesExplored,
+		&stats.Discoveries,
+	)
+
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to get detailed POI statistics", slog.Any("error", err))
+		return nil, err
+	}
+
+	r.logger.InfoContext(ctx, "Successfully retrieved user Stats",
+		slog.Int("saved_places", stats.SavedPlaces),
+		slog.Int("itineraries", stats.Itineraries),
+		slog.Int("cities_explored", stats.CitiesExplored),
+		slog.Int("discoveries", stats.Discoveries))
 
 	return &stats, nil
 }

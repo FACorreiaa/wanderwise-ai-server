@@ -99,6 +99,7 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Mount("/pois", POIRoutes(cfg.PointsOfInterestHandler)) // Points of Interest routes
 			r.Mount("/itineraries", ItineraryListRoutes(cfg.ItineraryListHandler))
 			r.Mount("/recents", RecentsRoutes(cfg.RecentsHandler)) // Recent interactions routes
+			r.Mount("/statistics", StatisticsProtectedRoutes(cfg.StatisticsHandler)) // Protected statistics routes
 
 			// r.Mount("/pois", POIRoutes(cfg.HandlerImpl))   // Example for POI routes
 		})
@@ -271,9 +272,19 @@ func RecentsRoutes(h *recents.HandlerImpl) http.Handler {
 func StatisticsRoutes(h *statistics.HandlerImpl) http.Handler {
 	r := chi.NewRouter()
 
-	//.Get("/main-page", h.GetMainPageStatisticsHandler)       // GET http://localhost:8000/api/v1/statistics/main-page
+	// Public statistics endpoints (no authentication required)
+	r.Get("/main-page", h.GetMainPageStatisticsHandler)       // GET http://localhost:8000/api/v1/statistics/main-page
 	r.Get("/main-page/stream", h.StatisticsSSEHandler)        // GET http://localhost:8000/api/v1/statistics/main-page/stream (SSE)
+
+	return r
+}
+
+func StatisticsProtectedRoutes(h *statistics.HandlerImpl) http.Handler {
+	r := chi.NewRouter()
+
+	// Protected statistics endpoints (authentication required)
 	r.Get("/poi/detailed", h.GetDetailedPOIStatisticsHandler) // GET http://localhost:8000/api/v1/statistics/poi/detailed
+	r.Get("/landing-page", h.GetLandingPageStatisticsHandler) // GET http://localhost:8000/api/v1/statistics/landing-page
 
 	return r
 }

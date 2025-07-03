@@ -13,6 +13,7 @@ var _ Service = (*ServiceImpl)(nil)
 type Service interface {
 	GetMainPageStatistics(ctx context.Context, userID uuid.UUID) (*types.MainPageStatistics, error)
 	GetDetailedPOIStatistics(ctx context.Context, userID uuid.UUID) (*types.DetailedPOIStatistics, error)
+	GetLandingPageStatistics(ctx context.Context, userID uuid.UUID) (*types.LandingPageUserStats, error)
 }
 
 type ServiceImpl struct {
@@ -48,5 +49,17 @@ func (s *ServiceImpl) GetDetailedPOIStatistics(ctx context.Context, userID uuid.
 	}
 
 	l.InfoContext(ctx, "Successfully retrieved detailed POI statistics")
+	return stats, nil
+}
+
+func (s *ServiceImpl) GetLandingPageStatistics(ctx context.Context, userID uuid.UUID) (*types.LandingPageUserStats, error) {
+	l := s.logger.With(slog.String("method", "GetLandingPageStatistics"))
+	stats, err := s.repo.LandingPageStatistics(ctx, userID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get landing page statistics", "error", err)
+		return nil, err
+	}
+
+	l.InfoContext(ctx, "Successfully retrieved landing page statistics")
 	return stats, nil
 }

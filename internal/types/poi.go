@@ -117,6 +117,7 @@ func (p *POIDetailedInfo) UnmarshalJSON(data []byte) error {
 }
 
 type AddPoiRequest struct {
-	ID       string `json:"poi_id"`
-	IsLlmPoi bool   `json:"is_llm_poi"`
+	ID       string           `json:"poi_id"`
+	IsLlmPoi bool             `json:"is_llm_poi"`
+	POIData  *POIDetailedInfo `json:"poi_data,omitempty"` // Optional POI data for creating new POIs
 }

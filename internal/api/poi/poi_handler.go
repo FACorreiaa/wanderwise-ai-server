@@ -118,7 +118,22 @@ func (h *HandlerImpl) AddPoiToFavourites(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	savedItinerary, err := h.poiService.AddPoiToFavourites(ctx, userID, poiID, true)
+	// Handle POI data creation if provided and POI doesn't exist
+	var actualPoiID uuid.UUID
+	if req.POIData != nil && req.IsLlmPoi {
+		// Try to find POI by name first, if not found, create it
+		existingPOI, err := h.poiService.FindOrCreateLLMPOI(ctx, req.POIData)
+		if err != nil {
+			l.ErrorContext(ctx, "Failed to find or create LLM POI", slog.Any("error", err))
+			api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to process POI: %s", err.Error()))
+			return
+		}
+		actualPoiID = existingPOI
+	} else {
+		actualPoiID = poiID
+	}
+
+	savedItinerary, err := h.poiService.AddPoiToFavourites(ctx, userID, actualPoiID, req.IsLlmPoi)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to save itinerary", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to save itinerary: %s", err.Error()))
@@ -181,7 +196,7 @@ func (h *HandlerImpl) RemovePoiFromFavourites(w http.ResponseWriter, r *http.Req
 		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid POI ID format")
 		return
 	}
-	if err := h.poiService.RemovePoiFromFavourites(ctx, userID, poiID, true); err != nil {
+	if err := h.poiService.RemovePoiFromFavourites(ctx, userID, poiID, req.IsLlmPoi); err != nil {
 		l.ErrorContext(ctx, "Failed to remove POI from favourites", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to remove POI from favourites: %s", err.Error()))
 		return

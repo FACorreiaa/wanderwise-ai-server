@@ -39,6 +39,8 @@ type Repository interface {
 	RemoveLLMPoiFromFavourite(ctx context.Context, userID, llmPoiID uuid.UUID) error
 	CheckPoiExists(ctx context.Context, poiID uuid.UUID) (bool, error)
 	CheckLlmPoiExists(ctx context.Context, llmPoiID uuid.UUID) (bool, error)
+	FindLLMPOIByNameAndCity(ctx context.Context, name, city string) (uuid.UUID, error)
+	CreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error)
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
 
@@ -2214,4 +2216,91 @@ func (l *RepositoryImpl) CalculateDistancePostGIS(ctx context.Context, userLat, 
 		return 0, fmt.Errorf("failed to calculate distance with PostGIS: %w", err)
 	}
 	return distance, nil
+}
+
+// FindLLMPOIByNameAndCity finds an existing LLM POI by name and city
+func (l *RepositoryImpl) FindLLMPOIByNameAndCity(ctx context.Context, name, city string) (uuid.UUID, error) {
+	ctx, span := otel.Tracer("POIRepository").Start(ctx, "FindLLMPOIByNameAndCity")
+	defer span.End()
+
+	query := `
+		SELECT id 
+		FROM llm_poi 
+		WHERE LOWER(name) = LOWER($1) AND LOWER(city) = LOWER($2)
+		LIMIT 1
+	`
+	
+	var id uuid.UUID
+	err := l.pgpool.QueryRow(ctx, query, name, city).Scan(&id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return uuid.Nil, fmt.Errorf("LLM POI not found")
+		}
+		return uuid.Nil, fmt.Errorf("failed to find LLM POI: %w", err)
+	}
+	
+	span.SetAttributes(attribute.String("poi.name", name), attribute.String("poi.city", city))
+	return id, nil
+}
+
+// CreateLLMPOI creates a new LLM POI in the database
+func (l *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error) {
+	ctx, span := otel.Tracer("POIRepository").Start(ctx, "CreateLLMPOI")
+	defer span.End()
+
+	newID := uuid.New()
+	
+	query := `
+		INSERT INTO llm_poi (
+			id, llm_interaction_id, city, name, latitude, longitude, 
+			category, description, address, website, phone_number, 
+			opening_hours, price_level, tags, images, rating,
+			created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+		)
+	`
+	
+	// Convert slices to JSON for storage
+	tagsJSON, _ := json.Marshal(poiData.Tags)
+	imagesJSON, _ := json.Marshal(poiData.Images)
+	openingHoursJSON, _ := json.Marshal(poiData.OpeningHours)
+	
+	// Use LLM interaction ID directly
+	llmInteractionID := poiData.LlmInteractionID
+	
+	now := time.Now()
+	_, err := l.pgpool.Exec(ctx, query,
+		newID,
+		llmInteractionID,
+		poiData.City,
+		poiData.Name,
+		poiData.Latitude,
+		poiData.Longitude,
+		poiData.Category,
+		poiData.Description,
+		poiData.Address,
+		poiData.Website,
+		poiData.PhoneNumber,
+		openingHoursJSON,
+		poiData.PriceLevel,
+		tagsJSON,
+		imagesJSON,
+		poiData.Rating,
+		now,
+		now,
+	)
+	
+	if err != nil {
+		span.RecordError(err)
+		return uuid.Nil, fmt.Errorf("failed to create LLM POI: %w", err)
+	}
+	
+	span.SetAttributes(
+		attribute.String("poi.id", newID.String()),
+		attribute.String("poi.name", poiData.Name),
+		attribute.String("poi.city", poiData.City),
+	)
+	
+	return newID, nil
 }

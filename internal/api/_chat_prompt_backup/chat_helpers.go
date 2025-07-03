@@ -1,4 +1,4 @@
-package llmChat
+package llmChatBackup
 
 import (
 	"fmt"
@@ -69,11 +69,11 @@ func cleanJSONResponse(response string) string {
 
 	// Extract the JSON portion
 	jsonPortion := response[firstBrace : lastValidBrace+1]
-	
+
 	// Remove any remaining backticks that might be within the JSON content
 	// This handles cases where the AI includes markdown formatting within JSON strings
 	jsonPortion = strings.ReplaceAll(jsonPortion, "`", "")
-	
+
 	return strings.TrimSpace(jsonPortion)
 }
 

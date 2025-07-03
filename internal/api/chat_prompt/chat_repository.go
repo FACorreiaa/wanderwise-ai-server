@@ -31,6 +31,7 @@ type Repository interface {
 	AddChatToBookmark(ctx context.Context, itinerary *types.UserSavedItinerary) (uuid.UUID, error)
 	RemoveChatFromBookmark(ctx context.Context, userID, itineraryID uuid.UUID) error
 	GetInteractionByID(ctx context.Context, interactionID uuid.UUID) (*types.LlmInteraction, error)
+	GetLatestInteractionBySessionID(ctx context.Context, sessionID uuid.UUID) (*types.LlmInteraction, error)
 
 	// Session methods
 	CreateSession(ctx context.Context, session types.ChatSession) error
@@ -504,6 +505,89 @@ func (r *RepositoryImpl) GetInteractionByID(ctx context.Context, interactionID u
 		attribute.Int("latency.ms", interaction.LatencyMs),
 	)
 	span.SetStatus(codes.Ok, "Interaction retrieved successfully")
+	return &interaction, nil
+}
+
+func (r *RepositoryImpl) GetLatestInteractionBySessionID(ctx context.Context, sessionID uuid.UUID) (*types.LlmInteraction, error) {
+	ctx, span := otel.Tracer("LlmInteractionRepo").Start(ctx, "GetLatestInteractionBySessionID", trace.WithAttributes(
+		semconv.DBSystemPostgreSQL,
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.sql.table", "llm_interactions"),
+		attribute.String("session.id", sessionID.String()),
+	))
+	defer span.End()
+
+	query := `
+		SELECT 
+			id, user_id, session_id, prompt, response, model_name, latency_ms,
+			prompt_tokens, completion_tokens, total_tokens,
+			request_payload, response_payload, city_name, created_at
+		FROM llm_interactions
+		WHERE session_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+	row := r.pgpool.QueryRow(ctx, query, sessionID)
+
+	var interaction types.LlmInteraction
+
+	nullPromptTokens := sql.NullInt64{}
+	nullCompletionTokens := sql.NullInt64{}
+	nullTotalTokens := sql.NullInt64{}
+	nullRequestPayload := sql.NullString{}
+	nullResponsePayload := sql.NullString{}
+	nullCityName := sql.NullString{}
+	nullSessionID := uuid.NullUUID{}
+
+	if err := row.Scan(
+		&interaction.ID,
+		&interaction.UserID,
+		&nullSessionID,
+		&interaction.Prompt,
+		&interaction.ResponseText,
+		&interaction.ModelUsed,
+		&interaction.LatencyMs,
+		&nullPromptTokens,
+		&nullCompletionTokens,
+		&nullTotalTokens,
+		&nullRequestPayload,
+		&nullResponsePayload,
+		&nullCityName,
+		&interaction.Timestamp,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			span.SetStatus(codes.Error, "No interactions found for session")
+			return nil, fmt.Errorf("no interactions found for session ID %s", sessionID)
+		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to scan interaction row")
+		return nil, fmt.Errorf("failed to scan llm_interaction row: %w", err)
+	}
+
+	// Handle nullable fields
+	if nullSessionID.Valid {
+		interaction.SessionID = nullSessionID.UUID
+	}
+	if nullCityName.Valid {
+		interaction.CityName = nullCityName.String
+	}
+	if nullPromptTokens.Valid {
+		interaction.PromptTokens = int(nullPromptTokens.Int64)
+	}
+	if nullCompletionTokens.Valid {
+		interaction.CompletionTokens = int(nullCompletionTokens.Int64)
+	}
+	if nullTotalTokens.Valid {
+		interaction.TotalTokens = int(nullTotalTokens.Int64)
+	}
+
+	span.SetAttributes(
+		attribute.String("user.id", interaction.UserID.String()),
+		attribute.String("session.id", interaction.SessionID.String()),
+		attribute.String("model.used", interaction.ModelUsed),
+		attribute.Int("latency.ms", interaction.LatencyMs),
+	)
+	span.SetStatus(codes.Ok, "Latest interaction retrieved successfully")
 	return &interaction, nil
 }
 

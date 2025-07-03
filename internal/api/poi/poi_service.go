@@ -47,6 +47,9 @@ type Service interface {
 
 	// Discover Service
 	GetGeneralPOIByDistance(ctx context.Context, userID uuid.UUID, lat, lon, distance float64) ([]types.POIDetailedInfo, error) //, categoryFilter string
+	
+	// LLM POI management
+	FindOrCreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error)
 }
 
 type ServiceImpl struct {
@@ -748,4 +751,34 @@ func (l *ServiceImpl) getGeneralPOIByDistance(wg *sync.WaitGroup,
 		Prompt:     prompt,
 		Response:   cleanTxt,
 	}
+}
+
+// FindOrCreateLLMPOI finds an existing LLM POI by name or creates a new one
+func (s *ServiceImpl) FindOrCreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error) {
+	ctx, span := otel.Tracer("POIService").Start(ctx, "FindOrCreateLLMPOI")
+	defer span.End()
+
+	if poiData == nil {
+		return uuid.Nil, fmt.Errorf("POI data cannot be nil")
+	}
+
+	// First, try to find existing POI by name and city
+	existingID, err := s.poiRepository.FindLLMPOIByNameAndCity(ctx, poiData.Name, poiData.City)
+	if err == nil && existingID != uuid.Nil {
+		s.logger.InfoContext(ctx, "Found existing LLM POI", "name", poiData.Name, "id", existingID)
+		span.SetAttributes(attribute.String("operation", "found_existing"))
+		return existingID, nil
+	}
+
+	// If not found, create new LLM POI
+	newID, err := s.poiRepository.CreateLLMPOI(ctx, poiData)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "Failed to create LLM POI", "error", err, "name", poiData.Name)
+		span.RecordError(err)
+		return uuid.Nil, fmt.Errorf("failed to create LLM POI: %w", err)
+	}
+
+	s.logger.InfoContext(ctx, "Created new LLM POI", "name", poiData.Name, "id", newID)
+	span.SetAttributes(attribute.String("operation", "created_new"))
+	return newID, nil
 }

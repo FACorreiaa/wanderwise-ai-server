@@ -1,4 +1,4 @@
-package llmChat
+package llmChatBackup
 
 import (
 	"context"
@@ -557,11 +557,7 @@ func (m *MockTagsRepo) GetTagsForProfile(ctx context.Context, profileID uuid.UUI
 
 // Helper to setup service with mocks for each test
 
-
-
-
 // Example for GetItinerary (simpler, as it's mostly a direct repo call)
-
 
 // Add similar unit tests for:
 // - GetItineraries
@@ -574,5 +570,3 @@ func (m *MockTagsRepo) GetTagsForProfile(ctx context.Context, profileID uuid.UUI
 
 // --- Integration Tests for llmInteraction (Example for GetPOIDetailedInfosResponse) ---
 // These would require a running database instance and potentially a configured AI client.
-
-

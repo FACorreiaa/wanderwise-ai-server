@@ -117,7 +117,8 @@ func NewContainer(cfg *config.Config, logger *slog.Logger) (*Container, error) {
 
 	// Initialize statistics components
 	statisticsRepository := statistics.NewRepository(logger, pool)
-	statisticsHandler := statistics.NewHandler(statisticsRepository, logger, cfg.JWT)
+	statisticsService := statistics.NewService(statisticsRepository, logger)
+	statisticsHandler := statistics.NewHandler(statisticsService, logger, cfg.JWT)
 
 	return &Container{
 		Config:                    cfg,

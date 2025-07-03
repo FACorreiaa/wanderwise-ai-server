@@ -12,5 +12,9 @@ testifylint:
 testifylint-fix:
 	testifylint -fix ./...
 
-static: 
+static:
 	staticcheck ./...
+
+lint: ## Runs linter for .go files
+	golangci-lint run --config .golangci.yml
+	@echo "Go lint passed successfully"

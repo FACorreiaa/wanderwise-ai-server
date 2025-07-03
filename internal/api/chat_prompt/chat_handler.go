@@ -82,9 +82,9 @@ func (HandlerImpl *HandlerImpl) SaveItenerary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if req.LlmInteractionID == uuid.Nil {
-		l.ErrorContext(ctx, "LlmInteractionID is required", slog.Any("itinerary", req))
-		api.ErrorResponse(w, r, http.StatusBadRequest, "LlmInteractionID is required")
+	if req.LlmInteractionID == nil && req.SessionID == nil {
+		l.ErrorContext(ctx, "Either LlmInteractionID or SessionID is required", slog.Any("request", req))
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Either llm_interaction_id or session_id is required")
 		return
 	}
 

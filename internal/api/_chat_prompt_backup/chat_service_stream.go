@@ -1,4 +1,4 @@
-package llmChat
+package llmChatBackup
 
 import (
 	"context"
@@ -1750,7 +1750,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			return
 		}
 
-		l.logger.InfoContext(asyncCtx, "Stream interaction saved successfully", 
+		l.logger.InfoContext(asyncCtx, "Stream interaction saved successfully",
 			slog.String("saved_interaction_id", savedInteractionID.String()),
 			slog.String("original_session_id", sessionID.String()))
 
@@ -2036,7 +2036,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			return
 		}
 
-		l.logger.InfoContext(asyncCtx, "Stream interaction saved successfully (free)", 
+		l.logger.InfoContext(asyncCtx, "Stream interaction saved successfully (free)",
 			slog.String("saved_interaction_id", savedInteractionID.String()),
 			slog.String("original_session_id", sessionID.String()))
 
