@@ -256,6 +256,27 @@ func (r *RepositoryImpl) SaveLlmSuggestedPOIsBatch(ctx context.Context, pois []t
 	))
 	defer span.End()
 
+	r.logger.InfoContext(ctx, "SaveLlmSuggestedPOIsBatch - About to save batch",
+		slog.String("llm_interaction_id", llmInteractionID.String()),
+		slog.String("user_id", userID.String()),
+		slog.String("city_id", cityID.String()),
+		slog.Int("poi_count", len(pois)))
+
+	// Verify the llm_interaction_id exists before trying to insert POIs
+	var exists bool
+	checkQuery := `SELECT EXISTS(SELECT 1 FROM llm_interactions WHERE id = $1)`
+	err := r.pgpool.QueryRow(ctx, checkQuery, llmInteractionID).Scan(&exists)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to check if llm_interaction exists", slog.Any("error", err))
+		return fmt.Errorf("failed to check if llm_interaction exists: %w", err)
+	}
+	if !exists {
+		r.logger.ErrorContext(ctx, "llm_interaction_id does not exist in database", 
+			slog.String("llm_interaction_id", llmInteractionID.String()))
+		return fmt.Errorf("llm_interaction_id %s does not exist in database", llmInteractionID.String())
+	}
+	r.logger.InfoContext(ctx, "llm_interaction_id exists, proceeding with POI batch insert")
+
 	batch := &pgx.Batch{}
 	query := `
         INSERT INTO llm_suggested_pois 

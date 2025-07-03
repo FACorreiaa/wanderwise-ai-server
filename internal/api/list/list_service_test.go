@@ -25,12 +25,12 @@ func (m *MockListRepository) CreateList(ctx context.Context, list types.List) er
 	return args.Error(0)
 }
 
-func (m *MockListRepository) GetList(ctx context.Context, listID uuid.UUID) (*types.List, error) {
+func (m *MockListRepository) GetList(ctx context.Context, listID uuid.UUID) (types.List, error) {
 	args := m.Called(ctx, listID)
 	if args.Get(0) == nil {
-		return nil, args.Error(1)
+		return types.List{}, args.Error(1)
 	}
-	return args.Get(0).(*types.List), args.Error(1)
+	return args.Get(0).(types.List), args.Error(1)
 }
 
 func (m *MockListRepository) UpdateList(ctx context.Context, list types.List) error {
@@ -235,13 +235,14 @@ func TestServiceImpl_GetListDetails(t *testing.T) {
 	}
 
 	t.Run("success - owner access", func(t *testing.T) {
-		mockRepo.On("GetList", mock.Anything, listID).Return(*list, nil).Once()
+				
+		mockRepo.On("GetList", mock.Anything, listID).Return(list, nil).Once()
 		mockRepo.On("GetListItems", mock.Anything, listID).Return(items, nil).Once()
 
 		result, err := service.GetListDetails(ctx, listID, userID)
 		
 		require.NoError(t, err)
-		assert.Equal(t, *list, result.List)
+		assert.Equal(t, list, result.List)
 		assert.Equal(t, items, result.Items)
 		assert.Len(t, result.Items, 2)
 		mockRepo.AssertExpectations(t)

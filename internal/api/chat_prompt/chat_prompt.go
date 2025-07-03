@@ -799,8 +799,6 @@ Respond with JSON:
 func getGeneralDiningPrompt(cityName string) string {
 	return fmt.Sprintf(`
 You are a restaurant recommendation assistant. Find a max of 5 dining options in %s.
-USER PREFERENCES:
-%s
 Respond with JSON:
 {
     "restaurants": [
@@ -816,7 +814,7 @@ Respond with JSON:
             "phone_number": "",
                 		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
 ,
-            "price_level": "$|$$|$$$|$$$$",
+            "price_level": "$|$|$$|$$",
             "cuisine_type": "",
             "tags": [],
             "images": [],
@@ -824,7 +822,7 @@ Respond with JSON:
             "distance": <float>
         }
     ]
-}`, cityName)
+}`, cityName, cityName)
 }
 
 func getActivitiesPrompt(cityName string, lat, lon float64, basePreferences string) string {

@@ -1750,6 +1750,10 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			return
 		}
 
+		l.logger.InfoContext(asyncCtx, "Stream interaction saved successfully", 
+			slog.String("saved_interaction_id", savedInteractionID.String()),
+			slog.String("original_session_id", sessionID.String()))
+
 		// Always try to process and save POI data regardless of domain
 		// since responses may contain POI data in different formats
 		l.ProcessAndSaveUnifiedResponse(asyncCtx, responses, userID, profileID, cityID, savedInteractionID, userLocation)
@@ -2031,6 +2035,10 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			l.logger.ErrorContext(asyncCtx, "Failed to save stream interaction", slog.Any("error", err))
 			return
 		}
+
+		l.logger.InfoContext(asyncCtx, "Stream interaction saved successfully (free)", 
+			slog.String("saved_interaction_id", savedInteractionID.String()),
+			slog.String("original_session_id", sessionID.String()))
 
 		// Always try to process and save POI data regardless of domain
 		// since responses may contain POI data in different formats

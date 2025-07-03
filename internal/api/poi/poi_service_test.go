@@ -139,8 +139,23 @@ func (m *MockPOIRepository) AddLLMPoiToFavourite(ctx context.Context, userID uui
 	return args.Get(0).(uuid.UUID), args.Error(1)
 }
 
+func (m *MockPOIRepository) CheckPoiExists(ctx context.Context, poiID uuid.UUID) (bool, error) {
+	args := m.Called(ctx, poiID)
+	return args.Get(0).(bool), args.Error(1)
+}
+
 func (m *MockPOIRepository) RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID) error {
 	args := m.Called(ctx, poiID, userID)
+	return args.Error(0)
+}
+
+func (m *MockPOIRepository) CheckLlmPoiExists(ctx context.Context, llmPoiID uuid.UUID) (bool, error) {
+	args := m.Called(ctx, llmPoiID)
+	return args.Get(0).(bool), args.Error(1)
+}
+
+func (m *MockPOIRepository) RemoveLLMPoiFromFavourite(ctx context.Context, userID, llmPoiID uuid.UUID) error {
+	args := m.Called(ctx, userID, llmPoiID)
 	return args.Error(0)
 }
 
@@ -276,6 +291,14 @@ func (m *MockPOIRepository) GetItineraries(ctx context.Context, userID uuid.UUID
 	return args.Get(0).([]types.UserSavedItinerary), args.Get(1).(int), args.Error(2)
 }
 
+func (m *MockPOIRepository) GetItineraryByUserIDAndCityID(ctx context.Context, userID, cityID uuid.UUID) (*types.UserSavedItinerary, error) {
+	args := m.Called(ctx, userID, cityID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*types.UserSavedItinerary), args.Error(1)
+}
+
 func (m *MockPOIRepository) UpdateItinerary(ctx context.Context, userID uuid.UUID, itineraryID uuid.UUID, updates types.UpdateItineraryRequest) (*types.UserSavedItinerary, error) {
 	args := m.Called(ctx, userID, itineraryID, updates)
 	if args.Get(0) == nil {
@@ -309,8 +332,8 @@ func (m *MockPOIRepository) CalculateDistancePostGIS(ctx context.Context, userLa
 	return args.Get(0).(float64), args.Error(1)
 }
 
-func (m *MockPOIRepository) SaveLlmPoisToDatabase(ctx context.Context, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse, llmInteractionID uuid.UUID) error {
-	args := m.Called(ctx, pois, genAIResponse, llmInteractionID)
+func (m *MockPOIRepository) SaveLlmPoisToDatabase(ctx context.Context, userID uuid.UUID, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse, llmInteractionID uuid.UUID) error {
+	args := m.Called(ctx, userID, pois, genAIResponse, llmInteractionID)
 	return args.Error(0)
 }
 

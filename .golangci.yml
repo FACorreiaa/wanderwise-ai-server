@@ -5,6 +5,8 @@ linters:
   enable:
     #- misspell
     - revive
+    - godot
+    - godox
     #- unparam
   settings:
     errcheck:
@@ -15,10 +17,15 @@ linters:
       rules:
         - name: blank-imports
         - name: unused-parameter
+    godox:
+      keywords:
+        - TODO
+        - FIXME
+        - BUG
     staticcheck:
-      checks:
-        - all
-        - -ST1000
+        checks:
+          - all
+          - -ST1000
   exclusions:
     generated: lax
     presets:
