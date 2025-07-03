@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ func SetupPprof() {
 		fmt.Println("   • http://localhost:6060/debug/pprof/goroutine")
 		fmt.Println("   • http://localhost:6060/debug/pprof/profile")
 		fmt.Println("   • http://localhost:6060/debug/pprof/trace")
-		
+
 		go func() {
 			http.ListenAndServe(":6060", nil)
 		}()

@@ -68,7 +68,7 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Get("/auth/google", cfg.AuthHandler.LoginWithGoogle)
 			r.Get("/auth/google/callback", cfg.AuthHandler.GoogleCallback)
 			r.Post("/auth/refresh", cfg.AuthHandler.RefreshToken) // Refresh tokens via HttpOnly cookie
-			r.Post("/llm/chat/stream/free", cfg.LLMInteractionHandler.ProcessUnifiedChatMessageStreamFree)
+			r.Post("/llm/chat/stream/free", cfg.LLMInteractionHandler.StartChatMessageStreamFree)
 
 			// Public city routes
 			r.Mount("/cities", CityRoutes(cfg.CityHandler))
@@ -186,23 +186,22 @@ func LLMInteractionRoutes(HandlerImpl *llmChat.HandlerImpl) http.Handler {
 	r := chi.NewRouter()
 
 	// Unified chat endpoints - more specific routes first
-	r.Post("/prompt-response/chat/sessions/stream/{profileID}", HandlerImpl.ProcessUnifiedChatMessageStream)
-	r.Post("/prompt-response/chat/sessions/{sessionID}/continue", HandlerImpl.ContinueChatSessionHandlerStream) // POST http://localhost:8000/api/v1/llm/prompt-response/chat/sessions/{sessionID}/continue
+	r.Post("/prompt-response/chat/sessions/stream/{profileID}", HandlerImpl.StartChatMessageStream)
+	r.Post("/prompt-response/chat/sessions/{sessionID}/continue", HandlerImpl.ContinueChatSessionStream) // POST http://localhost:8000/api/v1/llm/prompt-response/chat/sessions/{sessionID}/continue
 
 	// Chat session management
 	r.Get("/prompt-response/chat/sessions/user/{profileID}", HandlerImpl.GetUserChatSessions)
 
 	// LLM interaction routes
-	r.Get("/prompt-response/poi/details", HandlerImpl.GetPOIDetails)                    // GET http://localhost:8000/api/v1/llm/prompt-response/{interactionID}
-	r.Post("/prompt-response/bookmark", HandlerImpl.SaveItenerary)                      // POST http://localhost:8000/api/v1/llm/prompt-response
-	r.Delete("/prompt-response/bookmark/{itineraryID}", HandlerImpl.RemoveItenerary)    // DELETE http://localhost:8000/api/v1/llm/bookmark/{bookmarkID}
-	r.Get("/prompt-response/city/hotel/preferences", HandlerImpl.GetHotelsByPreference) // GET http://localhost:8000/api/v1/pois/city/hotel/preferences
-	r.Get("/prompt-response/city/hotel/nearby", HandlerImpl.GetHotelsNearby)            // GET http://localhost:8000/api/v1/pois/city/restaurant/preferences
-	r.Get("/prompt-response/city/hotel/{hotelID}", HandlerImpl.GetHotelByID)
-	r.Get("/prompt-response/city/restaurants/preferences", HandlerImpl.GetRestaurantsByPreferences)
-	r.Get("/prompt-response/city/restaurants/nearby", HandlerImpl.GetRestaurantsNearby)
-	// TODO save on the db
-	r.Get("/prompt-response/city/restaurants/{restaurantID}", HandlerImpl.GetRestaurantDetails) // GET http://localhost:8000/api/v1/pois/city/poi/nearby
+	r.Get("/prompt-response/poi/details", HandlerImpl.GetPOIDetails)                 // GET http://localhost:8000/api/v1/llm/prompt-response/{interactionID}
+	r.Post("/prompt-response/bookmark", HandlerImpl.SaveItenerary)                   // POST http://localhost:8000/api/v1/llm/prompt-response
+	r.Delete("/prompt-response/bookmark/{itineraryID}", HandlerImpl.RemoveItenerary) // DELETE http://localhost:8000/api/v1/llm/bookmark/{bookmarkID}
+	// r.Get("/prompt-response/city/hotel/preferences", HandlerImpl.GetHotelsByPreference) // GET http://localhost:8000/api/v1/pois/city/hotel/preferences
+	// r.Get("/prompt-response/city/hotel/nearby", HandlerImpl.GetHotelsNearby)            // GET http://localhost:8000/api/v1/pois/city/restaurant/preferences
+	// r.Get("/prompt-response/city/hotel/{hotelID}", HandlerImpl.GetHotelByID)
+	// r.Get("/prompt-response/city/restaurants/preferences", HandlerImpl.GetRestaurantsByPreferences)
+	// r.Get("/prompt-response/city/restaurants/nearby", HandlerImpl.GetRestaurantsNearby)
+	// r.Get("/prompt-response/city/restaurants/{restaurantID}", HandlerImpl.GetRestaurantDetails) // GET http://localhost:8000/api/v1/pois/city/poi/nearby
 
 	return r
 }
