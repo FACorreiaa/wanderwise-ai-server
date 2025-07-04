@@ -1,0 +1,448 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go AI POI Server - Dependency Graph</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: #d4d4d4;
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #graph-container {
+            flex-grow: 1;
+            position: relative;
+        }
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+        .node {
+            cursor: pointer;
+        }
+        .node-label {
+            font-size: 12px;
+            fill: #d4d4d4;
+            pointer-events: none;
+            text-anchor: middle;
+        }
+        .link {
+            stroke: #555;
+            stroke-opacity: 0.6;
+        }
+        .controls {
+            padding: 10px;
+            background-color: #252526;
+            border-bottom: 1px solid #333;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .controls button, .controls input, .controls select {
+            background-color: #3c3c3c;
+            color: #d4d4d4;
+            border: 1px solid #555;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .controls button:hover {
+            background-color: #4c4c4c;
+        }
+        .controls .active {
+            background-color: #0e639c;
+            border-color: #1c7ab5;
+        }
+        #tooltip {
+            position: absolute;
+            background-color: #252526;
+            border: 1px solid #555;
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            max-width: 400px;
+            font-size: 12px;
+        }
+        #breadcrumb {
+            padding: 5px 10px;
+            font-size: 14px;
+        }
+        #breadcrumb a {
+            color: #569cd6;
+            text-decoration: none;
+        }
+        #breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        #stats {
+            padding: 5px 10px;
+            font-size: 12px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+<div class="controls">
+    <div>
+        <strong>Levels:</strong>
+        <button id="level1-btn" class="level-btn active">System Overview</button>
+        <button id="level2-btn" class="level-btn">Module View</button>
+        <button id="level3-btn" class="level-btn">Full Graph</button>
+    </div>
+    <input type="text" id="search" placeholder="Search nodes... (/)">
+    <select id="filter-category">
+        <option value="all">All Categories</option>
+    </select>
+    <button id="reset-btn">Reset (R)</button>
+</div>
+<div id="breadcrumb"></div>
+<div id="stats"></div>
+<div id="graph-container">
+    <div id="tooltip"></div>
+</div>
+
+<script>
+const graphData = {
+    "nodes": [
+        {"id": "main", "path": "main.go", "category": "Backend", "lines": 100, "deps": ["github.com/FACorreiaa/go-poi-au-suggestions/config", "github.com/FACorreiaa/go-poi-au-suggestions/internal/container", "github.com/go-chi/chi/v5", "log/slog"]},
+        {"id": "config", "path": "config/config.go", "category": "Core", "lines": 50, "deps": ["github.com/spf13/viper", "time"]},
+        {"id": "container", "path": "internal/container/container.go", "category": "Core", "lines": 80, "deps": ["github.com/FACorreiaa/go-poi-au-suggestions/config", "github.com/FACorreiaa/go-poi-au-suggestions/app/db", "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/auth", "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/poi"]},
+        {"id": "db", "path": "app/db/db.go", "category": "Database", "lines": 120, "deps": ["context", "embed", "fmt", "log/slog", "github.com/jackc/pgx/v5/pgxpool"]},
+        {"id": "router", "path": "internal/router/router.go", "category": "Backend", "lines": 150, "deps": ["github.com/go-chi/chi/v5", "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/auth", "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/poi"]},
+        {"id": "auth_handler", "path": "internal/api/auth/auth_handler.go", "category": "Backend", "lines": 200, "deps": ["net/http", "github.com/FACorreiaa/go-poi-au-suggestions/internal/types", "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/auth/service"]},
+        {"id": "auth_service", "path": "internal/api/auth/auth_service.go", "category": "Core", "lines": 180, "deps": ["context", "github.com/FACorreiaa/go-poi-au-suggestions/internal/types", "github.com/golang-jwt/jwt/v5", "golang.org/x/crypto/bcrypt"]},
+        {"id": "auth_repo", "path": "internal/api/auth/auth_repository.go", "category": "Database", "lines": 160, "deps": ["context", "github.com/jackc/pgx/v5/pgxpool", "github.com/FACorreiaa/go-poi-au-suggestions/internal/types"]},
+        {"id": "poi_handler", "path": "internal/api/poi/poi_handler.go", "category": "Backend", "lines": 220, "deps": ["net/http", "github.com/FACorreiaa/go-poi-au-suggestions/internal/types", "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/poi/service"]},
+        {"id": "poi_service", "path": "internal/api/poi/poi_service.go", "category": "Core", "lines": 250, "deps": ["context", "github.com/FACorreiaa/go-poi-au-suggestions/internal/types", "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"]},
+        {"id": "poi_repo", "path": "internal/api/poi/poi_repository.go", "category": "Database", "lines": 280, "deps": ["context", "github.com/jackc/pgx/v5/pgxpool", "github.com/FACorreiaa/go-poi-au-suggestions/internal/types"]},
+        {"id": "llm_chat_handler", "path": "internal/api/llmchat/chat_handler.go", "category": "Backend", "lines": 180, "deps": ["net/http", "github.com/FACorreiaa/go-poi-au-suggestions/internal/types", "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/llmchat/service"]},
+        {"id": "llm_chat_service", "path": "internal/api/llmchat/chat_service.go", "category": "Core", "lines": 300, "deps": ["context", "github.com/FACorreiaa/go-poi-au-suggestions/internal/types", "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"]},
+        {"id": "gen_ai_service", "path": "internal/api/generative_ai/chat_service.go", "category": "Core", "lines": 100, "deps": ["google.golang.org/genai", "context"]},
+        {"id": "types_user", "path": "internal/types/user.go", "category": "Core", "lines": 30, "deps": ["github.com/google/uuid", "time"]},
+        {"id": "types_poi", "path": "internal/types/poi.go", "category": "Core", "lines": 40, "deps": ["github.com/google/uuid", "time"]},
+        {"id": "types_chat", "path": "internal/types/chat.go", "category": "Core", "lines": 50, "deps": ["github.com/google/uuid", "time"]},
+        {"id": "chi", "path": "github.com/go-chi/chi/v5", "category": "External", "lines": 0, "deps": []},
+        {"id": "viper", "path": "github.com/spf13/viper", "category": "External", "lines": 0, "deps": []},
+        {"id": "pgxpool", "path": "github.com/jackc/pgx/v5/pgxpool", "category": "External", "lines": 0, "deps": []},
+        {"id": "jwt", "path": "github.com/golang-jwt/jwt/v5", "category": "External", "lines": 0, "deps": []},
+        {"id": "bcrypt", "path": "golang.org/x/crypto/bcrypt", "category": "External", "lines": 0, "deps": []},
+        {"id": "genai", "path": "google.golang.org/genai", "category": "External", "lines": 0, "deps": []},
+        {"id": "std_context", "path": "context", "category": "External", "lines": 0, "deps": []},
+        {"id": "std_http", "path": "net/http", "category": "External", "lines": 0, "deps": []},
+        {"id": "std_slog", "path": "log/slog", "category": "External", "lines": 0, "deps": []},
+        {"id": "std_fmt", "path": "fmt", "category": "External", "lines": 0, "deps": []},
+        {"id": "std_time", "path": "time", "category": "External", "lines": 0, "deps": []},
+        {"id": "std_embed", "path": "embed", "category": "External", "lines": 0, "deps": []}
+    ],
+    "links": [
+        {"source": "main", "target": "config"},
+        {"source": "main", "target": "container"},
+        {"source": "main", "target": "chi"},
+        {"source": "main", "target": "std_slog"},
+        {"source": "container", "target": "config"},
+        {"source": "container", "target": "db"},
+        {"source": "container", "target": "auth_handler"},
+        {"source": "container", "target": "poi_handler"},
+        {"source": "router", "target": "chi"},
+        {"source": "router", "target": "auth_handler"},
+        {"source": "router", "target": "poi_handler"},
+        {"source": "auth_handler", "target": "std_http"},
+        {"source": "auth_handler", "target": "types_user"},
+        {"source": "auth_handler", "target": "auth_service"},
+        {"source": "auth_service", "target": "std_context"},
+        {"source": "auth_service", "target": "types_user"},
+        {"source": "auth_service", "target": "jwt"},
+        {"source": "auth_service", "target": "bcrypt"},
+        {"source": "auth_service", "target": "auth_repo"},
+        {"source": "auth_repo", "target": "std_context"},
+        {"source": "auth_repo", "target": "pgxpool"},
+        {"source": "auth_repo", "target": "types_user"},
+        {"source": "poi_handler", "target": "std_http"},
+        {"source": "poi_handler", "target": "types_poi"},
+        {"source": "poi_handler", "target": "poi_service"},
+        {"source": "poi_service", "target": "std_context"},
+        {"source": "poi_service", "target": "types_poi"},
+        {"source": "poi_service", "target": "gen_ai_service"},
+        {"source": "poi_service", "target": "poi_repo"},
+        {"source": "poi_repo", "target": "std_context"},
+        {"source": "poi_repo", "target": "pgxpool"},
+        {"source": "poi_repo", "target": "types_poi"},
+        {"source": "llm_chat_handler", "target": "std_http"},
+        {"source": "llm_chat_handler", "target": "types_chat"},
+        {"source": "llm_chat_handler", "target": "llm_chat_service"},
+        {"source": "llm_chat_service", "target": "std_context"},
+        {"source": "llm_chat_service", "target": "types_chat"},
+        {"source": "llm_chat_service", "target": "gen_ai_service"},
+        {"source": "gen_ai_service", "target": "genai"},
+        {"source": "gen_ai_service", "target": "std_context"},
+        {"source": "db", "target": "std_context"},
+        {"source": "db", "target": "std_embed"},
+        {"source": "db", "target": "std_fmt"},
+        {"source": "db", "target": "std_slog"},
+        {"source": "db", "target": "pgxpool"}
+    ]
+};
+
+// Process data for different levels
+const { nodes, links } = graphData;
+const nodeMap = new Map(nodes.map(n => [n.id, n]));
+
+// Calculate dependents
+nodes.forEach(n => n.dependents = 0);
+links.forEach(l => {
+    const targetNode = nodeMap.get(l.target);
+    if (targetNode) {
+        targetNode.dependents = (targetNode.dependents || 0) + 1;
+    }
+});
+
+const categories = [...new Set(nodes.map(n => n.category))];
+const filterCategory = d3.select("#filter-category");
+categories.forEach(c => {
+    filterCategory.append("option").attr("value", c).text(c);
+});
+
+const colorScale = d3.scaleOrdinal(d3.schemeCategory10).domain(categories);
+
+let currentLevel = 1;
+let currentNodes = [];
+let currentLinks = [];
+
+const width = window.innerWidth;
+const height = window.innerHeight - d3.select('.controls').node().offsetHeight - 20;
+
+const svg = d3.select("#graph-container").append("svg")
+    .attr("width", width)
+    .attr("height", height)
+    .call(d3.zoom().on("zoom", (event) => {
+        g.attr("transform", event.transform);
+    }));
+
+const g = svg.append("g");
+const tooltip = d3.select("#tooltip");
+
+let simulation = d3.forceSimulation()
+    .force("link", d3.forceLink().id(d => d.id).distance(100))
+    .force("charge", d3.forceManyBody().strength(-300))
+    .force("center", d3.forceCenter(width / 2, height / 2))
+    .force("x", d3.forceX(width / 2).strength(0.1))
+    .force("y", d3.forceY(height / 2).strength(0.1));
+
+function drawGraph() {
+    g.selectAll("*").remove();
+
+    let link = g.append("g")
+        .attr("class", "links")
+        .selectAll("line")
+        .data(currentLinks)
+        .enter().append("line")
+        .attr("class", "link");
+
+    let node = g.append("g")
+        .attr("class", "nodes")
+        .selectAll("g")
+        .data(currentNodes)
+        .enter().append("g")
+        .attr("class", "node")
+        .call(drag(simulation));
+
+    node.append("circle")
+        .attr("r", d => d.radius || 10)
+        .attr("fill", d => colorScale(d.category));
+
+    node.append("text")
+        .attr("class", "node-label")
+        .attr("dy", d => (d.radius || 10) + 12)
+        .text(d => d.label || d.id);
+
+    node.on("mouseover", (event, d) => {
+        tooltip.transition().duration(200).style("opacity", .9);
+        tooltip.html(`<strong>Path:</strong> ${d.path || d.id}<br>
+                      <strong>Category:</strong> ${d.category}<br>
+                      <strong>Lines:</strong> ${d.lines || 'N/A'}<br>
+                      <strong>Dependencies:</strong> ${d.deps.length}<br>
+                      <strong>Dependents:</strong> ${d.dependents}`)
+            .style("left", (event.pageX + 5) + "px")
+            .style("top", (event.pageY - 28) + "px");
+    })
+    .on("mouseout", () => {
+        tooltip.transition().duration(500).style("opacity", 0);
+    });
+
+    simulation.nodes(currentNodes).on("tick", ticked);
+    simulation.force("link").links(currentLinks);
+    simulation.alpha(1).restart();
+
+    function ticked() {
+        link
+            .attr("x1", d => d.source.x)
+            .attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x)
+            .attr("y2", d => d.target.y);
+        node
+            .attr("transform", d => `translate(${d.x},${d.y})`);
+    }
+}
+
+function drag(simulation) {
+    function dragstarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+    }
+    function dragged(event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+    }
+    function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+    }
+    return d3.drag()
+        .on("start", dragstarted)
+        .on("drag", dragged)
+        .on("end", dragended);
+}
+
+function setLevel(level) {
+    currentLevel = level;
+    d3.selectAll('.level-btn').classed('active', false);
+    d3.select(`#level${level}-btn`).classed('active', true);
+    updateGraphForLevel();
+}
+
+function updateGraphForLevel() {
+    if (currentLevel === 1) {
+        const systemOverview = {};
+        nodes.forEach(node => {
+            const subsystem = node.path.split('/')[0];
+            if (!systemOverview[subsystem]) {
+                systemOverview[subsystem] = { id: subsystem, category: node.category, files: 0, lines: 0, deps: new Set() };
+            }
+            systemOverview[subsystem].files++;
+            systemOverview[subsystem].lines += node.lines;
+        });
+        
+        currentNodes = Object.values(systemOverview).map(s => ({...s, radius: 20 + Math.log(s.files + 1) * 5, label: s.id}));
+        
+        const systemLinks = new Map();
+        links.forEach(link => {
+            const sourceNode = nodeMap.get(link.source);
+            const targetNode = nodeMap.get(link.target);
+            if (sourceNode && targetNode) {
+                const sourceSubsystem = sourceNode.path.split('/')[0];
+                const targetSubsystem = targetNode.path.split('/')[0];
+                if (sourceSubsystem !== targetSubsystem) {
+                    const key = `${sourceSubsystem}->${targetSubsystem}`;
+                    systemLinks.set(key, { source: sourceSubsystem, target: targetSubsystem });
+                }
+            }
+        });
+        currentLinks = Array.from(systemLinks.values());
+
+    } else if (currentLevel === 2) {
+        // Module view: ~30-50 most important modules
+        const sortedNodes = [...nodes].sort((a, b) => {
+            const scoreA = (a.dependents * 3) + (a.lines / 100);
+            const scoreB = (b.dependents * 3) + (b.lines / 100);
+            return scoreB - scoreA;
+        });
+        
+        currentNodes = sortedNodes.slice(0, 40).map(n => ({...n, radius: 5 + Math.sqrt(n.dependents * 2 + n.lines / 50), label: n.id}));
+        const currentNodeIds = new Set(currentNodes.map(n => n.id));
+        
+        currentLinks = links.filter(l => currentNodeIds.has(l.source) && currentNodeIds.has(l.target));
+
+    } else { // Level 3
+        currentNodes = nodes.map(n => ({...n, radius: 5 + Math.sqrt(n.dependents), label: n.id}));
+        currentLinks = links;
+    }
+    
+    filterAndDraw();
+}
+
+function filterAndDraw() {
+    const category = d3.select("#filter-category").property("value");
+    const searchTerm = d3.select("#search").property("value").toLowerCase();
+
+    let filteredNodes = currentNodes;
+    if (category !== 'all') {
+        filteredNodes = filteredNodes.filter(n => n.category === category);
+    }
+    if (searchTerm) {
+        filteredNodes = filteredNodes.filter(n => (n.label || n.id).toLowerCase().includes(searchTerm));
+    }
+
+    const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
+    const filteredLinks = currentLinks.filter(l => filteredNodeIds.has(l.source.id || l.source) && filteredNodeIds.has(l.target.id || l.target));
+
+    const tempCurrentNodes = currentNodes;
+    const tempCurrentLinks = currentLinks;
+    
+    currentNodes = filteredNodes;
+    currentLinks = filteredLinks;
+    
+    drawGraph();
+
+    currentNodes = tempCurrentNodes;
+    currentLinks = tempCurrentLinks;
+
+    updateStats();
+}
+
+function updateStats() {
+    const totalNodes = currentNodes.length;
+    const totalLinks = currentLinks.length;
+    const mostConnected = [...currentNodes].sort((a, b) => b.dependents - a.dependents).slice(0, 3);
+    
+    d3.select("#stats").html(
+        `<strong>Total Modules:</strong> ${totalNodes} | 
+         <strong>Total Dependencies:</strong> ${totalLinks} | 
+         <strong>Most Connected:</strong> ${mostConnected.map(n => n.label || n.id).join(', ')}`
+    );
+}
+
+// Event Listeners
+d3.select("#level1-btn").on("click", () => setLevel(1));
+d3.select("#level2-btn").on("click", () => setLevel(2));
+d3.select("#level3-btn").on("click", () => setLevel(3));
+d3.select("#reset-btn").on("click", () => {
+    d3.select("#search").property("value", "");
+    d3.select("#filter-category").property("value", "all");
+    setLevel(currentLevel);
+});
+d3.select("#search").on("input", filterAndDraw);
+d3.select("#filter-category").on("change", filterAndDraw);
+
+// Keyboard shortcuts
+d3.select("body").on("keydown", (event) => {
+    if (event.key === '1') setLevel(1);
+    if (event.key === '2') setLevel(2);
+    if (event.key === '3') setLevel(3);
+    if (event.key === 'r') {
+        d3.select("#reset-btn").dispatch('click');
+    }
+    if (event.key === '/') {
+        event.preventDefault();
+        d3.select("#search").node().focus();
+    }
+});
+
+// Initial draw
+setLevel(1);
+
+</script>
+</body>
+</html>

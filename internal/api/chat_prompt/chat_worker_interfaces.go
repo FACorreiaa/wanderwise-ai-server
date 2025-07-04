@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -20,13 +20,13 @@ import (
 
 // BaseAIWorker provides common functionality for AI workers
 type BaseAIWorker struct {
-	logger      *slog.Logger
-	aiClient    *generativeAI.AIClient
-	emitter     EventEmitter
-	resultCh    chan<- types.GenAIResponse
-	eventCh     chan<- types.StreamEvent
-	ctx         context.Context
-	wg          *sync.WaitGroup
+	logger   *slog.Logger
+	aiClient *generativeAI.AIClient
+	emitter  EventEmitter
+	resultCh chan<- types.GenAIResponse
+	eventCh  chan<- types.StreamEvent
+	ctx      context.Context
+	wg       *sync.WaitGroup
 }
 
 // NewBaseAIWorker creates a new base AI worker

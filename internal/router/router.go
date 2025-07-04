@@ -19,6 +19,7 @@ import (
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/statistics"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/tags"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/user"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/middleware"
 )
 
 // Config contains dependencies needed for the router setup
@@ -44,12 +45,15 @@ type Config struct {
 func SetupRouter(cfg *Config) chi.Router {
 	r := chi.NewRouter()
 
+	// Add rate limiting middleware (applied to all routes)
+	r.Use(middleware.RateLimitMiddleware(cfg.Logger))
+
 	// Optional: Add CORS middleware if your frontend is on a different origin
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:3000", "https://your-frontend-domain.com"}, // Adjust origins
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Link"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},
+		ExposedHeaders:   []string{"Link", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},
 		AllowCredentials: true,
 		MaxAge:           300, // Maximum value not ignored by any major browsers
 	}))

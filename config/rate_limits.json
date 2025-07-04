@@ -1,0 +1,63 @@
+{
+  "enabled": true,
+  "default_limits": {
+    "public": {
+      "requests_per_minute": 30,
+      "requests_per_hour": 500,
+      "requests_per_day": 2000,
+      "burst_limit": 10,
+      "window_size": "1m"
+    },
+    "free": {
+      "requests_per_minute": 10,
+      "requests_per_hour": 100,
+      "requests_per_day": 500,
+      "burst_limit": 5,
+      "window_size": "1m"
+    },
+    "premium": {
+      "requests_per_minute": 100,
+      "requests_per_hour": 2000,
+      "requests_per_day": 10000,
+      "burst_limit": 20,
+      "window_size": "1m"
+    },
+    "admin": {
+      "requests_per_minute": 1000,
+      "requests_per_hour": 10000,
+      "requests_per_day": 50000,
+      "burst_limit": 100,
+      "window_size": "1m"
+    }
+  },
+  "llm_limits": {
+    "public": {
+      "requests_per_minute": 2,
+      "requests_per_hour": 10,
+      "requests_per_day": 50,
+      "burst_limit": 1,
+      "window_size": "1m"
+    },
+    "free": {
+      "requests_per_minute": 5,
+      "requests_per_hour": 30,
+      "requests_per_day": 100,
+      "burst_limit": 2,
+      "window_size": "1m"
+    },
+    "premium": {
+      "requests_per_minute": 30,
+      "requests_per_hour": 500,
+      "requests_per_day": 2000,
+      "burst_limit": 10,
+      "window_size": "1m"
+    },
+    "admin": {
+      "requests_per_minute": 100,
+      "requests_per_hour": 2000,
+      "requests_per_day": 10000,
+      "burst_limit": 20,
+      "window_size": "1m"
+    }
+  }
+}

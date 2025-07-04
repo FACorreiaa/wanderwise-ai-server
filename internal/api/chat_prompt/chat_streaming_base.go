@@ -13,6 +13,7 @@ import (
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -48,15 +49,19 @@ func (h *BaseStreamHandler) ProcessStream(ctx context.Context, w http.ResponseWr
 	traceAttrs := processor.GetTraceAttributes()
 	var attrs []trace.SpanStartOption
 	if traceAttrs != nil {
+		var spanAttrs []attribute.KeyValue
 		for key, value := range traceAttrs {
 			switch v := value.(type) {
 			case string:
-				attrs = append(attrs, trace.WithAttributes(trace.StringAttribute(key, v)))
+				spanAttrs = append(spanAttrs, attribute.String(key, v))
 			case int:
-				attrs = append(attrs, trace.WithAttributes(trace.Int64Attribute(key, int64(v))))
+				spanAttrs = append(spanAttrs, attribute.Int(key, v))
 			case float64:
-				attrs = append(attrs, trace.WithAttributes(trace.Float64Attribute(key, v)))
+				spanAttrs = append(spanAttrs, attribute.Float64(key, v))
 			}
+		}
+		if len(spanAttrs) > 0 {
+			attrs = append(attrs, trace.WithAttributes(spanAttrs...))
 		}
 	}
 
