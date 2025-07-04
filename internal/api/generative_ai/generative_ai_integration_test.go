@@ -16,11 +16,11 @@ import (
 
 func TestMain(m *testing.M) {
 	// Check if API key is available for integration tests
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
+	if os.Getenv("GEMINI_API_KEY") == "" {
 		// Skip all tests if no API key is provided
 		os.Exit(0)
 	}
-	
+
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }
@@ -28,8 +28,8 @@ func TestMain(m *testing.M) {
 func TestNewAIClient_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	t.Run("Create AI client successfully", func(t *testing.T) {
@@ -44,8 +44,8 @@ func TestNewAIClient_Integration(t *testing.T) {
 func TestAIClient_GenerateContent_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -74,10 +74,10 @@ func TestAIClient_GenerateContent_Integration(t *testing.T) {
 		assert.NotEmpty(t, response)
 		// Should contain typical Paris attractions
 		lowerResponse := strings.ToLower(response)
-		assert.True(t, 
-			strings.Contains(lowerResponse, "eiffel") || 
-			strings.Contains(lowerResponse, "louvre") || 
-			strings.Contains(lowerResponse, "notre"),
+		assert.True(t,
+			strings.Contains(lowerResponse, "eiffel") ||
+				strings.Contains(lowerResponse, "louvre") ||
+				strings.Contains(lowerResponse, "notre"),
 			"Response should mention famous Paris attractions")
 	})
 
@@ -100,8 +100,8 @@ func TestAIClient_GenerateContent_Integration(t *testing.T) {
 func TestAIClient_GenerateResponse_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -116,7 +116,7 @@ func TestAIClient_GenerateResponse_Integration(t *testing.T) {
 		response, err := client.GenerateResponse(ctx, prompt, config)
 		require.NoError(t, err)
 		require.NotNil(t, response)
-		
+
 		text := response.Text()
 		assert.NotEmpty(t, text)
 		assert.Contains(t, strings.ToLower(text), "rome")
@@ -126,8 +126,8 @@ func TestAIClient_GenerateResponse_Integration(t *testing.T) {
 func TestAIClient_StartChatSession_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -148,8 +148,8 @@ func TestAIClient_StartChatSession_Integration(t *testing.T) {
 func TestChatSession_SendMessage_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -164,34 +164,34 @@ func TestChatSession_SendMessage_Integration(t *testing.T) {
 
 	t.Run("Send single message", func(t *testing.T) {
 		message := "What is the best time to visit Barcelona?"
-		
+
 		response, err := chatSession.SendMessage(ctx, message)
 		require.NoError(t, err)
 		assert.NotEmpty(t, response)
-		
+
 		// Should contain relevant information about Barcelona
 		lowerResponse := strings.ToLower(response)
 		assert.True(t,
 			strings.Contains(lowerResponse, "spring") ||
-			strings.Contains(lowerResponse, "summer") ||
-			strings.Contains(lowerResponse, "fall") ||
-			strings.Contains(lowerResponse, "barcelona"),
+				strings.Contains(lowerResponse, "summer") ||
+				strings.Contains(lowerResponse, "fall") ||
+				strings.Contains(lowerResponse, "barcelona"),
 			"Response should contain relevant travel information")
 	})
 
 	t.Run("Send follow-up message in same session", func(t *testing.T) {
 		followUpMessage := "What about the weather there?"
-		
+
 		response, err := chatSession.SendMessage(ctx, followUpMessage)
 		require.NoError(t, err)
 		assert.NotEmpty(t, response)
-		
+
 		// Should maintain context from previous message
 		lowerResponse := strings.ToLower(response)
 		assert.True(t,
 			strings.Contains(lowerResponse, "temperature") ||
-			strings.Contains(lowerResponse, "weather") ||
-			strings.Contains(lowerResponse, "climate"),
+				strings.Contains(lowerResponse, "weather") ||
+				strings.Contains(lowerResponse, "climate"),
 			"Response should address weather information")
 	})
 }
@@ -199,8 +199,8 @@ func TestChatSession_SendMessage_Integration(t *testing.T) {
 func TestAIClient_GenerateContentStream_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -218,7 +218,7 @@ func TestAIClient_GenerateContentStream_Integration(t *testing.T) {
 
 		var fullResponse strings.Builder
 		responseCount := 0
-		
+
 		// Set a timeout for the streaming test
 		timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -235,13 +235,13 @@ func TestAIClient_GenerateContentStream_Integration(t *testing.T) {
 				require.NoError(t, err, "Error in stream")
 				break
 			}
-			
+
 			if response != nil {
 				text := response.Text()
 				fullResponse.WriteString(text)
 				responseCount++
 			}
-			
+
 			// Limit iterations to prevent infinite loops in tests
 			if responseCount > 100 {
 				break
@@ -258,8 +258,8 @@ func TestAIClient_GenerateContentStream_Integration(t *testing.T) {
 func TestChatSession_SendMessageStream_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -274,13 +274,13 @@ func TestChatSession_SendMessageStream_Integration(t *testing.T) {
 
 	t.Run("Send streaming message", func(t *testing.T) {
 		message := "Tell me about the top 5 restaurants in New York City."
-		
+
 		stream := chatSession.SendMessageStream(ctx, message)
 		require.NotNil(t, stream)
 
 		var fullResponse strings.Builder
 		responseCount := 0
-		
+
 		// Set a timeout for the streaming test
 		timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -296,13 +296,13 @@ func TestChatSession_SendMessageStream_Integration(t *testing.T) {
 				require.NoError(t, err, "Error in chat stream")
 				break
 			}
-			
+
 			if response != nil {
 				text := response.Text()
 				fullResponse.WriteString(text)
 				responseCount++
 			}
-			
+
 			// Limit iterations
 			if responseCount > 100 {
 				break
@@ -312,12 +312,12 @@ func TestChatSession_SendMessageStream_Integration(t *testing.T) {
 		assert.Greater(t, responseCount, 0, "Should receive at least one response chunk")
 		finalResponse := fullResponse.String()
 		assert.NotEmpty(t, finalResponse)
-		
+
 		lowerResponse := strings.ToLower(finalResponse)
 		assert.True(t,
 			strings.Contains(lowerResponse, "restaurant") ||
-			strings.Contains(lowerResponse, "new york") ||
-			strings.Contains(lowerResponse, "nyc"),
+				strings.Contains(lowerResponse, "new york") ||
+				strings.Contains(lowerResponse, "nyc"),
 			"Response should contain relevant restaurant information")
 	})
 }
@@ -325,8 +325,8 @@ func TestChatSession_SendMessageStream_Integration(t *testing.T) {
 func TestAIClient_ErrorHandling_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	t.Run("Test with context cancellation", func(t *testing.T) {
@@ -352,8 +352,8 @@ func TestAIClient_ErrorHandling_Integration(t *testing.T) {
 func TestAIClient_LongPrompt_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)

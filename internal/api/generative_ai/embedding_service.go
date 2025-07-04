@@ -40,9 +40,9 @@ func NewEmbeddingService(ctx context.Context, logger *slog.Logger) (*EmbeddingSe
 	ctx, span := otel.Tracer("EmbeddingService").Start(ctx, "NewEmbeddingService")
 	defer span.End()
 
-	apiKey := os.Getenv("GOOGLE_GEMINI_API_KEY")
+	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
-		err := fmt.Errorf("GOOGLE_GEMINI_API_KEY environment variable is not set")
+		err := fmt.Errorf("GEMINI_API_KEY environment variable is not set")
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "API key not set")
 		return nil, err

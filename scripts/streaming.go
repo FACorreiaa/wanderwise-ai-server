@@ -13,10 +13,10 @@ import (
 )
 
 func cacheStream(ctx context.Context) {
-	apiKey := os.Getenv("GOOGLE_GEMINI_API_KEY")
-	fmt.Println("GOOGLE_GEMINI_API_KEY:", apiKey)
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	fmt.Println("GEMINI_API_KEY:", apiKey)
 	if apiKey == "" {
-		fmt.Println("GOOGLE_GEMINI_API_KEY environment variable is not set")
+		fmt.Println("GEMINI_API_KEY environment variable is not set")
 		return
 	}
 
