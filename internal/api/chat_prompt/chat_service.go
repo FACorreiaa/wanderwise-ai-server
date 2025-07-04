@@ -1308,7 +1308,7 @@ func (l *ServiceImpl) sendEvent(ctx context.Context, ch chan<- types.StreamEvent
 				l.logger.WarnContext(ctx, "Context cancelled while trying to send stream event", slog.String("eventType", event.Type))
 				l.deadLetterCh <- event // Send to dead letter queue
 				return false
-			case <-time.After(2 * time.Second): // Use a reasonable timeout
+			case <-time.After(30 * time.Second): // Use a reasonable timeout for streaming
 				l.logger.WarnContext(ctx, "Dropped stream event due to slow consumer or blocked channel (timeout)", slog.String("eventType", event.Type))
 				l.deadLetterCh <- event // Send to dead letter queue
 				return false
@@ -2274,14 +2274,23 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			}
 		}
 
-		// If we don't have a cityID from the response, try to get it from the database
+		// If we don't have a cityID from the response, try to get it from the database or create it
 		if cityID == uuid.Nil {
 			if existingCity, err := l.cityRepo.FindCityByNameAndCountry(asyncCtx, cityName, ""); err == nil && existingCity != nil {
 				cityID = existingCity.ID
 			} else {
-				l.logger.WarnContext(asyncCtx, "Could not find or save city data, skipping POI processing",
-					slog.String("city", cityName))
-				return
+				// Create a basic city entry if it doesn't exist
+				basicCityData := types.GeneralCityData{
+					City:        cityName,
+					Country:     "",
+					Description: fmt.Sprintf("Basic city data for %s", cityName),
+				}
+				cityID, err = l.HandleCityData(asyncCtx, basicCityData)
+				if err != nil {
+					l.logger.WarnContext(asyncCtx, "Could not find or create city data, skipping POI processing",
+						slog.String("city", cityName), slog.Any("error", err))
+					return
+				}
 			}
 		}
 
@@ -2580,14 +2589,23 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			}
 		}
 
-		// If we don't have a cityID from the response, try to get it from the database
+		// If we don't have a cityID from the response, try to get it from the database or create it
 		if cityID == uuid.Nil {
 			if existingCity, err := l.cityRepo.FindCityByNameAndCountry(asyncCtx, cityName, ""); err == nil && existingCity != nil {
 				cityID = existingCity.ID
 			} else {
-				l.logger.WarnContext(asyncCtx, "Could not find or save city data, skipping POI processing",
-					slog.String("city", cityName))
-				return
+				// Create a basic city entry if it doesn't exist
+				basicCityData := types.GeneralCityData{
+					City:        cityName,
+					Country:     "",
+					Description: fmt.Sprintf("Basic city data for %s", cityName),
+				}
+				cityID, err = l.HandleCityData(asyncCtx, basicCityData)
+				if err != nil {
+					l.logger.WarnContext(asyncCtx, "Could not find or create city data, skipping POI processing",
+						slog.String("city", cityName), slog.Any("error", err))
+					return
+				}
 			}
 		}
 

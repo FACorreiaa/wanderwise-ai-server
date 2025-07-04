@@ -195,7 +195,7 @@ func main() {
 	r.Use(l.StructuredLogger(logger))
 	r.Use(chiMiddleware.Recoverer)
 	r.Use(chiMiddleware.StripSlashes)
-	r.Use(chiMiddleware.Timeout(60 * time.Second))
+	r.Use(chiMiddleware.Timeout(300 * time.Second)) // 5 minutes for streaming operations
 	r.Use(chiMiddleware.Compress(5, "application/json"))
 	r.Use(httprate.LimitByIP(100, time.Minute))
 
@@ -215,7 +215,7 @@ func main() {
 		Addr:         serverAddress,
 		Handler:      r,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 300 * time.Second, // 5 minutes for streaming responses
 		IdleTimeout:  120 * time.Second,
 		ErrorLog:     slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}

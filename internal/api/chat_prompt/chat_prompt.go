@@ -661,25 +661,25 @@ Respond with JSON:
 
 func getPersonalizedItineraryPrompt(cityName, basePreferences string) string {
 	return fmt.Sprintf(`
-You are a travel planning assistant. Create a personalized itinerary for %s based on user preferences.
+You are a travel assistant. Create a personalized itinerary for %s based on user preferences.
 USER PREFERENCES:
 %s
-Respond with JSON:
+
+Respond ONLY with valid JSON, no additional text or explanations:
 {
     "itinerary_name": "Creative itinerary name",
     "overall_description": "Detailed description (100-150 words)",
     "points_of_interest": [
         {
             "name": "POI Name",
-            "latitude": <float>,
-            "longitude": <float>,
-            "category": "",
-            "description_poi": "",
-            "address": "",
-            "website": "",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
-,
-            "distance": <float>
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "category": "Category",
+            "description_poi": "Description",
+            "address": "Address",
+            "website": "Website URL",
+            "opening_hours": {},
+            "distance": 0.0
         }
     ]
 }`, cityName, basePreferences)
@@ -687,23 +687,23 @@ Respond with JSON:
 
 func getGeneralizedItineraryPrompt(cityName string) string {
 	return fmt.Sprintf(`
-You are a travel planning assistant. Create a personalized itinerary with a max of 5 results for %s with multi things to do and different activities.
-Respond with JSON:
+You are a travel assistant. Create a personalized itinerary with a max of 5 results for %s with multi things to do and different activities.
+
+Respond ONLY with valid JSON, no additional text or explanations:
 {
     "itinerary_name": "Creative itinerary name",
     "overall_description": "Detailed description (100-150 words)",
     "points_of_interest": [
         {
             "name": "POI Name",
-            "latitude": <float>,
-            "longitude": <float>,
-            "category": "",
-            "description_poi": "",
-            "address": "",
-            "website": "",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
-,
-            "distance": <float>
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "category": "Category",
+            "description_poi": "Description",
+            "address": "Address",
+            "website": "Website URL",
+            "opening_hours": {},
+            "distance": 0.0
         }
     ]
 }`, cityName)
