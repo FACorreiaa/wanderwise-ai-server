@@ -1437,28 +1437,49 @@ func TruncateString(str string, num int) string {
 }
 
 func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req types.BookmarkRequest) (uuid.UUID, error) {
+	var llmInteractionIDStr string
+	if req.LlmInteractionID != nil {
+		llmInteractionIDStr = req.LlmInteractionID.String()
+	} else {
+		llmInteractionIDStr = "nil"
+	}
+
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "SaveItenerary", trace.WithAttributes(
 		attribute.String("user.id", userID.String()),
-		attribute.String("llm_interaction.id", req.LlmInteractionID.String()),
+		attribute.String("llm_interaction.id", llmInteractionIDStr),
 		attribute.String("title", req.Title),
 	))
 	defer span.End()
 
 	l.logger.InfoContext(ctx, "Attempting to bookmark interaction",
 		slog.String("userID", userID.String()),
-		slog.String("llmInteractionID", req.LlmInteractionID.String()),
+		slog.String("llmInteractionID", llmInteractionIDStr),
 		slog.String("title", req.Title))
 
-	// Fetch original interaction
-	originalInteraction, err := l.llmInteractionRepo.GetInteractionByID(ctx, req.LlmInteractionID)
-	if err != nil || originalInteraction == nil {
-		l.logger.ErrorContext(ctx, "Failed to fetch original LLM interaction", slog.Any("error", err))
-		span.RecordError(err)
-		return uuid.Nil, fmt.Errorf("could not retrieve original interaction: %w", err)
+	// Fetch original interaction only if LlmInteractionID is provided
+	var originalInteraction *types.LlmInteraction
+	var err error
+	if req.LlmInteractionID != nil {
+		originalInteraction, err = l.llmInteractionRepo.GetInteractionByID(ctx, *req.LlmInteractionID)
+		if err != nil || originalInteraction == nil {
+			l.logger.ErrorContext(ctx, "Failed to fetch original LLM interaction", slog.Any("error", err))
+			span.RecordError(err)
+			return uuid.Nil, fmt.Errorf("could not retrieve original interaction: %w", err)
+		}
 	}
 
 	// Prepare and save to user_saved_itineraries
-	markdownContent := originalInteraction.ResponseText
+	var markdownContent string
+	if originalInteraction != nil {
+		markdownContent = originalInteraction.ResponseText
+	} else {
+		if req.Description != nil {
+			markdownContent = *req.Description
+		} else {
+			markdownContent = ""
+		}
+	}
+
 	var description sql.NullString
 	if req.Description != nil {
 		description.String = *req.Description
@@ -1468,10 +1489,22 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 	if req.IsPublic != nil {
 		isPublic = *req.IsPublic
 	}
+
+	// Use pointers for nullable fields
+	var sourceInteractionID *uuid.UUID
+	if req.LlmInteractionID != nil {
+		sourceInteractionID = req.LlmInteractionID // Already a pointer, no dereference needed
+	}
+
+	var primaryCityID *uuid.UUID
+	if req.PrimaryCityID != nil {
+		primaryCityID = req.PrimaryCityID // Already a pointer, no dereference needed
+	}
+
 	newBookmark := &types.UserSavedItinerary{
 		UserID:                 userID,
-		SourceLlmInteractionID: req.LlmInteractionID,
-		PrimaryCityID:          req.PrimaryCityID, // Assume this is added to BookmarkRequest
+		SourceLlmInteractionID: sourceInteractionID,
+		PrimaryCityID:          primaryCityID,
 		Title:                  req.Title,
 		Description:            description,
 		MarkdownContent:        markdownContent,
@@ -1484,41 +1517,43 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 		return uuid.Nil, err
 	}
 
-	// Fetch city ID (assuming PrimaryCityID is available; otherwise, derive from interaction)
-	cityID := newBookmark.PrimaryCityID
-	if cityID == uuid.Nil {
-		// Fallback: Get city from LLM interaction context if possible
-		l.logger.WarnContext(ctx, "PrimaryCityID not provided, deriving from interaction")
-		// This requires additional logic to parse city from interaction or session
-		return savedID, nil // Skip further processing if cityID cannot be determined
+	// Handle cityID for further processing
+	if newBookmark.PrimaryCityID == nil {
+		l.logger.WarnContext(ctx, "PrimaryCityID not provided, skipping itinerary save")
+		return savedID, nil
 	}
+	cityID := *newBookmark.PrimaryCityID // Safe to dereference since we checked for nil
 
 	// Save to itineraries
 	itineraryID, err := l.poiRepo.SaveItinerary(ctx, userID, cityID)
 	if err != nil {
 		l.logger.WarnContext(ctx, "Failed to save to itineraries", slog.Any("error", err))
 		span.RecordError(err)
-		return savedID, nil // Continue even if this fails
-	}
-
-	// Fetch POIs from llm_suggested_pois
-	pois, err := l.llmInteractionRepo.GetLlmSuggestedPOIsByInteractionSortedByDistance(ctx, req.LlmInteractionID, cityID, types.UserLocation{})
-	if err != nil {
-		l.logger.WarnContext(ctx, "Failed to fetch suggested POIs", slog.Any("error", err))
-		span.RecordError(err)
 		return savedID, nil
 	}
 
-	// Add CityID to POIs (if not already present)
-	for i := range pois {
-		pois[i].CityID = cityID // Ensure POIDetailedInfo has CityID field
-	}
+	// Fetch POIs from llm_suggested_pois only if we have an interaction ID
+	if req.LlmInteractionID != nil {
+		pois, err := l.llmInteractionRepo.GetLlmSuggestedPOIsByInteractionSortedByDistance(ctx, *req.LlmInteractionID, cityID, types.UserLocation{})
+		if err != nil {
+			l.logger.WarnContext(ctx, "Failed to fetch suggested POIs", slog.Any("error", err))
+			span.RecordError(err)
+			return savedID, nil
+		}
 
-	// Save to itinerary_pois
-	if err := l.poiRepo.SaveItineraryPOIs(ctx, itineraryID, pois); err != nil {
-		l.logger.WarnContext(ctx, "Failed to save to itinerary_pois", slog.Any("error", err))
-		span.RecordError(err)
-		return savedID, nil
+		if len(pois) > 0 {
+			l.logger.InfoContext(ctx, "Found POIs to process", slog.Int("count", len(pois)))
+
+			for i := range pois {
+				pois[i].CityID = cityID
+			}
+
+			if err := l.poiRepo.SaveItineraryPOIs(ctx, itineraryID, pois); err != nil {
+				l.logger.WarnContext(ctx, "Failed to save to itinerary_pois", slog.Any("error", err))
+				span.RecordError(err)
+				return savedID, nil
+			}
+		}
 	}
 
 	l.logger.InfoContext(ctx, "Successfully saved itinerary",

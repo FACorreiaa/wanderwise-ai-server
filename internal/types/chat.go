@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"google.golang.org/genai"
 )
 
@@ -109,8 +111,8 @@ type UserLocation struct {
 type UserSavedItinerary struct {
 	ID                     uuid.UUID      `json:"id"`
 	UserID                 uuid.UUID      `json:"user_id"`
-	SourceLlmInteractionID uuid.UUID      `json:"source_llm_interaction_id,omitempty"` // Nullable UUID for the source LLM interaction
-	PrimaryCityID          uuid.UUID      `json:"primary_city_id,omitempty"`           // Nullable UUID for the primary city
+	SourceLlmInteractionID pgtype.UUID    `json:"source_llm_interaction_id,omitempty"` // Nullable UUID for the source LLM interaction
+	PrimaryCityID          pgtype.UUID    `json:"primary_city_id,omitempty"`           // Nullable UUID for the primary city
 	Title                  string         `json:"title"`
 	Description            sql.NullString `json:"description"`             // Use sql.NullString for nullable text fields
 	MarkdownContent        string         `json:"markdown_content"`        // Markdown content for the itinerary
