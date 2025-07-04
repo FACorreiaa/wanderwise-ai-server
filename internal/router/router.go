@@ -196,8 +196,8 @@ func LLMInteractionRoutes(HandlerImpl *llmChat.HandlerImpl) http.Handler {
 	r := chi.NewRouter()
 
 	// Unified chat endpoints - more specific routes first
-	r.Post("/prompt-response/chat/sessions/stream/{profileID}", HandlerImpl.StartChatMessageStream)
-	r.Post("/prompt-response/chat/sessions/{sessionID}/continue", HandlerImpl.ContinueChatSessionStream) // POST http://localhost:8000/api/v1/llm/prompt-response/chat/sessions/{sessionID}/continue
+	r.Post("/prompt-response/chat/sessions/stream/{profileID}", HandlerImpl.StartChatMessageStream)                    // POST http://localhost:8000/api/v1/llm/prompt-response/chat/sessions/stream/{profileID} - starts NEW sessions
+	r.Post("/prompt-response/chat/sessions/{sessionID}/continue", HandlerImpl.ContinueChatSessionStream)              // POST http://localhost:8000/api/v1/llm/prompt-response/chat/sessions/{sessionID}/continue - continues EXISTING sessions
 
 	// Chat session management
 	r.Get("/prompt-response/chat/sessions/user/{profileID}", HandlerImpl.GetUserChatSessions)

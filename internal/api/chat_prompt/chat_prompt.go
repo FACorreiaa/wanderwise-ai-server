@@ -661,52 +661,59 @@ Respond with JSON:
 
 func getPersonalizedItineraryPrompt(cityName, basePreferences string) string {
 	return fmt.Sprintf(`
-You are a travel assistant. Create a personalized itinerary for %s based on user preferences.
+You are a travel assistant. Generate a detailed personalized itinerary for %s with specific places and activities.
+
 USER PREFERENCES:
 %s
 
-Respond ONLY with valid JSON, no additional text or explanations:
+IMPORTANT: You MUST respond with valid JSON in the exact format shown below. Do not provide explanations, status updates, or any text outside the JSON structure.
+
+Return exactly 3-5 real points of interest in %s with accurate coordinates:
+
 {
-    "itinerary_name": "Creative itinerary name",
-    "overall_description": "Detailed description (100-150 words)",
+    "itinerary_name": "Personalized %s Experience",
+    "overall_description": "A detailed 100-150 word description of this personalized itinerary",
     "points_of_interest": [
         {
-            "name": "POI Name",
-            "latitude": 0.0,
-            "longitude": 0.0,
-            "category": "Category",
-            "description_poi": "Description",
-            "address": "Address",
-            "website": "Website URL",
-            "opening_hours": {},
-            "distance": 0.0
+            "name": "Real POI Name",
+            "latitude": 40.4168,
+            "longitude": -3.7038,
+            "category": "museum/restaurant/attraction/etc",
+            "description_poi": "Detailed description of this specific place",
+            "address": "Complete street address",
+            "website": "https://example.com",
+            "opening_hours": {"monday": "9:00-18:00", "tuesday": "9:00-18:00"},
+            "distance": 0.5
         }
     ]
-}`, cityName, basePreferences)
+}`, cityName, basePreferences, cityName, cityName)
 }
 
 func getGeneralizedItineraryPrompt(cityName string) string {
 	return fmt.Sprintf(`
-You are a travel assistant. Create a personalized itinerary with a max of 5 results for %s with multi things to do and different activities.
+You are a travel assistant. Generate a complete itinerary for %s with exactly 5 diverse activities and attractions.
 
-Respond ONLY with valid JSON, no additional text or explanations:
+CRITICAL: You MUST respond with valid JSON only. No text, explanations, or status messages outside the JSON structure.
+
+Return exactly 5 real points of interest in %s with accurate coordinates:
+
 {
-    "itinerary_name": "Creative itinerary name",
-    "overall_description": "Detailed description (100-150 words)",
+    "itinerary_name": "Complete %s Experience",
+    "overall_description": "A detailed 100-150 word description of this general itinerary covering diverse activities",
     "points_of_interest": [
         {
-            "name": "POI Name",
-            "latitude": 0.0,
-            "longitude": 0.0,
-            "category": "Category",
-            "description_poi": "Description",
-            "address": "Address",
-            "website": "Website URL",
-            "opening_hours": {},
-            "distance": 0.0
+            "name": "Real POI Name",
+            "latitude": 40.4168,
+            "longitude": -3.7038,
+            "category": "museum/restaurant/attraction/park/etc",
+            "description_poi": "Detailed description of this specific place",
+            "address": "Complete street address",
+            "website": "https://example.com",
+            "opening_hours": {"monday": "9:00-18:00", "tuesday": "9:00-18:00"},
+            "distance": 0.5
         }
     ]
-}`, cityName)
+}`, cityName, cityName, cityName)
 }
 
 func getAccommodationPrompt(cityName string, lat, lon float64, basePreferences string) string {

@@ -1426,6 +1426,11 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 	l.logger.InfoContext(ctx, "Intent classified", slog.String("intent", string(intent)))
 	l.sendEvent(ctx, eventCh, types.StreamEvent{Type: "intent_classified", Data: map[string]string{"intent": string(intent)}}, 3)
 
+	// --- 4.5. Detect Domain ---
+	domainDetector := &types.DomainDetector{}
+	domain := domainDetector.DetectDomain(ctx, message)
+	l.logger.InfoContext(ctx, "Domain detected", slog.String("domain", string(domain)))
+
 	// --- 5. Enhance with Semantic POI Recommendations ---
 	l.sendEvent(ctx, eventCh, types.StreamEvent{
 		Type: types.EventTypeProgress,
@@ -1599,12 +1604,12 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 		Data:    "Turn completed.",
 		IsFinal: true,
 		Navigation: &types.NavigationData{
-			URL:       fmt.Sprintf("/itinerary?sessionId=%s&cityName=%s&domain=itinerary", sessionID.String(), url.QueryEscape(session.CityName)),
-			RouteType: "itinerary",
+			URL:       fmt.Sprintf("/%s?sessionId=%s&cityName=%s&domain=%s", domain, sessionID.String(), url.QueryEscape(session.CityName), domain),
+			RouteType: string(domain),
 			QueryParams: map[string]string{
 				"sessionId": sessionID.String(),
 				"cityName":  session.CityName,
-				"domain":    "itinerary",
+				"domain":    string(domain),
 			},
 		},
 	}, 3)

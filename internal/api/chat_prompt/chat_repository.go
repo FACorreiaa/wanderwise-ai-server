@@ -1328,48 +1328,6 @@ func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, s
 	return pois, rows.Err()
 }
 
-// type POIDetailedInfo struct {
-// 	Name        string  `json:"name"`
-// 	Latitude    float64 `json:"latitude"`
-// 	Longitude   float64 `json:"longitude"`
-// 	Category    string  `json:"category"`
-// 	Description string  `json:"description"`
-// }
-
-// type LlmApiResponseData struct {
-// 	GeneralCityData struct {
-// 		City            string  `json:"city"`
-// 		Country         string  `json:"country"`
-// 		Description     string  `json:"description"`
-// 		CenterLatitude  float64 `json:"center_latitude"`
-// 		CenterLongitude float64 `json:"center_longitude"`
-// 		// Add other fields from general_city_data if you need them
-// 		// Population       string  `json:"population,omitempty"`
-// 		// Area             string  `json:"area,omitempty"`
-// 		// Timezone         string  `json:"timezone,omitempty"`
-// 		// Language         string  `json:"language,omitempty"`
-// 		// Weather          string  `json:"weather,omitempty"`
-// 		// Attractions      string  `json:"attractions,omitempty"`
-// 		// History          string  `json:"history,omitempty"`
-// 	} `json:"general_city_data"`
-
-// 	PointsOfInterest []types.POIDetailedInfo `json:"points_of_interest"` // <--- ADD THIS FIELD for general POIs
-
-// 	ItineraryResponse struct {
-// 		ItineraryName      string            `json:"itinerary_name"`
-// 		OverallDescription string            `json:"overall_description"`
-// 		PointsOfInterest   []types.POIDetailedInfo `json:"points_of_interest"` // This is for itinerary_response.points_of_interest
-// 	} `json:"itinerary_response"`
-// }
-
-// type LlmApiResponse struct {
-// 	SessionID string             `json:"session_id"` // Capture the top-level session_id
-// 	Data      LlmApiResponseData `json:"data"`
-// 	// Note: The JSON also has a "session_id" inside "data".
-// 	// If you need that too, you'd add it to LlmApiResponseData:
-// 	// SessionIDInsideData string `json:"session_id,omitempty"`
-// }
-
 func parsePOIsFromResponse(responseText string, logger *slog.Logger) ([]types.POIDetailedInfo, error) {
 	cleanedResponse := cleanJSONResponse(responseText)
 
@@ -1386,6 +1344,7 @@ func parsePOIsFromResponse(responseText string, logger *slog.Logger) ([]types.PO
 			return cleanedResponse[start:]
 		}())
 
+	fmt.Printf("cleanedResponse %s", cleanedResponse)
 	// Check if this looks like an itinerary response instead of a POI response
 	if strings.Contains(cleanedResponse, "itinerary_name") {
 		logger.Debug("parsePOIsFromResponse: Response appears to be an itinerary, not POI data")
