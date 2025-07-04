@@ -1329,6 +1329,13 @@ func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, s
 }
 
 func parsePOIsFromResponse(responseText string, logger *slog.Logger) ([]types.POIDetailedInfo, error) {
+	// Check if the response starts with "Processed" - this is a default message, not JSON
+	if strings.HasPrefix(strings.TrimSpace(responseText), "Processed") {
+		logger.Debug("parsePOIsFromResponse: Response is a default message, not JSON data", 
+			"message", responseText)
+		return []types.POIDetailedInfo{}, nil
+	}
+
 	cleanedResponse := cleanJSONResponse(responseText)
 
 	// Debug logging to see the actual cleaned response

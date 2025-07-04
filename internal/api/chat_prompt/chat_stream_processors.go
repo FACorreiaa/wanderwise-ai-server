@@ -18,6 +18,7 @@ type UnifiedChatStreamProcessor struct {
 	userID    uuid.UUID
 	profileID uuid.UUID
 	message   string
+	cityName  string
 	location  *types.UserLocation
 	r         *http.Request
 }
@@ -59,6 +60,7 @@ func (p *UnifiedChatStreamProcessor) ValidateRequest() error {
 	// Validate request body
 	var req struct {
 		Message      string              `json:"message"`
+		CityName     string              `json:"city_name,omitempty"`
 		UserLocation *types.UserLocation `json:"user_location,omitempty"`
 	}
 	if err := p.validator.ValidateRequestBody(p.r, &req); err != nil {
@@ -70,6 +72,7 @@ func (p *UnifiedChatStreamProcessor) ValidateRequest() error {
 	}
 
 	p.message = req.Message
+	p.cityName = req.CityName
 	p.location = req.UserLocation
 
 	return nil
@@ -78,7 +81,7 @@ func (p *UnifiedChatStreamProcessor) ValidateRequest() error {
 // ProcessRequest processes the streaming request
 func (p *UnifiedChatStreamProcessor) ProcessRequest(ctx context.Context, eventCh chan<- types.StreamEvent) error {
 	return p.service.ProcessUnifiedChatMessageStream(
-		ctx, p.userID, p.profileID, "", p.message, p.location, eventCh,
+		ctx, p.userID, p.profileID, p.cityName, p.message, p.location, eventCh,
 	)
 }
 
@@ -87,6 +90,7 @@ func (p *UnifiedChatStreamProcessor) GetTraceAttributes() map[string]interface{}
 	return map[string]interface{}{
 		"user.id":    p.userID.String(),
 		"profile.id": p.profileID.String(),
+		"city.name":  p.cityName,
 		"message":    p.message,
 	}
 }

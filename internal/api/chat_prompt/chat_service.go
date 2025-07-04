@@ -2698,15 +2698,20 @@ func (l *ServiceImpl) parseCityDataFromResponse(ctx context.Context, responseCon
 
 // streamWorkerWithResponseAndCache handles streaming for a single worker with response capture and cache support
 func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prompt, partType string, sendEvent func(types.StreamEvent), domain types.DomainType, cacheKey string) {
+	// Create a detached background context that won't be cancelled when the parent context is cancelled
+	// This ensures workers can complete their responses even if the client disconnects
+	bgCtx := context.Background()
+
 	promptPreview := prompt
 	if len(prompt) > 100 {
 		promptPreview = prompt[:100]
 	}
-	l.logger.InfoContext(ctx, "Starting streaming worker", slog.String("partType", partType), slog.String("prompt_preview", promptPreview))
+	l.logger.InfoContext(bgCtx, "Starting streaming worker", slog.String("partType", partType), slog.String("prompt_preview", promptPreview))
 
-	iter, err := l.aiClient.GenerateContentStreamWithCache(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)}, cacheKey)
+	// Use background context for AI client call to ensure it completes even if client disconnects
+	iter, err := l.aiClient.GenerateContentStreamWithCache(bgCtx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)}, cacheKey)
 	if err != nil {
-		l.logger.ErrorContext(ctx, "Failed to create content stream", slog.String("partType", partType), slog.Any("error", err))
+		l.logger.ErrorContext(bgCtx, "Failed to create content stream", slog.String("partType", partType), slog.Any("error", err))
 		if ctx.Err() == nil {
 			sendEvent(types.StreamEvent{
 				Type:  types.EventTypeError,
@@ -2716,21 +2721,24 @@ func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prom
 		return
 	}
 
-	l.logger.InfoContext(ctx, "Stream iterator created successfully", slog.String("partType", partType))
+	l.logger.InfoContext(bgCtx, "Stream iterator created successfully", slog.String("partType", partType))
 	var fullResponse strings.Builder
 	responseCount := 0
 
 	for resp, err := range iter {
 		responseCount++
-		l.logger.DebugContext(ctx, "Received response from iterator", slog.String("partType", partType), slog.Int("responseCount", responseCount))
+		l.logger.DebugContext(bgCtx, "Received response from iterator", slog.String("partType", partType), slog.Int("responseCount", responseCount))
 
+		// Check original context for client disconnection, but continue processing
+		clientDisconnected := false
 		if ctx.Err() != nil {
-			l.logger.WarnContext(ctx, "Context cancelled, stopping worker", slog.String("partType", partType))
-			return // Stop if context is canceled
+			clientDisconnected = true
+			l.logger.WarnContext(bgCtx, "Client context cancelled, but continuing worker", slog.String("partType", partType))
 		}
+
 		if err != nil {
-			l.logger.ErrorContext(ctx, "Streaming error", slog.String("partType", partType), slog.Any("error", err))
-			if ctx.Err() == nil {
+			l.logger.ErrorContext(bgCtx, "Streaming error", slog.String("partType", partType), slog.Any("error", err))
+			if !clientDisconnected {
 				sendEvent(types.StreamEvent{
 					Type:  types.EventTypeError,
 					Error: fmt.Sprintf("%s streaming error: %v", partType, err),
@@ -2740,37 +2748,41 @@ func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prom
 		}
 
 		candidatesCount := len(resp.Candidates)
-		l.logger.DebugContext(ctx, "Processing candidates", slog.String("partType", partType), slog.Int("candidatesCount", candidatesCount))
+		l.logger.DebugContext(bgCtx, "Processing candidates", slog.String("partType", partType), slog.Int("candidatesCount", candidatesCount))
 
 		for _, cand := range resp.Candidates {
 			if cand.Content != nil {
 				partsCount := len(cand.Content.Parts)
-				l.logger.DebugContext(ctx, "Processing content parts", slog.String("partType", partType), slog.Int("partsCount", partsCount))
+				l.logger.DebugContext(bgCtx, "Processing content parts", slog.String("partType", partType), slog.Int("partsCount", partsCount))
 
 				for _, part := range cand.Content.Parts {
 					if part.Text != "" {
 						chunk := string(part.Text)
 						fullResponse.WriteString(chunk)
-						l.logger.DebugContext(ctx, "Sending chunk", slog.String("partType", partType), slog.Int("chunkLength", len(chunk)))
-						sendEvent(types.StreamEvent{
-							Type: types.EventTypeChunk,
-							Data: map[string]interface{}{
-								"part":       partType,
-								"chunk":      chunk,
-								"domain":     string(domain),
-								"cache_key":  cacheKey,
-								"cache_used": cacheKey != "",
-							},
-						})
+						l.logger.DebugContext(bgCtx, "Sending chunk", slog.String("partType", partType), slog.Int("chunkLength", len(chunk)))
+
+						// Only send events to client if they haven't disconnected
+						if !clientDisconnected {
+							sendEvent(types.StreamEvent{
+								Type: types.EventTypeChunk,
+								Data: map[string]interface{}{
+									"part":       partType,
+									"chunk":      chunk,
+									"domain":     string(domain),
+									"cache_key":  cacheKey,
+									"cache_used": cacheKey != "",
+								},
+							})
+						}
 					} else {
-						l.logger.DebugContext(ctx, "Empty text part", slog.String("partType", partType))
+						l.logger.DebugContext(bgCtx, "Empty text part", slog.String("partType", partType))
 					}
 				}
 			} else {
-				l.logger.DebugContext(ctx, "Candidate has no content", slog.String("partType", partType))
+				l.logger.DebugContext(bgCtx, "Candidate has no content", slog.String("partType", partType))
 			}
 		}
 	}
 
-	l.logger.InfoContext(ctx, "Stream worker completed", slog.String("partType", partType), slog.Int("totalResponses", responseCount), slog.Int("fullResponseLength", fullResponse.Len()))
+	l.logger.InfoContext(bgCtx, "Stream worker completed", slog.String("partType", partType), slog.Int("totalResponses", responseCount), slog.Int("fullResponseLength", fullResponse.Len()))
 }
