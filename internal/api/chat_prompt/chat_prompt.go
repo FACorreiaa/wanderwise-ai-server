@@ -619,44 +619,51 @@ Consider the user's physical activity level, cultural interests, and accessibili
 
 func getCityDataPrompt(cityName string) string {
 	return fmt.Sprintf(`
-You are a travel assistant. Provide general information about %s.
-Respond with JSON:
+You are a travel assistant. Provide detailed information about %s.
+
+CRITICAL: You MUST respond with valid JSON only. No text, explanations, or status messages outside the JSON structure.
+
+Return accurate information about %s:
+
 {
     "city": "%s",
     "country": "Country name",
     "state_province": "State/Province if applicable",
     "description": "Detailed city description (100-150 words)",
-    "center_latitude": <float>,
-    "center_longitude": <float>,
-    "population": "",
-    "area": "",
-    "timezone": "",
-    "language": "",
-    "weather": "",
-    "attractions": "",
-    "history": ""
-}`, cityName, cityName)
+    "center_latitude": 40.4168,
+    "center_longitude": -3.7038,
+    "population": "Population number or estimate",
+    "area": "City area in km²",
+    "timezone": "Time zone (e.g., UTC+1)",
+    "language": "Primary language spoken",
+    "weather": "Brief climate description",
+    "attractions": "Brief mention of main attractions",
+    "history": "Brief historical overview"
+}`, cityName, cityName, cityName)
 }
 
 func getGeneralPOIPrompt(cityName string) string {
 	return fmt.Sprintf(`
-You are a travel assistant. List general points of interest in %s.
-Respond with JSON:
+You are a travel assistant. Generate a list of top points of interest in %s.
+
+CRITICAL: You MUST respond with valid JSON only. No text, explanations, or status messages outside the JSON structure.
+
+Return exactly 5-8 real points of interest in %s with accurate coordinates:
+
 {
     "points_of_interest": [
         {
-            "name": "POI Name",
-            "latitude": <float>,
-            "longitude": <float>,
-            "category": "Category (e.g., Museum, Historical Site)",
-            "description_poi": "",
-            "address": "",
-            "website": "",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
-
+            "name": "Real POI Name",
+            "latitude": 40.4168,
+            "longitude": -3.7038,
+            "category": "museum/monument/park/attraction/etc",
+            "description_poi": "Detailed description of this place",
+            "address": "Complete street address",
+            "website": "https://example.com",
+            "opening_hours": {"monday": "9:00-18:00", "tuesday": "9:00-18:00"}
         }
     ]
-}`, cityName)
+}`, cityName, cityName)
 }
 
 func getPersonalizedItineraryPrompt(cityName, basePreferences string) string {

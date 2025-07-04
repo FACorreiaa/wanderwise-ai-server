@@ -2255,7 +2255,14 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		responsesMutex.Unlock()
 
 		fullResponse := fullResponseBuilder.String()
+		
+		// Debug logging to understand why response is empty
+		l.logger.InfoContext(asyncCtx, "Response capture debug", 
+			slog.Int("total_response_parts", len(responses)),
+			slog.Int("fullResponseLength", len(fullResponse)))
+		
 		if fullResponse == "" {
+			l.logger.WarnContext(asyncCtx, "No response captured, using fallback message")
 			fullResponse = fmt.Sprintf("Processed %s request for %s", domain, cityName)
 		}
 
@@ -2570,7 +2577,14 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 		responsesMutex.Unlock()
 
 		fullResponse := fullResponseBuilder.String()
+		
+		// Debug logging to understand why response is empty
+		l.logger.InfoContext(asyncCtx, "Response capture debug", 
+			slog.Int("total_response_parts", len(responses)),
+			slog.Int("fullResponseLength", len(fullResponse)))
+		
 		if fullResponse == "" {
+			l.logger.WarnContext(asyncCtx, "No response captured, using fallback message")
 			fullResponse = fmt.Sprintf("Processed %s request for %s", domain, cityName)
 		}
 
