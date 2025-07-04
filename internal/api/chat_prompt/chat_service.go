@@ -103,7 +103,13 @@ func NewLlmInteractiontService(interestRepo interests.Repository,
 	poiRepo poi.Repository,
 	logger *slog.Logger) *ServiceImpl {
 	ctx := context.Background()
-	aiClient, _ := generativeAI.NewAIClient(ctx)
+	logger.Info("Initializing AI client...")
+	aiClient, err := generativeAI.NewAIClient(ctx)
+	if err != nil {
+		logger.Error("Failed to create AI client", slog.Any("error", err))
+		log.Fatalf("Failed to create AI client: %v", err)
+	}
+	logger.Info("AI client initialized successfully")
 
 	// Initialize embedding service
 	embeddingService, err := generativeAI.NewEmbeddingService(ctx, logger)
@@ -2066,7 +2072,6 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 
 	// Step 5: Fan-in Fan-out Setup
 	var wg sync.WaitGroup
-	var closeOnce sync.Once
 
 	l.sendEvent(ctx, eventCh, types.StreamEvent{
 		Type: types.EventTypeStart,
@@ -2081,6 +2086,9 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 	// Step 5: Collect responses for saving interaction
 	responses := make(map[string]*strings.Builder)
 	responsesMutex := sync.Mutex{}
+
+	// Copy values from the original context but create a new context tree
+	workerCtx := context.WithValue(ctx, "trace_id", ctx.Value("trace_id"))
 
 	// Modified sendEventWithResponse to capture responses
 	sendEventWithResponse := func(event types.StreamEvent) {
@@ -2098,7 +2106,25 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			}
 			responsesMutex.Unlock()
 		}
-		l.sendEvent(ctx, eventCh, event, 3)
+		// Try to send the event, but don't panic if channel is closed
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					l.logger.WarnContext(workerCtx, "Event channel closed, continuing processing", slog.String("eventType", event.Type))
+				}
+			}()
+
+			select {
+			case eventCh <- event:
+				// Event sent successfully
+			case <-ctx.Done():
+				// Client disconnected, but we continue processing for logging/storage
+				l.logger.DebugContext(workerCtx, "Client disconnected, but continuing worker processing", slog.String("eventType", event.Type))
+			default:
+				// Channel might be full, but worker continues
+				l.logger.WarnContext(workerCtx, "Event channel full, dropping event", slog.String("eventType", event.Type))
+			}
+		}()
 	}
 
 	// Step 6: Spawn streaming workers based on domain with cache support
@@ -2111,7 +2137,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			defer wg.Done()
 			prompt := getCityDataPrompt(cityName)
 			partCacheKey := cacheKey + "_city_data"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "city_data", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "city_data", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 		// Worker 2: Stream General POIs with cache
@@ -2119,7 +2145,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			defer wg.Done()
 			prompt := getGeneralPOIPrompt(cityName)
 			partCacheKey := cacheKey + "_general_pois"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "general_pois", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "general_pois", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 		// Worker 3: Stream Personalized Itinerary with cache
@@ -2127,7 +2153,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			defer wg.Done()
 			prompt := getPersonalizedItineraryPrompt(cityName, basePreferences)
 			partCacheKey := cacheKey + "_itinerary"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "itinerary", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "itinerary", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	case types.DomainAccommodation:
@@ -2136,7 +2162,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			defer wg.Done()
 			prompt := getAccommodationPrompt(cityName, lat, lon, basePreferences)
 			partCacheKey := cacheKey + "_hotels"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "hotels", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "hotels", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	case types.DomainDining:
@@ -2145,7 +2171,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			defer wg.Done()
 			prompt := getDiningPrompt(cityName, lat, lon, basePreferences)
 			partCacheKey := cacheKey + "_restaurants"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "restaurants", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "restaurants", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	case types.DomainActivities:
@@ -2154,7 +2180,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 			defer wg.Done()
 			prompt := getActivitiesPrompt(cityName, lat, lon, basePreferences)
 			partCacheKey := cacheKey + "_activities"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "activities", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "activities", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	default:
@@ -2198,10 +2224,8 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 				},
 			}, 3)
 		}
-		closeOnce.Do(func() {
-			close(eventCh) // Close the channel only once
-			l.logger.InfoContext(ctx, "Event channel closed by completion goroutine")
-		})
+		// Channel is automatically closed by streaming base
+		l.logger.InfoContext(ctx, "Stream completion goroutine finished")
 	}()
 
 	// Step 8: Save interaction and process structured data asynchronously after completion
@@ -2354,7 +2378,6 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 
 	// Step 5: Fan-in Fan-out Setup
 	var wg sync.WaitGroup
-	var closeOnce sync.Once
 
 	l.sendEvent(ctx, eventCh, types.StreamEvent{
 		Type: types.EventTypeStart,
@@ -2369,6 +2392,9 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 	// Step 5: Collect responses for saving interaction
 	responses := make(map[string]*strings.Builder)
 	responsesMutex := sync.Mutex{}
+
+	// Copy values from the original context but create a new context tree
+	workerCtx := context.WithValue(ctx, "trace_id", ctx.Value("trace_id"))
 
 	// Modified sendEventWithResponse to capture responses
 	sendEventWithResponse := func(event types.StreamEvent) {
@@ -2386,7 +2412,25 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			}
 			responsesMutex.Unlock()
 		}
-		l.sendEvent(ctx, eventCh, event, 3)
+		// Try to send the event, but don't panic if channel is closed
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					l.logger.WarnContext(workerCtx, "Event channel closed, continuing processing", slog.String("eventType", event.Type))
+				}
+			}()
+
+			select {
+			case eventCh <- event:
+				// Event sent successfully
+			case <-ctx.Done():
+				// Client disconnected, but we continue processing for logging/storage
+				l.logger.DebugContext(workerCtx, "Client disconnected, but continuing worker processing", slog.String("eventType", event.Type))
+			default:
+				// Channel might be full, but worker continues
+				l.logger.WarnContext(workerCtx, "Event channel full, dropping event", slog.String("eventType", event.Type))
+			}
+		}()
 	}
 
 	// Step 6: Spawn streaming workers based on domain with cache support
@@ -2399,7 +2443,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			defer wg.Done()
 			prompt := getCityDataPrompt(cityName)
 			partCacheKey := cacheKey + "_city_data"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "city_data", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "city_data", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 		// Worker 2: Stream General POIs with cache
@@ -2407,7 +2451,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			defer wg.Done()
 			prompt := getGeneralPOIPrompt(cityName)
 			partCacheKey := cacheKey + "_general_pois"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "general_pois", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "general_pois", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 		// Worker 3: Stream Personalized Itinerary with cache
@@ -2415,7 +2459,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			defer wg.Done()
 			prompt := getGeneralizedItineraryPrompt(cityName)
 			partCacheKey := cacheKey + "_itinerary"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "itinerary", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "itinerary", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	case types.DomainAccommodation:
@@ -2424,7 +2468,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			defer wg.Done()
 			prompt := getGeneralAccommodationPrompt(cityName)
 			partCacheKey := cacheKey + "_hotels"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "hotels", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "hotels", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	case types.DomainDining:
@@ -2433,7 +2477,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			defer wg.Done()
 			prompt := getGeneralDiningPrompt(cityName)
 			partCacheKey := cacheKey + "_restaurants"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "restaurants", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "restaurants", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	case types.DomainActivities:
@@ -2442,7 +2486,7 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 			defer wg.Done()
 			prompt := getGeneralActivitiesPrompt(cityName)
 			partCacheKey := cacheKey + "_activities"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "activities", sendEventWithResponse, domain, partCacheKey)
+			l.streamWorkerWithResponseAndCache(workerCtx, prompt, "activities", sendEventWithResponse, domain, partCacheKey)
 		}()
 
 	default:
@@ -2486,10 +2530,8 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 				},
 			}, 3)
 		}
-		closeOnce.Do(func() {
-			close(eventCh) // Close the channel only once
-			l.logger.InfoContext(ctx, "Event channel closed by completion goroutine")
-		})
+		// Channel is automatically closed by streaming base
+		l.logger.InfoContext(ctx, "Stream completion goroutine finished")
 	}()
 
 	// Step 8: Save interaction and process structured data asynchronously after completion
@@ -2633,8 +2675,15 @@ func (l *ServiceImpl) parseCityDataFromResponse(ctx context.Context, responseCon
 
 // streamWorkerWithResponseAndCache handles streaming for a single worker with response capture and cache support
 func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prompt, partType string, sendEvent func(types.StreamEvent), domain types.DomainType, cacheKey string) {
+	promptPreview := prompt
+	if len(prompt) > 100 {
+		promptPreview = prompt[:100]
+	}
+	l.logger.InfoContext(ctx, "Starting streaming worker", slog.String("partType", partType), slog.String("prompt_preview", promptPreview))
+
 	iter, err := l.aiClient.GenerateContentStreamWithCache(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)}, cacheKey)
 	if err != nil {
+		l.logger.ErrorContext(ctx, "Failed to create content stream", slog.String("partType", partType), slog.Any("error", err))
 		if ctx.Err() == nil {
 			sendEvent(types.StreamEvent{
 				Type:  types.EventTypeError,
@@ -2644,12 +2693,20 @@ func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prom
 		return
 	}
 
+	l.logger.InfoContext(ctx, "Stream iterator created successfully", slog.String("partType", partType))
 	var fullResponse strings.Builder
+	responseCount := 0
+
 	for resp, err := range iter {
+		responseCount++
+		l.logger.DebugContext(ctx, "Received response from iterator", slog.String("partType", partType), slog.Int("responseCount", responseCount))
+
 		if ctx.Err() != nil {
+			l.logger.WarnContext(ctx, "Context cancelled, stopping worker", slog.String("partType", partType))
 			return // Stop if context is canceled
 		}
 		if err != nil {
+			l.logger.ErrorContext(ctx, "Streaming error", slog.String("partType", partType), slog.Any("error", err))
 			if ctx.Err() == nil {
 				sendEvent(types.StreamEvent{
 					Type:  types.EventTypeError,
@@ -2658,12 +2715,20 @@ func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prom
 			}
 			return
 		}
+
+		candidatesCount := len(resp.Candidates)
+		l.logger.DebugContext(ctx, "Processing candidates", slog.String("partType", partType), slog.Int("candidatesCount", candidatesCount))
+
 		for _, cand := range resp.Candidates {
 			if cand.Content != nil {
+				partsCount := len(cand.Content.Parts)
+				l.logger.DebugContext(ctx, "Processing content parts", slog.String("partType", partType), slog.Int("partsCount", partsCount))
+
 				for _, part := range cand.Content.Parts {
 					if part.Text != "" {
 						chunk := string(part.Text)
 						fullResponse.WriteString(chunk)
+						l.logger.DebugContext(ctx, "Sending chunk", slog.String("partType", partType), slog.Int("chunkLength", len(chunk)))
 						sendEvent(types.StreamEvent{
 							Type: types.EventTypeChunk,
 							Data: map[string]interface{}{
@@ -2674,9 +2739,15 @@ func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prom
 								"cache_used": cacheKey != "",
 							},
 						})
+					} else {
+						l.logger.DebugContext(ctx, "Empty text part", slog.String("partType", partType))
 					}
 				}
+			} else {
+				l.logger.DebugContext(ctx, "Candidate has no content", slog.String("partType", partType))
 			}
 		}
 	}
+
+	l.logger.InfoContext(ctx, "Stream worker completed", slog.String("partType", partType), slog.Int("totalResponses", responseCount), slog.Int("fullResponseLength", fullResponse.Len()))
 }

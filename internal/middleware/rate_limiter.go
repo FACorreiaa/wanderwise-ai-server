@@ -2,9 +2,11 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +37,34 @@ type RateLimitConfig struct {
 	RequestsPerDay    int           `json:"requests_per_day"`
 	BurstLimit        int           `json:"burst_limit"`
 	WindowSize        time.Duration `json:"window_size"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for RateLimitConfig
+func (c *RateLimitConfig) UnmarshalJSON(data []byte) error {
+	type Alias RateLimitConfig
+	aux := &struct {
+		WindowSize string `json:"window_size"`
+		*Alias
+	}{
+		Alias: (*Alias)(c),
+	}
+	
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	
+	// Parse window_size string to duration
+	if aux.WindowSize != "" {
+		duration, err := time.ParseDuration(aux.WindowSize)
+		if err != nil {
+			return fmt.Errorf("invalid window_size format: %w", err)
+		}
+		c.WindowSize = duration
+	} else {
+		c.WindowSize = time.Minute // Default
+	}
+	
+	return nil
 }
 
 // DefaultRateLimits defines default rate limits for different tiers
@@ -132,8 +162,10 @@ func (tb *TokenBucket) Allow() bool {
 
 	// Refill tokens based on elapsed time
 	if elapsed >= tb.window {
-		tokensToAdd := int(elapsed/tb.window) * tb.refill
-		tb.tokens = min(tb.capacity, tb.tokens+tokensToAdd)
+		if tb.window > 0 {
+			tokensToAdd := int(elapsed/tb.window) * tb.refill
+			tb.tokens = min(tb.capacity, tb.tokens+tokensToAdd)
+		}
 		tb.lastTime = now
 	}
 
@@ -164,6 +196,18 @@ type RateLimiter struct {
 
 // NewRateLimiter creates a new rate limiter
 func NewRateLimiter(logger *slog.Logger) *RateLimiter {
+	// Check environment variable first for quick disable
+	if os.Getenv("RATE_LIMIT_DISABLED") == "true" {
+		logger.Info("Rate limiting disabled via environment variable")
+		return &RateLimiter{
+			buckets:  make(map[string]*TokenBucket),
+			logger:   logger,
+			config:   make(map[string]RateLimitConfig),
+			enabled:  false,
+			settings: &RateLimitSettings{Enabled: false},
+		}
+	}
+
 	// Load configuration from environment or config file
 	settings, err := LoadRateLimitConfig("config/rate_limits.json")
 	if err != nil {
@@ -174,6 +218,10 @@ func NewRateLimiter(logger *slog.Logger) *RateLimiter {
 			Enabled:       true,
 		}
 	}
+
+	logger.Info("Rate limiter initialized", 
+		slog.Bool("enabled", settings.Enabled),
+		slog.String("config_source", "config/rate_limits.json"))
 
 	return &RateLimiter{
 		buckets:  make(map[string]*TokenBucket),
@@ -302,6 +350,12 @@ func RateLimitMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Check if rate limiting is disabled globally
+			if !limiter.enabled {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			ctx, span := otel.Tracer("RateLimitMiddleware").Start(r.Context(), "RateLimit", 
 				trace.WithAttributes(
 					attribute.String("http.method", r.Method),

@@ -1,5 +1,5 @@
 {
-  "enabled": true,
+  "enabled": false,
   "default_limits": {
     "public": {
       "requests_per_minute": 30,

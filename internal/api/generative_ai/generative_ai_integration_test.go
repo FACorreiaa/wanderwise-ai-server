@@ -16,7 +16,7 @@ import (
 
 func TestMain(m *testing.M) {
 	// Check if API key is available for integration tests
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
+	if os.Getenv("GEMINI_API_KEY") == "" {
 		// Skip all tests if no API key is provided
 		os.Exit(0)
 	}
@@ -28,8 +28,8 @@ func TestMain(m *testing.M) {
 func TestNewAIClient_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	t.Run("Create AI client successfully", func(t *testing.T) {
@@ -44,8 +44,8 @@ func TestNewAIClient_Integration(t *testing.T) {
 func TestAIClient_GenerateContent_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -100,8 +100,8 @@ func TestAIClient_GenerateContent_Integration(t *testing.T) {
 func TestAIClient_GenerateResponse_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -126,8 +126,8 @@ func TestAIClient_GenerateResponse_Integration(t *testing.T) {
 func TestAIClient_StartChatSession_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -148,8 +148,8 @@ func TestAIClient_StartChatSession_Integration(t *testing.T) {
 func TestChatSession_SendMessage_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -199,8 +199,8 @@ func TestChatSession_SendMessage_Integration(t *testing.T) {
 func TestAIClient_GenerateContentStream_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -258,8 +258,8 @@ func TestAIClient_GenerateContentStream_Integration(t *testing.T) {
 func TestChatSession_SendMessageStream_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)
@@ -325,8 +325,8 @@ func TestChatSession_SendMessageStream_Integration(t *testing.T) {
 func TestAIClient_ErrorHandling_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	t.Run("Test with context cancellation", func(t *testing.T) {
@@ -352,8 +352,8 @@ func TestAIClient_ErrorHandling_Integration(t *testing.T) {
 func TestAIClient_LongPrompt_Integration(t *testing.T) {
 	ctx := context.Background()
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping integration test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
 
 	client, err := NewAIClient(ctx)

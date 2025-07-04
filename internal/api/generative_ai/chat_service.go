@@ -63,9 +63,9 @@ func NewAIClient(ctx context.Context) (*AIClient, error) {
 	ctx, span := otel.Tracer("GenerativeAI").Start(ctx, "NewAIClient")
 	defer span.End()
 
-	apiKey := os.Getenv("GOOGLE_GEMINI_API_KEY")
+	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
-		err := fmt.Errorf("GOOGLE_GEMINI_API_KEY environment variable is not set")
+		err := fmt.Errorf("GEMINI_API_KEY environment variable is not set")
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "API key not set")
 		log.Fatal(err)

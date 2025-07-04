@@ -1352,6 +1352,8 @@ func (r *RepositoryImpl) SaveItinerary(ctx context.Context, userID, cityID uuid.
 	query := `
         INSERT INTO itineraries (user_id, city_id, created_at, updated_at)
         VALUES ($1, $2, NOW(), NOW())
+        ON CONFLICT (user_id, city_id) 
+        DO UPDATE SET updated_at = NOW()
         RETURNING id
     `
 	var itineraryID uuid.UUID

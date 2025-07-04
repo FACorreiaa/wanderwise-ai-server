@@ -66,7 +66,7 @@ func TestMain(m *testing.M) {
 
 	// Initialize AI client (may require API key)
 	var aiClient *generativeAI.AIClient
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") != "" {
+	if os.Getenv("GEMINI_API_KEY") != "" {
 		aiClient, err = generativeAI.NewAIClient(context.Background())
 		if err != nil {
 			log.Printf("Warning: Could not initialize AI client for integration tests: %v", err)
@@ -214,9 +214,9 @@ func TestServiceImpl_StartNewSession_Integration(t *testing.T) {
 
 		sessionID, response, err := testChatService.StartNewSession(ctx, userID, profileID, cityName, message, userLocation)
 
-		if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
+		if os.Getenv("GEMINI_API_KEY") == "" {
 			// Skip AI-dependent tests if no API key
-			t.Skip("Skipping AI-dependent test: GOOGLE_GEMINI_API_KEY not set")
+			t.Skip("Skipping AI-dependent test: GEMINI_API_KEY not set")
 		}
 
 		require.NoError(t, err)
@@ -237,8 +237,8 @@ func TestServiceImpl_ContinueSession_Integration(t *testing.T) {
 	ctx := context.Background()
 	clearChatTables(t)
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping AI-dependent test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping AI-dependent test: GEMINI_API_KEY not set")
 	}
 
 	userID := createTestUserForChat(t)
@@ -277,8 +277,8 @@ func TestServiceImpl_GetIteneraryResponse_Integration(t *testing.T) {
 	ctx := context.Background()
 	clearChatTables(t)
 
-	if os.Getenv("GOOGLE_GEMINI_API_KEY") == "" {
-		t.Skip("Skipping AI-dependent test: GOOGLE_GEMINI_API_KEY not set")
+	if os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("Skipping AI-dependent test: GEMINI_API_KEY not set")
 	}
 
 	userID := createTestUserForChat(t)

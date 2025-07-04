@@ -272,7 +272,7 @@ func (r *RepositoryImpl) SaveLlmSuggestedPOIsBatch(ctx context.Context, pois []t
 		return fmt.Errorf("failed to check if llm_interaction exists: %w", err)
 	}
 	if !exists {
-		r.logger.ErrorContext(ctx, "llm_interaction_id does not exist in database", 
+		r.logger.ErrorContext(ctx, "llm_interaction_id does not exist in database",
 			slog.String("llm_interaction_id", llmInteractionID.String()))
 		return fmt.Errorf("llm_interaction_id %s does not exist in database", llmInteractionID.String())
 	}
@@ -280,10 +280,10 @@ func (r *RepositoryImpl) SaveLlmSuggestedPOIsBatch(ctx context.Context, pois []t
 
 	batch := &pgx.Batch{}
 	query := `
-        INSERT INTO llm_suggested_pois 
-            (user_id, search_profile_id, llm_interaction_id, city_id, 
+        INSERT INTO llm_suggested_pois
+            (user_id, search_profile_id, llm_interaction_id, city_id,
              name, description_poi, location)
-        VALUES 
+        VALUES
             ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($7, $8), 4326))
     `
 
@@ -331,12 +331,12 @@ func (r *RepositoryImpl) GetLlmSuggestedPOIsByInteractionSortedByDistance(
 	// We filter by llm_interaction_id, so city_id might be redundant if interaction is specific to a city context
 	// But adding it for robustness if an interaction could span POIs from different "requested" cities (unlikely for current setup).
 	query := `
-        SELECT 
-            id, 
-            name, 
+        SELECT
+            id,
+            name,
             description_poi,
-            ST_X(location::geometry) AS longitude, 
-            ST_Y(location::geometry) AS latitude, 
+            ST_X(location::geometry) AS longitude,
+            ST_Y(location::geometry) AS latitude,
             ST_Distance(location::geography, ST_GeomFromText($1, 4326)::geography) AS distance
         FROM llm_suggested_pois
         WHERE llm_interaction_id = $2 `
@@ -460,7 +460,7 @@ func (r *RepositoryImpl) GetInteractionByID(ctx context.Context, interactionID u
 	defer span.End()
 
 	query := `
-		SELECT 
+		SELECT
 			id, user_id, prompt, response, model_name, latency_ms,
 			prompt_tokens, completion_tokens, total_tokens,
 			request_payload, response_payload
@@ -518,7 +518,7 @@ func (r *RepositoryImpl) GetLatestInteractionBySessionID(ctx context.Context, se
 	defer span.End()
 
 	query := `
-		SELECT 
+		SELECT
 			id, user_id, session_id, prompt, response, model_name, latency_ms,
 			prompt_tokens, completion_tokens, total_tokens,
 			request_payload, response_payload, city_name, created_at
@@ -710,8 +710,8 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 
 	query := `
         WITH grouped_interactions AS (
-            SELECT 
-                COALESCE(session_id, city_name || '_' || DATE(created_at)) as session_key,
+            SELECT
+                COALESCE(session_id::text, COALESCE(city_name, 'unknown') || '_' || DATE(created_at)) as session_key,
                 user_id,
                 city_name,
                 MIN(created_at) as first_interaction,
@@ -739,11 +739,11 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
                         'completion_tokens', completion_tokens
                     ) ORDER BY created_at
                 ) as interactions
-            FROM llm_interactions 
+            FROM llm_interactions
             WHERE user_id = $1 AND prompt IS NOT NULL
             GROUP BY session_key, user_id, city_name
         )
-        SELECT 
+        SELECT
             session_key,
             user_id,
             city_name,
@@ -773,13 +773,12 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 
 	var sessions []types.ChatSession
 	for rows.Next() {
-		var sessionKey, cityName string
+		var sessionKey, cityName, interactionsJSON sql.NullString
 		var userIDFromDB uuid.UUID
 		var firstInteraction, lastInteraction time.Time
 		var interactionCount int
 		var avgLatencyMs, totalTokens, totalPromptTokens, totalCompletionTokens, totalLatencyMs sql.NullInt64
 		var modelsUsed []string
-		var interactionsJSON string
 
 		err := rows.Scan(
 			&sessionKey, &userIDFromDB, &cityName, &firstInteraction, &lastInteraction, &interactionCount,
@@ -794,9 +793,11 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 		}
 
 		var interactions []map[string]interface{}
-		if err := json.Unmarshal([]byte(interactionsJSON), &interactions); err != nil {
-			r.logger.WarnContext(ctx, "Failed to parse interactions JSON", slog.Any("error", err))
-			continue
+		if interactionsJSON.Valid {
+			if err := json.Unmarshal([]byte(interactionsJSON.String), &interactions); err != nil {
+				r.logger.WarnContext(ctx, "Failed to parse interactions JSON", slog.Any("error", err))
+				continue
+			}
 		}
 
 		var conversationHistory []types.ConversationMessage
@@ -815,7 +816,7 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 			}
 			if response, ok := interaction["response"].(string); ok {
 				if response == "" {
-					response = fmt.Sprintf("I provided recommendations for %s", cityName)
+					response = fmt.Sprintf("I provided recommendations for %s", cityName.String)
 				} else {
 					// Count content items from response for metrics
 					contentCounts := countContentFromResponse(response)
@@ -828,7 +829,7 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 					dominantCategories = append(dominantCategories, contentCounts.Categories...)
 
 					// Convert JSON response to human-readable format
-					response = formatResponseForDisplay(response, cityName)
+					response = formatResponseForDisplay(response, cityName.String)
 				}
 				conversationHistory = append(conversationHistory, types.ConversationMessage{
 					Role:      "assistant",
@@ -850,7 +851,9 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 
 		// Calculate unique cities covered
 		citiesMap := make(map[string]bool)
-		citiesMap[cityName] = true
+		if cityName.Valid {
+			citiesMap[cityName.String] = true
+		}
 		for _, city := range citiesCovered {
 			citiesMap[city] = true
 		}
@@ -887,11 +890,11 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 			EngagementLevel:       engagementLevel,
 		}
 
-		sessionID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(sessionKey))
+		sessionID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(sessionKey.String))
 		session := types.ChatSession{
 			ID:                  sessionID,
 			UserID:              userIDFromDB,
-			CityName:            cityName,
+			CityName:            cityName.String,
 			ConversationHistory: conversationHistory,
 			CreatedAt:           firstInteraction,
 			UpdatedAt:           lastInteraction,
@@ -1222,12 +1225,12 @@ func (r *RepositoryImpl) SaveSinglePOI(ctx context.Context, poi types.POIDetaile
 	// Placeholders:                $1,    $2,      $3,      $4,                 $5,   $6,       $7,        ST_MakePoint($7,$6), $8, $9
 	query := `
         INSERT INTO llm_suggested_pois (
-            id, user_id, city_id, llm_interaction_id, name, 
+            id, user_id, city_id, llm_interaction_id, name,
             latitude, longitude, "location", -- Ensure "location" is quoted if it's a reserved keyword or mixed case
-            category, description_poi 
+            category, description_poi
             -- Removed distance from INSERT list
         ) VALUES (
-            $1, $2, $3, $4, $5, 
+            $1, $2, $3, $4, $5,
             $6, $7, ST_SetSRID(ST_MakePoint($7, $6), 4326), -- Longitude ($7) first, then Latitude ($6)
             $8, $9
         )
@@ -1276,13 +1279,13 @@ func (r *RepositoryImpl) SaveSinglePOI(ctx context.Context, poi types.POIDetaile
 func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, sessionID, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error) {
 
 	query := `
-        SELECT id, name, latitude, longitude, category, description_poi, 
+        SELECT id, name, latitude, longitude, category, description_poi,
                ST_Distance(
                    ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
                    location::geography  -- Use the actual geometry column for distance
                ) AS distance
         FROM llm_suggested_pois  -- Assuming this is the correct table to query for session POIs
-        WHERE city_id = $1 
+        WHERE city_id = $1
         -- Add AND llm_interaction_id IN (SELECT ...) if POIs are tied to specific interactions of the session
         ORDER BY distance ASC;
     `
@@ -1491,144 +1494,6 @@ func (r *RepositoryImpl) SaveItineraryPOIs(ctx context.Context, itineraryID uuid
 
 	return nil
 }
-
-// func (r *RepositoryImpl) SaveInteractionWithEmbedding(ctx context.Context, interaction types.LlmInteraction, embedding []float32) (uuid.UUID, error) {
-// 	ctx, span := otel.Tracer("LlmInteractionRepo").Start(ctx, "SaveInteractionWithEmbedding", trace.WithAttributes(
-// 		semconv.DBSystemPostgreSQL,
-// 		attribute.String("db.operation", "INSERT_COMPLEX"),
-// 		attribute.String("db.sql.table", "llm_interactions,itineraries,itinerary_pois"),
-// 		attribute.String("user.id", interaction.UserID.String()),
-// 		attribute.String("model.used", interaction.ModelUsed),
-// 		attribute.Int("latency.ms", interaction.LatencyMs),
-// 		attribute.String("city.name", interaction.CityName),
-// 	))
-// 	defer span.End()
-
-// 	var err error
-// 	tx, err := r.pgpool.BeginTx(ctx, pgx.TxOptions{})
-// 	if err != nil {
-// 		span.RecordError(err)
-// 		span.SetStatus(codes.Error, "Failed to start transaction")
-// 		return uuid.Nil, fmt.Errorf("failed to start transaction: %w", err)
-// 	}
-// 	defer func() {
-// 		if p := recover(); p != nil {
-// 			_ = tx.Rollback(ctx)
-// 			panic(p)
-// 		}
-// 		if err != nil {
-// 			if rbErr := tx.Rollback(ctx); rbErr != nil {
-// 				r.logger.ErrorContext(ctx, "Transaction rollback failed", slog.Any("error", rbErr))
-// 			}
-// 		}
-// 	}()
-
-// 	// Convert embedding to pgvector format
-// 	vectorParam := pgvector.NewVector(embedding)
-
-// 	interactionQuery := `
-//         INSERT INTO llm_interactions (
-//             user_id, prompt, response, model_name, latency_ms, city_name, prompt_embedding
-//         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-//         RETURNING id
-//     `
-// 	var interactionID uuid.UUID
-// 	err = tx.QueryRow(ctx, interactionQuery,
-// 		interaction.UserID,
-// 		interaction.Prompt,
-// 		interaction.ResponseText,
-// 		interaction.ModelUsed,
-// 		interaction.LatencyMs,
-// 		interaction.CityName,
-// 		vectorParam,
-// 	).Scan(&interactionID)
-// 	if err != nil {
-// 		span.RecordError(err)
-// 		span.SetStatus(codes.Error, "Failed to insert llm_interaction")
-// 		return uuid.Nil, fmt.Errorf("failed to insert llm_interaction: %w", err)
-// 	}
-// 	span.SetAttributes(attribute.String("llm_interaction.id", interactionID.String()))
-
-// 	// Existing itinerary and POI logic remains unchanged
-// 	var cityID uuid.UUID
-// 	if interaction.CityName != "" {
-// 		cityQuery := `SELECT id FROM cities WHERE name = $1 LIMIT 1`
-// 		err = tx.QueryRow(ctx, cityQuery, interaction.CityName).Scan(&cityID)
-// 		if err != nil && err != pgx.ErrNoRows {
-// 			span.RecordError(err)
-// 			return interactionID, fmt.Errorf("failed to get city_id: %w", err)
-// 		}
-// 	}
-
-// 	var itineraryID uuid.UUID
-// 	if cityID != uuid.Nil {
-// 		itineraryQuery := `
-//             INSERT INTO itineraries (user_id, city_id, source_llm_interaction_id)
-//             VALUES ($1, $2, $3)
-//             ON CONFLICT (user_id, city_id) DO UPDATE SET
-//                 updated_at = NOW(),
-//                 source_llm_interaction_id = EXCLUDED.source_llm_interaction_id
-//             RETURNING id
-//         `
-// 		err = tx.QueryRow(ctx, itineraryQuery, interaction.UserID, cityID, interactionID).Scan(&itineraryID)
-// 		if err != nil {
-// 			span.RecordError(err)
-// 			return interactionID, fmt.Errorf("failed to insert itinerary: %w", err)
-// 		}
-// 	}
-
-// 	if itineraryID != uuid.Nil {
-// 		var pois []types.POIDetailedInfo
-// 		pois, err = parsePOIsFromResponse(interaction.ResponseText, r.logger)
-// 		if err != nil {
-// 			span.RecordError(err)
-// 			return interactionID, fmt.Errorf("failed to parse POIs: %w", err)
-// 		}
-
-// 		if len(pois) > 0 {
-// 			poiBatch := &pgx.Batch{}
-// 			itineraryPoiInsertQuery := `
-//                 INSERT INTO itinerary_pois (itinerary_id, poi_id, order_index, ai_description)
-//                 VALUES ($1, $2, $3, $4)
-//                 ON CONFLICT (itinerary_id, poi_id) DO UPDATE SET
-//                     order_index = EXCLUDED.order_index,
-//                     ai_description = EXCLUDED.ai_description,
-//                     updated_at = NOW()
-//             `
-// 			for i, POIDetailedInfo := range pois {
-// 				var poiDBID uuid.UUID
-// 				poiDBID, err = r.GetOrCreatePOI(ctx, tx, POIDetailedInfo, cityID, interactionID)
-// 				if err != nil {
-// 					span.RecordError(err)
-// 					return interactionID, fmt.Errorf("failed to get or create POI: %w", err)
-// 				}
-// 				poiBatch.Queue(itineraryPoiInsertQuery, itineraryID, poiDBID, i, POIDetailedInfo.DescriptionPOI)
-// 			}
-
-// 			if poiBatch.Len() > 0 {
-// 				br := tx.SendBatch(ctx, poiBatch)
-// 				for i := 0; i < poiBatch.Len(); i++ {
-// 					_, execErr := br.Exec()
-// 					if execErr != nil {
-// 						err = fmt.Errorf("failed to insert itinerary_poi: %w", execErr)
-// 						br.Close()
-// 						return interactionID, err
-// 					}
-// 				}
-// 				br.Close()
-// 			}
-// 		}
-// 	}
-
-// 	err = tx.Commit(ctx)
-// 	if err != nil {
-// 		span.RecordError(err)
-// 		return uuid.Nil, fmt.Errorf("failed to commit transaction: %w", err)
-// 	}
-
-// 	span.SetStatus(codes.Ok, "Interaction saved successfully")
-// 	return interactionID, nil
-// }
 
 // ContentCounts represents counts of different content types found in responses
 type ContentCounts struct {
