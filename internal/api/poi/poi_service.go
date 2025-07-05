@@ -10,15 +10,16 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
-	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/google/uuid"
 	"github.com/patrickmn/go-cache"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
+	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 var _ Service = (*ServiceImpl)(nil)
@@ -47,7 +48,7 @@ type Service interface {
 
 	// Discover Service
 	GetGeneralPOIByDistance(ctx context.Context, userID uuid.UUID, lat, lon, distance float64) ([]types.POIDetailedInfo, error) //, categoryFilter string
-	
+
 	// LLM POI management
 	FindOrCreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error)
 }
@@ -781,4 +782,17 @@ func (s *ServiceImpl) FindOrCreateLLMPOI(ctx context.Context, poiData *types.POI
 	s.logger.InfoContext(ctx, "Created new LLM POI", "name", poiData.Name, "id", newID)
 	span.SetAttributes(attribute.String("operation", "created_new"))
 	return newID, nil
+}
+
+// FindLLMPOIByName finds an LLM POI by name, searching across all cities
+func (s *ServiceImpl) FindLLMPOIByName(ctx context.Context, poiName string) (uuid.UUID, error) {
+	ctx, span := otel.Tracer("POIService").Start(ctx, "FindLLMPOIByName", trace.WithAttributes(
+		attribute.String("poi.name", poiName),
+	))
+	defer span.End()
+
+	// For removal purposes, we need to find the POI by name
+	// Since we don't have city context, we'll search by name only
+	// This could be enhanced later to include city context if needed
+	return s.poiRepository.FindLLMPOIByName(ctx, poiName)
 }

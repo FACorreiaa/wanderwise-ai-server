@@ -40,6 +40,7 @@ type Repository interface {
 	CheckPoiExists(ctx context.Context, poiID uuid.UUID) (bool, error)
 	CheckLlmPoiExists(ctx context.Context, llmPoiID uuid.UUID) (bool, error)
 	FindLLMPOIByNameAndCity(ctx context.Context, name, city string) (uuid.UUID, error)
+	FindLLMPOIByName(ctx context.Context, name string) (uuid.UUID, error)
 	CreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error)
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
@@ -321,15 +322,39 @@ func (r *RepositoryImpl) RemovePoiFromFavourites(ctx context.Context, userID, po
 }
 
 func (r *RepositoryImpl) RemoveLLMPoiFromFavourite(ctx context.Context, userID, llmPoiID uuid.UUID) error {
+	// Debug: Check what's in the favorites table for this user
+	checkQuery := `SELECT id, llm_poi_id FROM user_favorite_llm_pois WHERE user_id = $1`
+	rows, err := r.pgpool.Query(ctx, checkQuery, userID)
+	if err == nil {
+		defer rows.Close()
+		r.logger.InfoContext(ctx, "Current user LLM favorites before deletion:")
+		for rows.Next() {
+			var id, poi_id uuid.UUID
+			if err := rows.Scan(&id, &poi_id); err == nil {
+				r.logger.InfoContext(ctx, "Found favorite", 
+					slog.String("favorite_id", id.String()),
+					slog.String("llm_poi_id", poi_id.String()))
+			}
+		}
+	}
+
 	query := `
 		DELETE FROM user_favorite_llm_pois
 		WHERE user_id = $1 AND llm_poi_id = $2
 	`
+	r.logger.InfoContext(ctx, "Executing delete query",
+		slog.String("userID", userID.String()),
+		slog.String("llmPoiID", llmPoiID.String()))
+		
 	result, err := r.pgpool.Exec(ctx, query, userID, llmPoiID)
 	if err != nil {
 		return fmt.Errorf("failed to remove LLM POI from favourites: %w", err)
 	}
-	if result.RowsAffected() == 0 {
+	
+	rowsAffected := result.RowsAffected()
+	r.logger.InfoContext(ctx, "Delete query result", slog.Int64("rows_affected", rowsAffected))
+	
+	if rowsAffected == 0 {
 		return fmt.Errorf("no favourite LLM POI found to remove")
 	}
 	return nil
@@ -1118,7 +1143,7 @@ func (r *RepositoryImpl) GetItinerary(ctx context.Context, userID, itineraryID u
 
 	query := `
 		SELECT 
-			id, user_id, source_llm_interaction_id, primary_city_id, title, description,
+			id, user_id, source_llm_interaction_id, session_id, primary_city_id, title, description,
 			markdown_content, tags, estimated_duration_days, estimated_cost_level, is_public
 		FROM user_saved_itineraries
 		WHERE id = $1 AND user_id = $2
@@ -1130,6 +1155,7 @@ func (r *RepositoryImpl) GetItinerary(ctx context.Context, userID, itineraryID u
 		&itinerary.ID,
 		&itinerary.UserID,
 		&itinerary.SourceLlmInteractionID,
+		&itinerary.SessionID,
 		&itinerary.PrimaryCityID,
 		&itinerary.Title,
 		&itinerary.Description,
@@ -1165,7 +1191,7 @@ func (r *RepositoryImpl) GetItineraries(ctx context.Context, userID uuid.UUID, p
 	offset := (page - 1) * pageSize
 	query := `
 		SELECT 
-			id, user_id, source_llm_interaction_id, primary_city_id, title, description,
+			id, user_id, source_llm_interaction_id, session_id, primary_city_id, title, description,
 			markdown_content, tags, estimated_duration_days, estimated_cost_level, is_public
 		FROM user_saved_itineraries
 		WHERE user_id = $1
@@ -1185,6 +1211,7 @@ func (r *RepositoryImpl) GetItineraries(ctx context.Context, userID uuid.UUID, p
 			&itinerary.ID,
 			&itinerary.UserID,
 			&itinerary.SourceLlmInteractionID,
+			&itinerary.SessionID,
 			&itinerary.PrimaryCityID,
 			&itinerary.Title,
 			&itinerary.Description,
@@ -2229,7 +2256,7 @@ func (l *RepositoryImpl) FindLLMPOIByNameAndCity(ctx context.Context, name, city
 		WHERE LOWER(name) = LOWER($1) AND LOWER(city) = LOWER($2)
 		LIMIT 1
 	`
-	
+
 	var id uuid.UUID
 	err := l.pgpool.QueryRow(ctx, query, name, city).Scan(&id)
 	if err != nil {
@@ -2238,8 +2265,33 @@ func (l *RepositoryImpl) FindLLMPOIByNameAndCity(ctx context.Context, name, city
 		}
 		return uuid.Nil, fmt.Errorf("failed to find LLM POI: %w", err)
 	}
-	
+
 	span.SetAttributes(attribute.String("poi.name", name), attribute.String("poi.city", city))
+	return id, nil
+}
+
+// FindLLMPOIByName finds an existing LLM POI by name across all cities
+func (l *RepositoryImpl) FindLLMPOIByName(ctx context.Context, name string) (uuid.UUID, error) {
+	ctx, span := otel.Tracer("POIRepository").Start(ctx, "FindLLMPOIByName")
+	defer span.End()
+
+	query := `
+		SELECT id 
+		FROM llm_poi 
+		WHERE LOWER(name) = LOWER($1)
+		LIMIT 1
+	`
+
+	var id uuid.UUID
+	err := l.pgpool.QueryRow(ctx, query, name).Scan(&id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return uuid.Nil, fmt.Errorf("LLM POI not found")
+		}
+		return uuid.Nil, fmt.Errorf("failed to find LLM POI: %w", err)
+	}
+
+	span.SetAttributes(attribute.String("poi.name", name))
 	return id, nil
 }
 
@@ -2249,7 +2301,7 @@ func (l *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDet
 	defer span.End()
 
 	newID := uuid.New()
-	
+
 	query := `
 		INSERT INTO llm_poi (
 			id, llm_interaction_id, city, name, latitude, longitude, 
@@ -2260,18 +2312,18 @@ func (l *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDet
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 		)
 	`
-	
+
 	// Convert slices to JSON for storage
 	tagsJSON, _ := json.Marshal(poiData.Tags)
 	imagesJSON, _ := json.Marshal(poiData.Images)
 	openingHoursJSON, _ := json.Marshal(poiData.OpeningHours)
-	
+
 	// Use LLM interaction ID directly, but handle invalid UUIDs
 	var llmInteractionID *uuid.UUID
 	if poiData.LlmInteractionID != uuid.Nil {
 		llmInteractionID = &poiData.LlmInteractionID
 	}
-	
+
 	now := time.Now()
 	_, err := l.pgpool.Exec(ctx, query,
 		newID,
@@ -2293,17 +2345,17 @@ func (l *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDet
 		now,
 		now,
 	)
-	
+
 	if err != nil {
 		span.RecordError(err)
 		return uuid.Nil, fmt.Errorf("failed to create LLM POI: %w", err)
 	}
-	
+
 	span.SetAttributes(
 		attribute.String("poi.id", newID.String()),
 		attribute.String("poi.name", poiData.Name),
 		attribute.String("poi.city", poiData.City),
 	)
-	
+
 	return newID, nil
 }

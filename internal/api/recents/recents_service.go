@@ -152,6 +152,24 @@ func (s *ServiceImpl) GetCityDetailsForUser(ctx context.Context, userID uuid.UUI
 		restaurants = []types.RestaurantDetailedInfo{} // Set to empty slice if we can't get restaurants
 	}
 
+	// Get saved itineraries for the city
+	itineraries, err := s.repo.GetCityItinerariesByInteraction(ctx, userID, cityName)
+	if err != nil {
+		l.WarnContext(ctx, "Failed to get itineraries for city",
+			slog.String("city_name", cityName),
+			slog.Any("error", err))
+		itineraries = []types.UserSavedItinerary{} // Set to empty slice if we can't get itineraries
+	}
+
+	// Get favorite POIs for the city
+	favorites, err := s.repo.GetCityFavorites(ctx, userID, cityName)
+	if err != nil {
+		l.WarnContext(ctx, "Failed to get favorites for city",
+			slog.String("city_name", cityName),
+			slog.Any("error", err))
+		favorites = []types.POIDetailedInfo{} // Set to empty slice if we can't get favorites
+	}
+
 	// Enrich interactions with POI/hotel/restaurant data
 	for i := range interactions {
 		interactions[i].POIs = convertPOIsToDetail(pois)
@@ -166,10 +184,15 @@ func (s *ServiceImpl) GetCityDetailsForUser(ctx context.Context, userID uuid.UUI
 	}
 
 	cityDetails := &types.CityInteractions{
-		CityName:     cityName,
-		Interactions: interactions,
-		POICount:     poiCount,
-		LastActivity: lastActivity,
+		CityName:          cityName,
+		Interactions:      interactions,
+		POICount:          poiCount,
+		LastActivity:      lastActivity,
+		SavedItineraries:  itineraries,
+		FavoritePOIs:      favorites,
+		TotalInteractions: len(interactions),
+		TotalFavorites:    len(favorites),
+		TotalItineraries:  len(itineraries),
 	}
 
 	l.InfoContext(ctx, "Successfully retrieved city details",
@@ -178,13 +201,17 @@ func (s *ServiceImpl) GetCityDetailsForUser(ctx context.Context, userID uuid.UUI
 		slog.Int("interaction_count", len(interactions)),
 		slog.Int("poi_count", len(pois)),
 		slog.Int("hotel_count", len(hotels)),
-		slog.Int("restaurant_count", len(restaurants)))
+		slog.Int("restaurant_count", len(restaurants)),
+		slog.Int("itinerary_count", len(itineraries)),
+		slog.Int("favorite_count", len(favorites)))
 
 	span.SetAttributes(
 		attribute.Int("results.interactions", len(interactions)),
 		attribute.Int("results.pois", len(pois)),
 		attribute.Int("results.hotels", len(hotels)),
 		attribute.Int("results.restaurants", len(restaurants)),
+		attribute.Int("results.itineraries", len(itineraries)),
+		attribute.Int("results.favorites", len(favorites)),
 	)
 	span.SetStatus(codes.Ok, "City details retrieved")
 

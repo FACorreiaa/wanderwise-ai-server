@@ -416,15 +416,16 @@ func (r *RepositoryImpl) AddChatToBookmark(ctx context.Context, itinerary *types
 
 	query := `
 		INSERT INTO user_saved_itineraries (
-			user_id, source_llm_interaction_id, primary_city_id, title, description,
+			user_id, source_llm_interaction_id, session_id, primary_city_id, title, description,
 			markdown_content, tags, estimated_duration_days, estimated_cost_level, is_public
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id
 	`
 	var savedItineraryID uuid.UUID
 	if err := tx.QueryRow(ctx, query,
 		&itinerary.UserID,
 		&itinerary.SourceLlmInteractionID,
+		&itinerary.SessionID,
 		&itinerary.PrimaryCityID,
 		&itinerary.Title,
 		&itinerary.Description,

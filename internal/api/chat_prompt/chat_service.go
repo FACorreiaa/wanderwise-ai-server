@@ -509,14 +509,23 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 		l.logger.InfoContext(ctx, "Using provided LlmInteractionID for bookmark",
 			slog.String("llmInteractionID", req.LlmInteractionID.String()))
 	} else if req.SessionID != nil {
-		// If SessionID is provided, use it directly as the source interaction ID
-		// This allows matching bookmarks by session ID later
-		sourceInteractionID = pgtype.UUID{
-			Bytes: *req.SessionID,
-			Valid: true,
+		// If SessionID is provided, try to find the latest LLM interaction in that session
+		// But always store the session ID for tracking purposes
+		latestInteraction, err := l.llmInteractionRepo.GetLatestInteractionBySessionID(ctx, *req.SessionID)
+		if err != nil || latestInteraction == nil {
+			l.logger.InfoContext(ctx, "No interaction found for session, storing session ID without interaction reference",
+				slog.String("sessionID", req.SessionID.String()),
+				slog.Any("findError", err))
+			sourceInteractionID = pgtype.UUID{Valid: false} // Set to NULL for interaction reference
+		} else {
+			sourceInteractionID = pgtype.UUID{
+				Bytes: latestInteraction.ID,
+				Valid: true,
+			}
+			l.logger.InfoContext(ctx, "Found latest interaction for session",
+				slog.String("sessionID", req.SessionID.String()),
+				slog.String("interactionID", latestInteraction.ID.String()))
 		}
-		l.logger.InfoContext(ctx, "Using SessionID as source interaction ID for bookmark",
-			slog.String("sessionID", req.SessionID.String()))
 	} else {
 		sourceInteractionID = pgtype.UUID{Valid: false} // Explicitly invalid for NULL
 		l.logger.InfoContext(ctx, "No LlmInteractionID or SessionID provided, bookmark will have no source reference")
@@ -584,9 +593,21 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 		isPublic = *req.IsPublic
 	}
 
+	// Prepare session ID if provided
+	var sessionID pgtype.UUID
+	if req.SessionID != nil {
+		sessionID = pgtype.UUID{
+			Bytes: *req.SessionID,
+			Valid: true,
+		}
+	} else {
+		sessionID = pgtype.UUID{Valid: false}
+	}
+
 	newBookmark := &types.UserSavedItinerary{
 		UserID:                 userID,
 		SourceLlmInteractionID: sourceInteractionID, // Will be nil if not provided
+		SessionID:              sessionID,           // Store the session ID separately
 		PrimaryCityID:          primaryCityID,
 		Title:                  req.Title,
 		Description:            description,
