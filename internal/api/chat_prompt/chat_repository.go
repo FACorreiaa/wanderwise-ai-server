@@ -621,7 +621,27 @@ func (r *RepositoryImpl) RemoveChatFromBookmark(ctx context.Context, userID, iti
 	}
 
 	if tag.RowsAffected() == 0 {
-		err := fmt.Errorf("no itinerary found with ID %s for user %s", itineraryID, userID)
+		// Check if the itinerary exists but belongs to a different user
+		var existsForOtherUser bool
+		checkQuery := `SELECT EXISTS(SELECT 1 FROM user_saved_itineraries WHERE id = $1)`
+		checkErr := r.pgpool.QueryRow(ctx, checkQuery, itineraryID).Scan(&existsForOtherUser)
+		if checkErr != nil {
+			r.logger.ErrorContext(ctx, "Failed to check if itinerary exists for other user", slog.Any("error", checkErr))
+		}
+		
+		var err error
+		if existsForOtherUser {
+			err = fmt.Errorf("itinerary with ID %s exists but belongs to a different user (attempted by user %s)", itineraryID, userID)
+			r.logger.WarnContext(ctx, "Attempted to delete itinerary belonging to different user", 
+				slog.String("itineraryID", itineraryID.String()),
+				slog.String("userID", userID.String()))
+		} else {
+			err = fmt.Errorf("no itinerary found with ID %s for user %s", itineraryID, userID)
+			r.logger.WarnContext(ctx, "Attempted to delete non-existent itinerary", 
+				slog.String("itineraryID", itineraryID.String()),
+				slog.String("userID", userID.String()))
+		}
+		
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Itinerary not found")
 		return err

@@ -183,6 +183,7 @@ func main() {
 		RecentsHandler:          c.RecentsHandler,
 		StatisticsHandler:       c.StatisticsHandler,
 		AuthenticateMiddleware:  authenticateMiddleware,
+		RateLimiter:             c.RateLimiter,
 		Logger:                  logger,
 	}
 	apiRouter := router.SetupRouter(routerConfig)

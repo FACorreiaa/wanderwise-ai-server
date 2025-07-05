@@ -7,8 +7,7 @@ CREATE TABLE itineraries (
     city_id UUID REFERENCES cities (id) ON DELETE CASCADE,
     source_llm_interaction_id UUID REFERENCES llm_interactions (id) ON DELETE CASCADE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT itineraries_user_id_city_id_unique UNIQUE (user_id, city_id)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Table to link POIs to itineraries with AI-generated descriptions

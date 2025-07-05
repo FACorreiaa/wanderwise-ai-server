@@ -270,11 +270,11 @@ func (l *ServiceImpl) CollectResults(resultCh <-chan types.GenAIResponse) (itine
 }
 
 func (l *ServiceImpl) HandleCityData(ctx context.Context, cityData types.GeneralCityData) (cityID uuid.UUID, err error) {
-	city, err := l.cityRepo.FindCityByNameAndCountry(ctx, cityData.City, cityData.Country)
+	c, err := l.cityRepo.FindCityByNameAndCountry(ctx, cityData.City, cityData.Country)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("failed to check city existence: %w", err)
 	}
-	if city == nil {
+	if c == nil {
 		cityDetail := types.CityDetail{
 			Name:            cityData.City,
 			Country:         cityData.Country,
@@ -288,7 +288,7 @@ func (l *ServiceImpl) HandleCityData(ctx context.Context, cityData types.General
 			return uuid.Nil, fmt.Errorf("failed to save city: %w", err)
 		}
 	} else {
-		cityID = city.ID
+		cityID = c.ID
 	}
 	return cityID, nil
 }
@@ -310,9 +310,17 @@ func (l *ServiceImpl) HandleGeneralPOIs(ctx context.Context, pois []types.POIDet
 }
 
 func (l *ServiceImpl) HandlePersonalisedPOIs(ctx context.Context, pois []types.POIDetailedInfo, cityID uuid.UUID, userLocation *types.UserLocation, llmInteractionID uuid.UUID, userID, profileID uuid.UUID) ([]types.POIDetailedInfo, error) {
-	if userLocation == nil || cityID == uuid.Nil || len(pois) == 0 {
+	if userLocation == nil || len(pois) == 0 {
 		return pois, nil // No sorting possible
 	}
+
+	// Check if cityID is valid, if not, skip itinerary creation to avoid foreign key constraint errors
+	if cityID == uuid.Nil || cityID.String() == "00000000-0000-0000-0000-000000000000" {
+		l.logger.WarnContext(ctx, "Skipping itinerary creation due to invalid cityID",
+			slog.String("cityID", cityID.String()))
+		return pois, nil // Return POIs without sorting/saving to avoid database errors
+	}
+
 	err := l.llmInteractionRepo.SaveLlmSuggestedPOIsBatch(ctx, pois, userID, profileID, llmInteractionID, cityID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save personalised POIs: %w", err)
@@ -320,7 +328,12 @@ func (l *ServiceImpl) HandlePersonalisedPOIs(ctx context.Context, pois []types.P
 
 	itineraryID, err := l.poiRepo.SaveItinerary(ctx, userID, cityID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to save itinerary: %w", err)
+		l.logger.ErrorContext(ctx, "Failed to save itinerary, skipping itinerary creation",
+			slog.Any("error", err),
+			slog.String("cityID", cityID.String()),
+			slog.String("userID", userID.String()))
+		// Don't return error, just skip itinerary creation and continue with POI processing
+		return pois, nil
 	}
 
 	if err := l.poiRepo.SaveItineraryPOIs(ctx, itineraryID, pois); err != nil {
@@ -488,24 +501,54 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 
 	var sourceInteractionID pgtype.UUID
 	if req.LlmInteractionID != nil {
+		// Use specific interaction ID if provided
 		sourceInteractionID = pgtype.UUID{
 			Bytes: *req.LlmInteractionID,
 			Valid: true,
 		}
-	} else {
-		sourceInteractionID = pgtype.UUID{Valid: false} // Explicitly invalid for NULL
-	}
-
-	// Prepare primaryCityID
-	var primaryCityID pgtype.UUID
-	if req.PrimaryCityID != nil {
-		primaryCityID = pgtype.UUID{
-			Bytes: *req.PrimaryCityID,
+		l.logger.InfoContext(ctx, "Using provided LlmInteractionID for bookmark",
+			slog.String("llmInteractionID", req.LlmInteractionID.String()))
+	} else if req.SessionID != nil {
+		// If SessionID is provided, use it directly as the source interaction ID
+		// This allows matching bookmarks by session ID later
+		sourceInteractionID = pgtype.UUID{
+			Bytes: *req.SessionID,
 			Valid: true,
 		}
+		l.logger.InfoContext(ctx, "Using SessionID as source interaction ID for bookmark",
+			slog.String("sessionID", req.SessionID.String()))
 	} else {
-		primaryCityID = pgtype.UUID{Valid: false} // Explicitly invalid for NULL
+		sourceInteractionID = pgtype.UUID{Valid: false} // Explicitly invalid for NULL
+		l.logger.InfoContext(ctx, "No LlmInteractionID or SessionID provided, bookmark will have no source reference")
 	}
+
+	// Prepare primaryCityID - handle both PrimaryCityID and PrimaryCityName
+	var primaryCityID pgtype.UUID
+	//if req.PrimaryCityID != nil {
+	//	primaryCityID = pgtype.UUID{
+	//		Bytes: *req.PrimaryCityID,
+	//		Valid: true,
+	//	}
+	//} else if req.PrimaryCityName != "" {
+	//	// Look up city by name using the existing HandleCityData function
+	//	cityData, err := l.HandleCityData(ctx, req.PrimaryCityName)
+	//	if err != nil {
+	//		l.logger.WarnContext(ctx, "Failed to find city by name for bookmark",
+	//			slog.String("cityName", req.PrimaryCityName),
+	//			slog.Any("error", err))
+	//		primaryCityID = pgtype.UUID{Valid: false} // Set to NULL if city lookup fails
+	//	} else {
+	//		primaryCityID = pgtype.UUID{
+	//			Bytes: cityData.ID,
+	//			Valid: true,
+	//		}
+	//		l.logger.InfoContext(ctx, "Successfully resolved city name to ID for bookmark",
+	//			slog.String("cityName", req.PrimaryCityName),
+	//			slog.String("cityID", cityData.ID.String()))
+	//	}
+	//} else {
+	//	primaryCityID = pgtype.UUID{Valid: false} // Explicitly invalid for NULL
+	//}
 
 	// Fetch original interaction only if LlmInteractionID is provided
 	var originalInteraction *types.LlmInteraction
@@ -557,43 +600,16 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 		return uuid.Nil, err
 	}
 
-	// Save to itineraries
-	itineraryID, err := l.poiRepo.SaveItinerary(ctx, userID, primaryCityID.Bytes)
-	if err != nil {
-		l.logger.WarnContext(ctx, "Failed to save to itineraries", slog.Any("error", err))
-		span.RecordError(err)
-		return savedID, nil
-	}
+	// Note: We skip saving to the old 'itineraries' table for bookmarks
+	// because it has a unique constraint on (user_id, city_id) that prevents
+	// multiple itineraries per city. Bookmarks should only use user_saved_itineraries.
 
-	// Fetch POIs from llm_suggested_pois only if we have an interaction ID
-	if req.LlmInteractionID != nil {
-		pois, err := l.llmInteractionRepo.GetLlmSuggestedPOIsByInteractionSortedByDistance(ctx, *req.LlmInteractionID, primaryCityID.Bytes, types.UserLocation{})
-		if err != nil {
-			l.logger.WarnContext(ctx, "Failed to fetch suggested POIs", slog.Any("error", err))
-			span.RecordError(err)
-			return savedID, nil
-		}
+	l.logger.InfoContext(ctx, "Successfully saved bookmark to user_saved_itineraries",
+		slog.String("savedID", savedID.String()),
+		slog.String("title", req.Title))
 
-		if len(pois) > 0 {
-			l.logger.InfoContext(ctx, "Found POIs to process", slog.Int("count", len(pois)))
-
-			for i := range pois {
-				pois[i].CityID = primaryCityID.Bytes
-			}
-
-			if err := l.poiRepo.SaveItineraryPOIs(ctx, itineraryID, pois); err != nil {
-				l.logger.WarnContext(ctx, "Failed to save to itinerary_pois", slog.Any("error", err))
-				span.RecordError(err)
-				return savedID, nil
-			}
-		}
-	}
-
-	l.logger.InfoContext(ctx, "Successfully saved itinerary",
-		slog.String("savedItineraryID", savedID.String()),
-		slog.String("itineraryID", itineraryID.String()))
-	span.SetAttributes(attribute.String("itinerary.id", itineraryID.String()))
-	span.SetStatus(codes.Ok, "Itinerary saved successfully")
+	span.SetAttributes(attribute.String("saved_itinerary.id", savedID.String()))
+	span.SetStatus(codes.Ok, "Bookmark saved successfully")
 	return savedID, nil
 }
 

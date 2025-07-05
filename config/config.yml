@@ -47,6 +47,22 @@ jwt:
   audience: ${JWT_AUDIENCE}
   accessTokenTTL: 15m # Default value if ENV not set or invalid
   refreshTokenTTL: 168h # Default value if ENV not set or invalid
+
+# Rate limiting configuration for LLM calls
+rateLimit:
+  enabled: true # Set to false for development
+  anonymous:
+    perMinute: 2   # Very limited for anonymous users
+    perHour: 10
+    perDay: 20
+  loggedIn:
+    perMinute: 5   # Reasonable limits for registered users
+    perHour: 50
+    perDay: 200
+  paying:
+    perMinute: 20  # Higher limits for paying users
+    perHour: 500
+    perDay: 2000
   # redis:
   #   host: "redis"
   #   port: "6388"

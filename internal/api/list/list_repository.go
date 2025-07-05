@@ -28,6 +28,12 @@ type Repository interface {
 	UpdateList(ctx context.Context, list types.List) error
 	GetSubLists(ctx context.Context, parentListID uuid.UUID) ([]*types.List, error)
 	GetListItems(ctx context.Context, listID uuid.UUID) ([]*types.ListItem, error)
+
+	// Generic list item methods (support all content types)
+	GetListItemByID(ctx context.Context, listID, itemID uuid.UUID) (types.ListItem, error)
+	DeleteListItemByID(ctx context.Context, listID, itemID uuid.UUID) error
+
+	// Legacy POI-specific methods (for backward compatibility)
 	GetListItem(ctx context.Context, listID, poiID uuid.UUID) (types.ListItem, error)
 	AddListItem(ctx context.Context, item types.ListItem) error
 	UpdateListItem(ctx context.Context, item types.ListItem) error
@@ -145,7 +151,7 @@ func (r *RepositoryImpl) GetListItems(ctx context.Context, listID uuid.UUID) ([]
 		var timeSlot sql.NullTime
 		var duration sql.NullInt32
 		err := rows.Scan(
-			&item.ListID, &item.PoiID, &item.Position, &item.Notes,
+			&item.ListID, &item.ItemID, &item.Position, &item.Notes,
 			&dayNumber, &timeSlot, &duration, &item.CreatedAt, &item.UpdatedAt,
 		)
 		if err != nil {
@@ -172,18 +178,20 @@ func (r *RepositoryImpl) GetListItems(ctx context.Context, listID uuid.UUID) ([]
 	return items, nil
 }
 
-// AddListItem inserts a new item into the list_items table
+// AddListItem inserts a new item into the list_items table (supports both legacy and new structure)
 func (r *RepositoryImpl) AddListItem(ctx context.Context, item types.ListItem) error {
 	query := `
         INSERT INTO list_items (
-            list_id, poi_id, position, notes, day_number, time_slot, duration, created_at, updated_at
+            list_id, item_id, content_type, position, notes, day_number, time_slot, 
+            duration, source_llm_interaction_id, item_ai_description, created_at, updated_at
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
         )
     `
 	_, err := r.pgpool.Exec(ctx, query,
-		item.ListID, item.PoiID, item.Position, item.Notes,
-		item.DayNumber, item.TimeSlot, item.Duration, item.CreatedAt, item.UpdatedAt,
+		item.ListID, item.ItemID, item.ContentType, item.Position, item.Notes,
+		item.DayNumber, item.TimeSlot, item.Duration, item.SourceLlmInteractionID,
+		item.ItemAIDescription, item.CreatedAt, item.UpdatedAt,
 	)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "Failed to add list item", slog.Any("error", err))
@@ -255,7 +263,7 @@ func (r *RepositoryImpl) GetListItem(ctx context.Context, listID, poiID uuid.UUI
 	var timeSlot sql.NullTime
 	var duration sql.NullInt32
 	err := row.Scan(
-		&item.ListID, &item.PoiID, &item.Position, &item.Notes,
+		&item.ListID, &item.ItemID, &item.Position, &item.Notes,
 		&dayNumber, &timeSlot, &duration, &item.CreatedAt, &item.UpdatedAt,
 	)
 	if err != nil {
@@ -279,24 +287,26 @@ func (r *RepositoryImpl) GetListItem(ctx context.Context, listID, poiID uuid.UUI
 	return item, nil
 }
 
-// UpdateListItem updates an item in the list_items table
+// UpdateListItem updates an item in the list_items table (supports new generic structure)
 func (r *RepositoryImpl) UpdateListItem(ctx context.Context, item types.ListItem) error {
 	query := `
         UPDATE list_items
-        SET position = $1, notes = $2, day_number = $3, time_slot = $4, 
-            duration = $5, updated_at = $6
-        WHERE list_id = $7 AND poi_id = $8
+        SET item_id = $1, content_type = $2, position = $3, notes = $4, day_number = $5, 
+            time_slot = $6, duration = $7, source_llm_interaction_id = $8, 
+            item_ai_description = $9, updated_at = $10
+        WHERE list_id = $11 AND item_id = $12
     `
 	result, err := r.pgpool.Exec(ctx, query,
-		item.Position, item.Notes, item.DayNumber, item.TimeSlot,
-		item.Duration, item.UpdatedAt, item.ListID, item.PoiID,
+		item.ItemID, item.ContentType, item.Position, item.Notes, item.DayNumber,
+		item.TimeSlot, item.Duration, item.SourceLlmInteractionID, item.ItemAIDescription,
+		item.UpdatedAt, item.ListID, item.ItemID,
 	)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "Failed to update list item", slog.Any("error", err))
 		return fmt.Errorf("failed to update list item: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("no list item found for list_id %s and poi_id %s", item.ListID, item.PoiID)
+		return fmt.Errorf("no list item found for list_id %s and item_id %s", item.ListID, item.ItemID)
 	}
 	return nil
 }
@@ -335,4 +345,45 @@ func (r *RepositoryImpl) GetUserLists(ctx context.Context, userID uuid.UUID, isI
 		return nil, fmt.Errorf("error iterating list rows: %w", err)
 	}
 	return lists, nil
+}
+
+// Generic list item methods (support all content types)
+
+// GetListItemByID retrieves a specific item from a list using generic item_id
+func (r *RepositoryImpl) GetListItemByID(ctx context.Context, listID, itemID uuid.UUID) (types.ListItem, error) {
+	query := `
+        SELECT list_id, item_id, content_type, position, notes, day_number, 
+               time_slot, duration, source_llm_interaction_id, item_ai_description, 
+               created_at, updated_at
+        FROM list_items 
+        WHERE list_id = $1 AND item_id = $2
+    `
+	var item types.ListItem
+	err := r.pgpool.QueryRow(ctx, query, listID, itemID).Scan(
+		&item.ListID, &item.ItemID, &item.ContentType, &item.Position, &item.Notes,
+		&item.DayNumber, &item.TimeSlot, &item.Duration, &item.SourceLlmInteractionID,
+		&item.ItemAIDescription, &item.CreatedAt, &item.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return types.ListItem{}, fmt.Errorf("no list item found for list_id %s and item_id %s", listID, itemID)
+		}
+		r.logger.ErrorContext(ctx, "Failed to get list item by ID", slog.Any("error", err))
+		return types.ListItem{}, fmt.Errorf("failed to get list item: %w", err)
+	}
+	return item, nil
+}
+
+// DeleteListItemByID deletes a specific item from a list using generic item_id
+func (r *RepositoryImpl) DeleteListItemByID(ctx context.Context, listID, itemID uuid.UUID) error {
+	query := `DELETE FROM list_items WHERE list_id = $1 AND item_id = $2`
+	result, err := r.pgpool.Exec(ctx, query, listID, itemID)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to delete list item by ID", slog.Any("error", err))
+		return fmt.Errorf("failed to delete list item: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("no list item found for list_id %s and item_id %s", listID, itemID)
+	}
+	return nil
 }

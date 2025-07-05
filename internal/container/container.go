@@ -20,6 +20,7 @@ import (
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/statistics"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/tags"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/user"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/middleware"
 )
 
 // Container holds all application dependencies
@@ -27,6 +28,7 @@ type Container struct {
 	Config                    *config.Config
 	Logger                    *slog.Logger
 	Pool                      *pgxpool.Pool
+	RateLimiter               *middleware.RateLimiter
 	AuthHandler               *auth.HandlerImpl
 	UserHandler               *user.HandlerImpl
 	InterestHandler           *interests.HandlerImpl
@@ -120,10 +122,14 @@ func NewContainer(cfg *config.Config, logger *slog.Logger) (*Container, error) {
 	statisticsService := statistics.NewService(statisticsRepository, logger)
 	statisticsHandler := statistics.NewHandler(statisticsService, logger, cfg.JWT)
 
+	// Initialize rate limiter
+	rateLimiter := middleware.NewRateLimiter(&cfg.RateLimit, logger)
+
 	return &Container{
 		Config:                    cfg,
 		Logger:                    logger,
 		Pool:                      pool,
+		RateLimiter:               rateLimiter,
 		AuthHandler:               authHandlerImpl,
 		UserHandler:               userHandlerImpl,
 		InterestHandler:           HandlerImpl,

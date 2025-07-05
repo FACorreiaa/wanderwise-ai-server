@@ -57,16 +57,31 @@ type List struct {
 	UpdatedAt    time.Time
 }
 
+// ContentType defines the type of content in a list item
+type ContentType string
+
+const (
+	ContentTypePOI        ContentType = "poi"
+	ContentTypeRestaurant ContentType = "restaurant"
+	ContentTypeHotel      ContentType = "hotel"
+	ContentTypeItinerary  ContentType = "itinerary"
+)
+
 type ListItem struct {
-	ListID    uuid.UUID
-	PoiID     uuid.UUID
-	Position  int
-	Notes     string
-	DayNumber *int       // Nullable, as per schema
-	TimeSlot  *time.Time // Nullable, as per schema
-	Duration  *int       // Nullable, as per schema
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ListID      uuid.UUID   `json:"list_id"`
+	ItemID      uuid.UUID   `json:"item_id"`      // Generic ID that could reference POI, Restaurant, Hotel, or Itinerary
+	ContentType ContentType `json:"content_type"` // Type of content this item represents
+	Position    int         `json:"position"`
+	Notes       string      `json:"notes"`
+	DayNumber   *int        `json:"day_number"` // Nullable, as per schema
+	TimeSlot    *time.Time  `json:"time_slot"`  // Nullable, as per schema
+	Duration    *int        `json:"duration"`   // Nullable, as per schema
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
+
+	// Additional metadata for different content types
+	SourceLlmInteractionID *uuid.UUID `json:"source_llm_interaction_id,omitempty"` // Reference to the original LLM interaction
+	ItemAIDescription      string     `json:"item_ai_description,omitempty"`       // AI-generated description for this item
 }
 
 type UpdateListRequest struct {
@@ -78,31 +93,48 @@ type UpdateListRequest struct {
 }
 
 type AddListItemRequest struct {
-	PoiID                   uuid.UUID  `json:"poi_id" validate:"required"`
-	Position                int        `json:"position" validate:"gte=0"`
-	Notes                   string     `json:"notes,omitempty" validate:"max=1000"`
-	DayNumber               *int       `json:"day_number,omitempty" validate:"omitempty,gt=0"`
-	TimeSlot                *time.Time `json:"time_slot,omitempty"`
-	DurationMinutes         *int       `json:"duration_minutes,omitempty" validate:"omitempty,gt=0"`
-	SourceLlmSuggestedPoiID *uuid.UUID `json:"source_llm_suggested_poi_id,omitempty"`
-	ItemAIDescription       string     `json:"item_ai_description,omitempty"`
+	ItemID                 uuid.UUID   `json:"item_id" validate:"required"`                                           // Generic ID for POI, Restaurant, Hotel, or Itinerary
+	ContentType            ContentType `json:"content_type" validate:"required,oneof=poi restaurant hotel itinerary"` // Type of content being added
+	Position               int         `json:"position" validate:"gte=0"`
+	Notes                  string      `json:"notes,omitempty" validate:"max=1000"`
+	DayNumber              *int        `json:"day_number,omitempty" validate:"omitempty,gt=0"`
+	TimeSlot               *time.Time  `json:"time_slot,omitempty"`
+	DurationMinutes        *int        `json:"duration_minutes,omitempty" validate:"omitempty,gt=0"`
+	SourceLlmInteractionID *uuid.UUID  `json:"source_llm_interaction_id,omitempty"` // Reference to the LLM interaction that generated this content
+	ItemAIDescription      string      `json:"item_ai_description,omitempty"`
 }
 
 type UpdateListItemRequest struct {
-	PoiID                   *uuid.UUID `json:"poi_id,omitempty"`
-	Position                *int       `json:"position,omitempty" validate:"omitempty,gte=0"`
-	Notes                   *string    `json:"notes,omitempty" validate:"omitempty,max=1000"`
-	DayNumber               *int       `json:"day_number,omitempty" validate:"omitempty,gt=0"`
-	TimeSlot                *time.Time `json:"time_slot,omitempty"`
-	DurationMinutes         *int       `json:"duration_minutes,omitempty" validate:"omitempty,gt=0"`
-	SourceLlmSuggestedPoiID *uuid.UUID `json:"source_llm_suggested_poi_id,omitempty"`
-	ItemAIDescription       *string    `json:"item_ai_description,omitempty"`
+	ItemID                 *uuid.UUID   `json:"item_id,omitempty"`                                                                // Generic ID for POI, Restaurant, Hotel, or Itinerary
+	ContentType            *ContentType `json:"content_type,omitempty" validate:"omitempty,oneof=poi restaurant hotel itinerary"` // Type of content
+	Position               *int         `json:"position,omitempty" validate:"omitempty,gte=0"`
+	Notes                  *string      `json:"notes,omitempty" validate:"omitempty,max=1000"`
+	DayNumber              *int         `json:"day_number,omitempty" validate:"omitempty,gt=0"`
+	TimeSlot               *time.Time   `json:"time_slot,omitempty"`
+	DurationMinutes        *int         `json:"duration_minutes,omitempty" validate:"omitempty,gt=0"`
+	SourceLlmInteractionID *uuid.UUID   `json:"source_llm_interaction_id,omitempty"`
+	ItemAIDescription      *string      `json:"item_ai_description,omitempty"`
 }
 
 // ListWithItems combines a List with its items
 type ListWithItems struct {
 	List  List
 	Items []*ListItem
+}
+
+// ListItemWithContent combines a ListItem with its actual content details
+type ListItemWithContent struct {
+	ListItem   ListItem                `json:"list_item"`
+	POI        *POIDetailedInfo        `json:"poi,omitempty"`        // Populated when ContentType is "poi"
+	Restaurant *RestaurantDetailedInfo `json:"restaurant,omitempty"` // Populated when ContentType is "restaurant"
+	Hotel      *HotelDetailedInfo      `json:"hotel,omitempty"`      // Populated when ContentType is "hotel"
+	Itinerary  *UserSavedItinerary     `json:"itinerary,omitempty"`  // Populated when ContentType is "itinerary"
+}
+
+// ListWithDetailedItems combines a List with its items and their content details
+type ListWithDetailedItems struct {
+	List  List                   `json:"list"`
+	Items []*ListItemWithContent `json:"items"`
 }
 
 type CreateListRequest struct {
