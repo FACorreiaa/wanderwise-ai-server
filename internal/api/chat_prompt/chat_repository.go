@@ -272,7 +272,7 @@ func (r *RepositoryImpl) SaveLlmSuggestedPOIsBatch(ctx context.Context, pois []t
 		return fmt.Errorf("failed to check if llm_interaction exists: %w", err)
 	}
 	if !exists {
-		r.logger.ErrorContext(ctx, "llm_interaction_id does not exist in database", 
+		r.logger.ErrorContext(ctx, "llm_interaction_id does not exist in database",
 			slog.String("llm_interaction_id", llmInteractionID.String()))
 		return fmt.Errorf("llm_interaction_id %s does not exist in database", llmInteractionID.String())
 	}
@@ -632,88 +632,88 @@ func (r *RepositoryImpl) RemoveChatFromBookmark(ctx context.Context, userID, iti
 		DELETE FROM user_saved_itineraries
 		WHERE id = $1 AND user_id = $2
 	`
-	tag, err := tx.Exec(ctx, query, itineraryID, userID)
+	_, err = tx.Exec(ctx, query, itineraryID, userID)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Failed to delete itinerary")
 		return fmt.Errorf("failed to delete user_saved_itinerary with ID %s: %w", itineraryID, err)
 	}
 
-	if tag.RowsAffected() == 0 {
-		// Debug: List all itineraries for this user to help with debugging
-		r.logger.InfoContext(ctx, "Attempting to remove non-existent itinerary, debugging available itineraries",
-			slog.String("requested_itinerary_id", itineraryID.String()),
-			slog.String("user_id", userID.String()))
-			
-		debugQuery := `SELECT id, title, session_id, source_llm_interaction_id, created_at FROM user_saved_itineraries WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10`
-		rows, debugErr := r.pgpool.Query(ctx, debugQuery, userID)
-		if debugErr != nil {
-			r.logger.ErrorContext(ctx, "Failed to execute debug query", slog.Any("error", debugErr))
-		} else {
-			defer rows.Close()
-			count := 0
-			for rows.Next() {
-				var id uuid.UUID
-				var title string
-				var createdAt time.Time
-				var sessionIDStr, sourceIDStr sql.NullString
-				
-				if scanErr := rows.Scan(&id, &title, &sessionIDStr, &sourceIDStr, &createdAt); scanErr == nil {
-					count++
-					r.logger.InfoContext(ctx, "Found existing itinerary", 
-						slog.Int("index", count),
-						slog.String("id", id.String()),
-						slog.String("title", title),
-						slog.String("session_id", func() string {
-							if sessionIDStr.Valid {
-								return sessionIDStr.String
-							}
-							return "null"
-						}()),
-						slog.String("source_llm_interaction_id", func() string {
-							if sourceIDStr.Valid {
-								return sourceIDStr.String
-							}
-							return "null"
-						}()),
-						slog.Time("created_at", createdAt))
-				} else {
-					r.logger.WarnContext(ctx, "Failed to scan debug row", slog.Any("error", scanErr))
-				}
-			}
-			if count == 0 {
-				r.logger.InfoContext(ctx, "No itineraries found for user")
-			} else {
-				r.logger.InfoContext(ctx, "Debug query completed", slog.Int("total_found", count))
-			}
-		}
-
-		// Check if the itinerary exists but belongs to a different user
-		var existsForOtherUser bool
-		checkQuery := `SELECT EXISTS(SELECT 1 FROM user_saved_itineraries WHERE id = $1)`
-		checkErr := r.pgpool.QueryRow(ctx, checkQuery, itineraryID).Scan(&existsForOtherUser)
-		if checkErr != nil {
-			r.logger.ErrorContext(ctx, "Failed to check if itinerary exists for other user", slog.Any("error", checkErr))
-		}
-		
-		if existsForOtherUser {
-			err := fmt.Errorf("itinerary with ID %s exists but belongs to a different user (attempted by user %s)", itineraryID, userID)
-			r.logger.WarnContext(ctx, "Attempted to delete itinerary belonging to different user", 
-				slog.String("itineraryID", itineraryID.String()),
-				slog.String("userID", userID.String()))
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "Itinerary belongs to different user")
-			return err
-		} else {
-			// Itinerary doesn't exist - this is actually OK for idempotent DELETE operations
-			// The desired outcome (itinerary not existing) is achieved
-			r.logger.InfoContext(ctx, "Attempted to delete non-existent itinerary - treating as successful (idempotent)", 
-				slog.String("itineraryID", itineraryID.String()),
-				slog.String("userID", userID.String()))
-			span.SetStatus(codes.Ok, "Itinerary already deleted (idempotent operation)")
-			return nil
-		}
-	}
+	//if tag.RowsAffected() == 0 {
+	//	// Debug: List all itineraries for this user to help with debugging
+	//	r.logger.InfoContext(ctx, "Attempting to remove non-existent itinerary, debugging available itineraries",
+	//		slog.String("requested_itinerary_id", itineraryID.String()),
+	//		slog.String("user_id", userID.String()))
+	//
+	//	debugQuery := `SELECT id, title, session_id, source_llm_interaction_id, created_at FROM user_saved_itineraries WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10`
+	//	rows, debugErr := r.pgpool.Query(ctx, debugQuery, userID)
+	//	if debugErr != nil {
+	//		r.logger.ErrorContext(ctx, "Failed to execute debug query", slog.Any("error", debugErr))
+	//	} else {
+	//		defer rows.Close()
+	//		count := 0
+	//		for rows.Next() {
+	//			var id uuid.UUID
+	//			var title string
+	//			var createdAt time.Time
+	//			var sessionIDStr, sourceIDStr sql.NullString
+	//
+	//			if scanErr := rows.Scan(&id, &title, &sessionIDStr, &sourceIDStr, &createdAt); scanErr == nil {
+	//				count++
+	//				r.logger.InfoContext(ctx, "Found existing itinerary",
+	//					slog.Int("index", count),
+	//					slog.String("id", id.String()),
+	//					slog.String("title", title),
+	//					slog.String("session_id", func() string {
+	//						if sessionIDStr.Valid {
+	//							return sessionIDStr.String
+	//						}
+	//						return "null"
+	//					}()),
+	//					slog.String("source_llm_interaction_id", func() string {
+	//						if sourceIDStr.Valid {
+	//							return sourceIDStr.String
+	//						}
+	//						return "null"
+	//					}()),
+	//					slog.Time("created_at", createdAt))
+	//			} else {
+	//				r.logger.WarnContext(ctx, "Failed to scan debug row", slog.Any("error", scanErr))
+	//			}
+	//		}
+	//		if count == 0 {
+	//			r.logger.InfoContext(ctx, "No itineraries found for user")
+	//		} else {
+	//			r.logger.InfoContext(ctx, "Debug query completed", slog.Int("total_found", count))
+	//		}
+	//	}
+	//
+	//	// Check if the itinerary exists but belongs to a different user
+	//	var existsForOtherUser bool
+	//	checkQuery := `SELECT EXISTS(SELECT 1 FROM user_saved_itineraries WHERE id = $1)`
+	//	checkErr := r.pgpool.QueryRow(ctx, checkQuery, itineraryID).Scan(&existsForOtherUser)
+	//	if checkErr != nil {
+	//		r.logger.ErrorContext(ctx, "Failed to check if itinerary exists for other user", slog.Any("error", checkErr))
+	//	}
+	//
+	//	if existsForOtherUser {
+	//		err := fmt.Errorf("itinerary with ID %s exists but belongs to a different user (attempted by user %s)", itineraryID, userID)
+	//		r.logger.WarnContext(ctx, "Attempted to delete itinerary belonging to different user",
+	//			slog.String("itineraryID", itineraryID.String()),
+	//			slog.String("userID", userID.String()))
+	//		span.RecordError(err)
+	//		span.SetStatus(codes.Error, "Itinerary belongs to different user")
+	//		return err
+	//	} else {
+	//		// Itinerary doesn't exist - this is actually OK for idempotent DELETE operations
+	//		// The desired outcome (itinerary not existing) is achieved
+	//		r.logger.InfoContext(ctx, "Attempted to delete non-existent itinerary - treating as successful (idempotent)",
+	//			slog.String("itineraryID", itineraryID.String()),
+	//			slog.String("userID", userID.String()))
+	//		span.SetStatus(codes.Ok, "Itinerary already deleted (idempotent operation)")
+	//		return nil
+	//	}
+	//}
 
 	if err := tx.Commit(ctx); err != nil {
 		span.RecordError(err)
