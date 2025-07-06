@@ -82,6 +82,19 @@ func (m *MockListRepository) GetUserLists(ctx context.Context, userID uuid.UUID,
 	return args.Get(0).([]*types.List), args.Error(1)
 }
 
+func (m *MockListRepository) GetListItemByID(ctx context.Context, listID, itemID uuid.UUID) (types.ListItem, error) {
+	args := m.Called(ctx, listID, itemID)
+	if args.Get(0) == nil {
+		return types.ListItem{}, args.Error(1)
+	}
+	return args.Get(0).(types.ListItem), args.Error(1)
+}
+
+func (m *MockListRepository) DeleteListItemByID(ctx context.Context, listID, itemID uuid.UUID) error {
+	args := m.Called(ctx, listID, itemID)
+	return args.Error(0)
+}
+
 func (m *MockListRepository) GetSubLists(ctx context.Context, parentListID uuid.UUID) ([]*types.List, error) {
 	args := m.Called(ctx, parentListID)
 	if args.Get(0) == nil {
@@ -150,7 +163,7 @@ func TestServiceImpl_CreateItineraryForList(t *testing.T) {
 	parentListID := uuid.New()
 	cityID := uuid.New()
 
-	parentList := &types.List{
+	parentList := types.List{
 		ID:          parentListID,
 		UserID:      userID,
 		Name:        "Parent List",
@@ -186,7 +199,7 @@ func TestServiceImpl_CreateItineraryForList(t *testing.T) {
 	})
 
 	t.Run("user does not own parent list", func(t *testing.T) {
-		otherUserList := &types.List{
+		otherUserList := types.List{
 			ID:          parentListID,
 			UserID:      uuid.New(), // Different user
 			Name:        "Parent List",
@@ -211,7 +224,7 @@ func TestServiceImpl_GetListDetails(t *testing.T) {
 	userID := uuid.New()
 	listID := uuid.New()
 
-	list := &types.List{
+	list := types.List{
 		ID:          listID,
 		UserID:      userID,
 		Name:        "Test List",
@@ -221,16 +234,18 @@ func TestServiceImpl_GetListDetails(t *testing.T) {
 
 	items := []*types.ListItem{
 		{
-			ListID:   listID,
-			PoiID:    uuid.New(),
-			Position: 1,
-			Notes:    "First POI",
+			ListID:      listID,
+			ItemID:      uuid.New(),
+			ContentType: types.ContentTypePOI,
+			Position:    1,
+			Notes:       "First POI",
 		},
 		{
-			ListID:   listID,
-			PoiID:    uuid.New(),
-			Position: 2,
-			Notes:    "Second POI",
+			ListID:      listID,
+			ItemID:      uuid.New(),
+			ContentType: types.ContentTypePOI,
+			Position:    2,
+			Notes:       "Second POI",
 		},
 	}
 
@@ -249,7 +264,7 @@ func TestServiceImpl_GetListDetails(t *testing.T) {
 	})
 
 	t.Run("success - public list access", func(t *testing.T) {
-		publicList := &types.List{
+		publicList := types.List{
 			ID:          listID,
 			UserID:      uuid.New(), // Different user
 			Name:        "Public Test List",
@@ -268,7 +283,7 @@ func TestServiceImpl_GetListDetails(t *testing.T) {
 	})
 
 	t.Run("access denied - private list", func(t *testing.T) {
-		privateList := &types.List{
+		privateList := types.List{
 			ID:          listID,
 			UserID:      uuid.New(), // Different user
 			Name:        "Private Test List",
@@ -303,7 +318,7 @@ func TestServiceImpl_UpdateListDetails(t *testing.T) {
 	userID := uuid.New()
 	listID := uuid.New()
 
-	list := &types.List{
+	list := types.List{
 		ID:          listID,
 		UserID:      userID,
 		Name:        "Old Name",
@@ -339,7 +354,7 @@ func TestServiceImpl_UpdateListDetails(t *testing.T) {
 	})
 
 	t.Run("user does not own list", func(t *testing.T) {
-		otherUserList := &types.List{
+		otherUserList := types.List{
 			ID:     listID,
 			UserID: uuid.New(), // Different user
 			Name:   "Test List",
@@ -362,7 +377,7 @@ func TestServiceImpl_AddPOIListItem(t *testing.T) {
 	listID := uuid.New()
 	poiID := uuid.New()
 
-	list := &types.List{
+	list := types.List{
 		ID:          listID,
 		UserID:      userID,
 		Name:        "Test Itinerary",
@@ -381,20 +396,20 @@ func TestServiceImpl_AddPOIListItem(t *testing.T) {
 
 		mockRepo.On("GetList", mock.Anything, listID).Return(list, nil).Once()
 		mockRepo.On("AddListItem", mock.Anything, mock.MatchedBy(func(item types.ListItem) bool {
-			return item.ListID == listID && item.PoiID == poiID && item.Position == 1
+			return item.ListID == listID && item.ItemID == poiID && item.Position == 1
 		})).Return(nil).Once()
 
 		result, err := service.AddPOIListItem(ctx, userID, listID, poiID, params)
 		
 		require.NoError(t, err)
 		assert.Equal(t, listID, result.ListID)
-		assert.Equal(t, poiID, result.PoiID)
+		assert.Equal(t, poiID, result.ItemID)
 		assert.Equal(t, 1, result.Position)
 		mockRepo.AssertExpectations(t)
 	})
 
 	t.Run("list is not an itinerary", func(t *testing.T) {
-		nonItineraryList := &types.List{
+		nonItineraryList := types.List{
 			ID:          listID,
 			UserID:      userID,
 			Name:        "Regular List",
@@ -460,7 +475,7 @@ func TestServiceImpl_DeleteUserList(t *testing.T) {
 	userID := uuid.New()
 	listID := uuid.New()
 
-	list := &types.List{
+	list := types.List{
 		ID:     listID,
 		UserID: userID,
 		Name:   "Test List",
@@ -477,7 +492,7 @@ func TestServiceImpl_DeleteUserList(t *testing.T) {
 	})
 
 	t.Run("user does not own list", func(t *testing.T) {
-		otherUserList := &types.List{
+		otherUserList := types.List{
 			ID:     listID,
 			UserID: uuid.New(), // Different user
 			Name:   "Test List",

@@ -342,6 +342,26 @@ func (m *MockPOIRepository) SaveLlmInteraction(ctx context.Context, interaction 
 	return args.Get(0).(uuid.UUID), args.Error(1)
 }
 
+func (m *MockPOIRepository) CreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error) {
+	args := m.Called(ctx, poiData)
+	return args.Get(0).(uuid.UUID), args.Error(1)
+}
+
+func (m *MockPOIRepository) FindLLMPOIByNameAndCity(ctx context.Context, name, city string) (uuid.UUID, error) {
+	args := m.Called(ctx, name, city)
+	return args.Get(0).(uuid.UUID), args.Error(1)
+}
+
+func (m *MockPOIRepository) FindLLMPOIByName(ctx context.Context, name string) (uuid.UUID, error) {
+	args := m.Called(ctx, name)
+	return args.Get(0).(uuid.UUID), args.Error(1)
+}
+
+func (m *MockPOIRepository) RemoveLLMPoiFromFavouriteByName(ctx context.Context, userID uuid.UUID, poiName string) error {
+	args := m.Called(ctx, userID, poiName)
+	return args.Error(0)
+}
+
 // Helper to setup service with mock repository
 func setupPOIServiceTest() (*ServiceImpl, *MockPOIRepository, *MockCityRepository) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})) // or io.Discard
