@@ -533,31 +533,6 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 
 	// Prepare primaryCityID - handle both PrimaryCityID and PrimaryCityName
 	var primaryCityID pgtype.UUID
-	//if req.PrimaryCityID != nil {
-	//	primaryCityID = pgtype.UUID{
-	//		Bytes: *req.PrimaryCityID,
-	//		Valid: true,
-	//	}
-	//} else if req.PrimaryCityName != "" {
-	//	// Look up city by name using the existing HandleCityData function
-	//	cityData, err := l.HandleCityData(ctx, req.PrimaryCityName)
-	//	if err != nil {
-	//		l.logger.WarnContext(ctx, "Failed to find city by name for bookmark",
-	//			slog.String("cityName", req.PrimaryCityName),
-	//			slog.Any("error", err))
-	//		primaryCityID = pgtype.UUID{Valid: false} // Set to NULL if city lookup fails
-	//	} else {
-	//		primaryCityID = pgtype.UUID{
-	//			Bytes: cityData.ID,
-	//			Valid: true,
-	//		}
-	//		l.logger.InfoContext(ctx, "Successfully resolved city name to ID for bookmark",
-	//			slog.String("cityName", req.PrimaryCityName),
-	//			slog.String("cityID", cityData.ID.String()))
-	//	}
-	//} else {
-	//	primaryCityID = pgtype.UUID{Valid: false} // Explicitly invalid for NULL
-	//}
 
 	// Fetch original interaction only if LlmInteractionID is provided
 	var originalInteraction *types.LlmInteraction

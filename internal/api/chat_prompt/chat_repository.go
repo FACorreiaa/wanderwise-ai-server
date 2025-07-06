@@ -446,6 +446,24 @@ func (r *RepositoryImpl) AddChatToBookmark(ctx context.Context, itinerary *types
 		return uuid.Nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	// Debug: Log what was saved for debugging bookmark removal issues
+	r.logger.InfoContext(ctx, "Successfully saved bookmark to database",
+		slog.String("saved_itinerary_id", savedItineraryID.String()),
+		slog.String("user_id", itinerary.UserID.String()),
+		slog.String("title", itinerary.Title),
+		slog.String("session_id", func() string {
+			if itinerary.SessionID.Valid {
+				return uuid.UUID(itinerary.SessionID.Bytes).String()
+			}
+			return "null"
+		}()),
+		slog.String("source_llm_interaction_id", func() string {
+			if itinerary.SourceLlmInteractionID.Valid {
+				return uuid.UUID(itinerary.SourceLlmInteractionID.Bytes).String()
+			}
+			return "null"
+		}()))
+
 	span.SetAttributes(attribute.String("saved_itinerary.id", savedItineraryID.String()))
 	span.SetStatus(codes.Ok, "Itinerary saved successfully")
 	return savedItineraryID, nil
@@ -622,6 +640,54 @@ func (r *RepositoryImpl) RemoveChatFromBookmark(ctx context.Context, userID, iti
 	}
 
 	if tag.RowsAffected() == 0 {
+		// Debug: List all itineraries for this user to help with debugging
+		r.logger.InfoContext(ctx, "Attempting to remove non-existent itinerary, debugging available itineraries",
+			slog.String("requested_itinerary_id", itineraryID.String()),
+			slog.String("user_id", userID.String()))
+			
+		debugQuery := `SELECT id, title, session_id, source_llm_interaction_id, created_at FROM user_saved_itineraries WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10`
+		rows, debugErr := r.pgpool.Query(ctx, debugQuery, userID)
+		if debugErr != nil {
+			r.logger.ErrorContext(ctx, "Failed to execute debug query", slog.Any("error", debugErr))
+		} else {
+			defer rows.Close()
+			count := 0
+			for rows.Next() {
+				var id uuid.UUID
+				var title string
+				var createdAt time.Time
+				var sessionIDStr, sourceIDStr sql.NullString
+				
+				if scanErr := rows.Scan(&id, &title, &sessionIDStr, &sourceIDStr, &createdAt); scanErr == nil {
+					count++
+					r.logger.InfoContext(ctx, "Found existing itinerary", 
+						slog.Int("index", count),
+						slog.String("id", id.String()),
+						slog.String("title", title),
+						slog.String("session_id", func() string {
+							if sessionIDStr.Valid {
+								return sessionIDStr.String
+							}
+							return "null"
+						}()),
+						slog.String("source_llm_interaction_id", func() string {
+							if sourceIDStr.Valid {
+								return sourceIDStr.String
+							}
+							return "null"
+						}()),
+						slog.Time("created_at", createdAt))
+				} else {
+					r.logger.WarnContext(ctx, "Failed to scan debug row", slog.Any("error", scanErr))
+				}
+			}
+			if count == 0 {
+				r.logger.InfoContext(ctx, "No itineraries found for user")
+			} else {
+				r.logger.InfoContext(ctx, "Debug query completed", slog.Int("total_found", count))
+			}
+		}
+
 		// Check if the itinerary exists but belongs to a different user
 		var existsForOtherUser bool
 		checkQuery := `SELECT EXISTS(SELECT 1 FROM user_saved_itineraries WHERE id = $1)`
@@ -630,22 +696,23 @@ func (r *RepositoryImpl) RemoveChatFromBookmark(ctx context.Context, userID, iti
 			r.logger.ErrorContext(ctx, "Failed to check if itinerary exists for other user", slog.Any("error", checkErr))
 		}
 		
-		var err error
 		if existsForOtherUser {
-			err = fmt.Errorf("itinerary with ID %s exists but belongs to a different user (attempted by user %s)", itineraryID, userID)
+			err := fmt.Errorf("itinerary with ID %s exists but belongs to a different user (attempted by user %s)", itineraryID, userID)
 			r.logger.WarnContext(ctx, "Attempted to delete itinerary belonging to different user", 
 				slog.String("itineraryID", itineraryID.String()),
 				slog.String("userID", userID.String()))
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "Itinerary belongs to different user")
+			return err
 		} else {
-			err = fmt.Errorf("no itinerary found with ID %s for user %s", itineraryID, userID)
-			r.logger.WarnContext(ctx, "Attempted to delete non-existent itinerary", 
+			// Itinerary doesn't exist - this is actually OK for idempotent DELETE operations
+			// The desired outcome (itinerary not existing) is achieved
+			r.logger.InfoContext(ctx, "Attempted to delete non-existent itinerary - treating as successful (idempotent)", 
 				slog.String("itineraryID", itineraryID.String()),
 				slog.String("userID", userID.String()))
+			span.SetStatus(codes.Ok, "Itinerary already deleted (idempotent operation)")
+			return nil
 		}
-		
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Itinerary not found")
-		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
