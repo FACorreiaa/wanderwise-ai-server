@@ -7,8 +7,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/google/uuid"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 func generatePOICacheKey(city string, lat, lon, distance float64, userID uuid.UUID) string {
@@ -21,6 +22,10 @@ func generateHotelCacheKey(city string, lat, lon float64, userID uuid.UUID) stri
 
 func generateRestaurantCacheKey(city string, lat, lon float64, userID uuid.UUID) string {
 	return fmt.Sprintf("restaurant:%s:%.6f:%.6f:%s", city, lat, lon, userID.String())
+}
+
+func generateCityCacheKey(city string) string {
+	return fmt.Sprintf("city:%s", city)
 }
 
 func cleanJSONResponse(response string) string {

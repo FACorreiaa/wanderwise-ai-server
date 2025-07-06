@@ -102,7 +102,7 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Mount("/pois", POIRoutes(cfg.PointsOfInterestHandler)) // Points of Interest routes
 			r.Mount("/itineraries", ItineraryListRoutes(cfg.ItineraryListHandler))
 			r.Mount("/recents", RecentsRoutes(cfg.RecentsHandler)) // Recent interactions routes
-			
+
 			// Mount protected statistics routes with different paths to avoid conflicts
 			r.Route("/user-statistics", func(r chi.Router) {
 				r.Get("/poi/detailed", cfg.StatisticsHandler.GetDetailedPOIStatisticsHandler)
@@ -257,16 +257,16 @@ func ItineraryListRoutes(h *itineraryList.HandlerImpl) http.Handler {
 	r.Put("/lists/{listID}", h.UpdateListDetailsHandler)                         // Update a specific list
 	r.Delete("/lists/{listID}", h.DeleteListHandler)                             // Delete a specific list
 	r.Post("/lists/{parentListID}/itineraries", h.CreateItineraryForListHandler) // Create an itinerary within a parent list
-	
+
 	// Generic list item endpoints (support all content types)
-	r.Post("/lists/{listID}/items", h.AddListItemHandler)                        // Add any content type to a list
-	r.Put("/lists/{listID}/items/{itemID}", h.UpdateListItemHandler)             // Update any item in a list
-	r.Delete("/lists/{listID}/items/{itemID}", h.RemoveListItemHandler)          // Remove any item from a list
-	
+	r.Post("/lists/{listID}/items", h.AddListItemHandler)               // Add any content type to a list
+	r.Put("/lists/{listID}/items/{itemID}", h.UpdateListItemHandler)    // Update any item in a list
+	r.Delete("/lists/{listID}/items/{itemID}", h.RemoveListItemHandler) // Remove any item from a list
+
 	// Legacy POI-specific endpoints (for backward compatibility)
-	r.Post("/{itineraryID}/items", h.AddPOIListItemHandler)                      // Add a POI to an itinerary
-	r.Put("/{itineraryID}/items/{poiID}", h.UpdatePOIListItemHandler)            // Update a POI in an itinerary
-	r.Delete("/{itineraryID}/items/{poiID}", h.RemovePOIListItemHandler)         // Remove a POI from an itinerary
+	r.Post("/{itineraryID}/items", h.AddPOIListItemHandler)              // Add a POI to an itinerary
+	r.Put("/{itineraryID}/items/{poiID}", h.UpdatePOIListItemHandler)    // Update a POI in an itinerary
+	r.Delete("/{itineraryID}/items/{poiID}", h.RemovePOIListItemHandler) // Remove a POI from an itinerary
 	return r
 }
 
@@ -291,9 +291,8 @@ func StatisticsRoutes(h *statistics.HandlerImpl) http.Handler {
 	r := chi.NewRouter()
 
 	// Public statistics endpoints (no authentication required)
-	r.Get("/main-page", h.GetMainPageStatisticsHandler)       // GET http://localhost:8000/api/v1/statistics/main-page
-	r.Get("/main-page/stream", h.StatisticsSSEHandler)        // GET http://localhost:8000/api/v1/statistics/main-page/stream (SSE)
+	r.Get("/main-page", h.GetMainPageStatisticsHandler) // GET http://localhost:8000/api/v1/statistics/main-page
+	r.Get("/main-page/stream", h.StatisticsSSEHandler)  // GET http://localhost:8000/api/v1/statistics/main-page/stream (SSE)
 
 	return r
 }
-

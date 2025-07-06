@@ -1,11 +1,12 @@
 module github.com/FACorreiaa/go-poi-au-suggestions
 
-go 1.24.3
+go 1.24.4
 
 require (
+	github.com/FACorreiaa/go-genai-sdk v0.0.0-20250706221639-3765883b79e5
 	github.com/go-chi/chi v1.5.5
 	github.com/go-chi/chi/v5 v5.2.2
-	github.com/go-chi/cors v1.2.1
+	github.com/go-chi/cors v1.2.2
 	github.com/go-chi/httprate v0.15.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/golang-migrate/migrate/v4 v4.18.3
@@ -14,7 +15,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/lmittmann/tint v1.1.2
 	github.com/markbates/goth v1.81.0
-	github.com/pashagolub/pgxmock/v4 v4.7.0
+	github.com/pashagolub/pgxmock/v4 v4.8.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/prometheus/client_golang v1.22.0
 	github.com/spf13/viper v1.20.1
@@ -30,7 +31,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.37.0
 	golang.org/x/crypto v0.39.0
 	golang.org/x/sync v0.15.0
-	google.golang.org/genai v1.13.0
+	google.golang.org/genai v1.14.0
 )
 
 require (
@@ -72,7 +73,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.65.0 // indirect
-	github.com/prometheus/procfs v0.16.1 // indirect
+	github.com/prometheus/procfs v0.17.0 // indirect
 	github.com/sagikazarmark/locafero v0.9.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/afero v1.14.0 // indirect

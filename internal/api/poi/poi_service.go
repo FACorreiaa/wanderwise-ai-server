@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
+	ggSDK "github.com/FACorreiaa/go-genai-sdk"
 	"google.golang.org/genai"
 
 	"github.com/google/uuid"
@@ -18,7 +20,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
-	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
@@ -57,18 +58,18 @@ type Service interface {
 type ServiceImpl struct {
 	logger           *slog.Logger
 	poiRepository    Repository
-	embeddingService *generativeAI.EmbeddingService
-	aiClient         *generativeAI.AIClient
+	embeddingService *ggSDK.EmbeddingService
+	aiClient         *ggSDK.LLMChatClient
 	cityRepo         city.Repository
 	cache            *cache.Cache
 }
 
 func NewServiceImpl(poiRepository Repository,
-	embeddingService *generativeAI.EmbeddingService,
+	embeddingService *ggSDK.EmbeddingService,
 	cityRepo city.Repository,
 	logger *slog.Logger) *ServiceImpl {
-
-	aiClient, err := generativeAI.NewAIClient(context.Background())
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	aiClient, err := ggSDK.NewLLMChatClient(context.Background(), apiKey)
 	if err != nil {
 		logger.Error("Failed to initialize AI client", slog.Any("error", err))
 		// For now, set to nil and handle gracefully in methods

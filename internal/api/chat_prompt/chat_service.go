@@ -7,17 +7,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
+	ggSDK "github.com/FACorreiaa/go-genai-sdk"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/patrickmn/go-cache"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -26,7 +26,6 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
-	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/interests"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/poi"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/profiles"
@@ -80,9 +79,8 @@ type ServiceImpl struct {
 	searchProfileRepo  profiles.Repository
 	searchProfileSvc   profiles.Service // Add service for enhanced methods
 	tagsRepo           tags.Repository
-	aiClient           *generativeAI.AIClient
-	embeddingService   *generativeAI.EmbeddingService
-	ragService         *generativeAI.RAGService
+	aiClient           *ggSDK.LLMChatClient
+	embedding          *ggSDK.EmbeddingService
 	llmInteractionRepo Repository
 	cityRepo           city.Repository
 	poiRepo            poi.Repository
@@ -102,22 +100,12 @@ func NewLlmInteractiontService(interestRepo interests.Repository,
 	cityRepo city.Repository,
 	poiRepo poi.Repository,
 	logger *slog.Logger) *ServiceImpl {
+
 	ctx := context.Background()
-	aiClient, _ := generativeAI.NewAIClient(ctx)
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	aiClient, _ := ggSDK.NewLLMChatClient(ctx, apiKey)
 
-	// Initialize embedding service
-	embeddingService, err := generativeAI.NewEmbeddingService(ctx, logger)
-	if err != nil {
-		log.Fatalf("Failed to create embedding service: %v", err) // Terminate if initialization fails
-	}
-
-	// Initialize RAG service
-	ragService, err := generativeAI.NewRAGService(ctx, logger)
-	if err != nil {
-		log.Fatalf("Failed to create RAG service: %v", err) // Terminate if initialization fails
-	}
-
-	cache := cache.New(24*time.Hour, 1*time.Hour) // Cache for 24 hours with cleanup every hour
+	c := cache.New(24*time.Hour, 1*time.Hour) // Cache for 24 hours with cleanup every hour
 	service := &ServiceImpl{
 		logger:             logger,
 		tagsRepo:           tagsRepo,
@@ -125,12 +113,10 @@ func NewLlmInteractiontService(interestRepo interests.Repository,
 		searchProfileRepo:  searchProfileRepo,
 		searchProfileSvc:   searchProfileSvc,
 		aiClient:           aiClient,
-		embeddingService:   embeddingService,
-		ragService:         ragService,
 		llmInteractionRepo: llmInteractionRepo,
 		cityRepo:           cityRepo,
 		poiRepo:            poiRepo,
-		cache:              cache,
+		cache:              c,
 		deadLetterCh:       make(chan types.StreamEvent, 100),
 		intentClassifier:   &types.SimpleIntentClassifier{},
 	}
@@ -294,16 +280,16 @@ func (l *ServiceImpl) HandleCityData(ctx context.Context, cityData types.General
 }
 
 func (l *ServiceImpl) HandleGeneralPOIs(ctx context.Context, pois []types.POIDetailedInfo, cityID uuid.UUID) {
-	for _, poi := range pois {
-		existingPoi, err := l.poiRepo.FindPoiByNameAndCity(ctx, poi.Name, cityID)
+	for _, p := range pois {
+		existingPoi, err := l.poiRepo.FindPoiByNameAndCity(ctx, p.Name, cityID)
 		if err != nil {
-			l.logger.WarnContext(ctx, "Failed to check POI existence", slog.String("poi_name", poi.Name), slog.Any("error", err))
+			l.logger.WarnContext(ctx, "Failed to check POI existence", slog.String("poi_name", p.Name), slog.Any("error", err))
 			continue
 		}
 		if existingPoi == nil {
-			_, err = l.poiRepo.SavePoi(ctx, poi, cityID)
+			_, err = l.poiRepo.SavePoi(ctx, p, cityID)
 			if err != nil {
-				l.logger.WarnContext(ctx, "Failed to save POI", slog.String("poi_name", poi.Name), slog.Any("error", err))
+				l.logger.WarnContext(ctx, "Failed to save POI", slog.String("poi_name", p.Name), slog.Any("error", err))
 			}
 		}
 	}
@@ -470,13 +456,6 @@ func getBasePersonalizedPromptInstructions() string {
 - Include practical details like accessibility if relevant to user preferences
 - Consider user's pace and planning style preferences in the selection
 - Maximum 8-10 POIs to maintain quality over quantity`
-}
-
-func TruncateString(str string, num int) string {
-	if len(str) > num {
-		return str[0:num] + "..."
-	}
-	return str
 }
 
 func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req types.BookmarkRequest) (uuid.UUID, error) {
@@ -874,7 +853,7 @@ func (l *ServiceImpl) generatePOIData(ctx context.Context, poiName, cityName str
 	prompt := generatedContinuedConversationPrompt(poiName, cityName)
 
 	// Generate LLM response
-	response, err := l.aiClient.GenerateContent(ctx, prompt, nil)
+	response, err := l.aiClient.GenerateContent(ctx, prompt, "", nil)
 	if err != nil {
 		span.RecordError(err)
 		return types.POIDetailedInfo{}, fmt.Errorf("failed to generate POI data: %w", err)
@@ -961,62 +940,6 @@ func (l *ServiceImpl) generatePOIData(ctx context.Context, poiName, cityName str
 	return poiData, nil
 }
 
-// enhancePOIRecommendationsWithSemantics uses embeddings to find similar POIs and enrich recommendations
-func (l *ServiceImpl) enhancePOIRecommendationsWithSemantics(ctx context.Context, userMessage string, cityID uuid.UUID, userPreferences []string, limit int) ([]types.POIDetailedInfo, error) {
-	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "enhancePOIRecommendationsWithSemantics", trace.WithAttributes(
-		attribute.String("user.message", userMessage),
-		attribute.String("city.id", cityID.String()),
-		attribute.Int("limit", limit),
-	))
-	defer span.End()
-
-	l.logger.DebugContext(ctx, "Enhancing POI recommendations with semantic search",
-		slog.String("message", userMessage),
-		slog.String("city_id", cityID.String()))
-
-	if l.embeddingService == nil {
-		l.logger.WarnContext(ctx, "Embedding service not available, falling back to traditional search")
-		span.AddEvent("Embedding service not available")
-		return []types.POIDetailedInfo{}, nil
-	}
-
-	// Generate embedding for user message combined with preferences
-	searchQuery := userMessage
-	if len(userPreferences) > 0 {
-		searchQuery += " " + strings.Join(userPreferences, " ")
-	}
-
-	queryEmbedding, err := l.embeddingService.GenerateQueryEmbedding(ctx, searchQuery)
-	if err != nil {
-		l.logger.ErrorContext(ctx, "Failed to generate query embedding",
-			slog.Any("error", err),
-			slog.String("query", searchQuery))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Failed to generate query embedding")
-		return []types.POIDetailedInfo{}, fmt.Errorf("failed to generate query embedding: %w", err)
-	}
-
-	// Search for similar POIs in the city
-	similarPOIs, err := l.poiRepo.FindSimilarPOIsByCity(ctx, queryEmbedding, cityID, limit)
-	if err != nil {
-		l.logger.ErrorContext(ctx, "Failed to find similar POIs", slog.Any("error", err))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Failed to find similar POIs")
-		return []types.POIDetailedInfo{}, fmt.Errorf("failed to find similar POIs: %w", err)
-	}
-
-	l.logger.InfoContext(ctx, "Found semantically similar POIs",
-		slog.Int("count", len(similarPOIs)),
-		slog.String("city_id", cityID.String()))
-	span.SetAttributes(
-		attribute.Int("similar_pois.count", len(similarPOIs)),
-		attribute.String("search.query", searchQuery),
-	)
-	span.SetStatus(codes.Ok, "Semantic POI recommendations enhanced")
-
-	return similarPOIs, nil
-}
-
 // generateSemanticPOIRecommendations generates POI recommendations using semantic search
 func (l *ServiceImpl) generateSemanticPOIRecommendations(ctx context.Context, userMessage string, cityID uuid.UUID, userID uuid.UUID, userLocation *types.UserLocation, semanticWeight float64) ([]types.POIDetailedInfo, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "generateSemanticPOIRecommendations", trace.WithAttributes(
@@ -1032,7 +955,7 @@ func (l *ServiceImpl) generateSemanticPOIRecommendations(ctx context.Context, us
 		slog.String("city_id", cityID.String()),
 		slog.Float64("semantic_weight", semanticWeight))
 
-	if l.embeddingService == nil {
+	if l.embedding == nil {
 		err := fmt.Errorf("embedding service not available")
 		l.logger.ErrorContext(ctx, "Embedding service not available", slog.Any("error", err))
 		span.RecordError(err)
@@ -1041,7 +964,7 @@ func (l *ServiceImpl) generateSemanticPOIRecommendations(ctx context.Context, us
 	}
 
 	// Generate embedding for user message
-	queryEmbedding, err := l.embeddingService.GenerateQueryEmbedding(ctx, userMessage)
+	queryEmbedding, err := l.embedding.GenerateQueryEmbedding(ctx, userMessage)
 	if err != nil {
 		l.logger.ErrorContext(ctx, "Failed to generate query embedding", slog.Any("error", err))
 		span.RecordError(err)
@@ -1096,7 +1019,7 @@ func (l *ServiceImpl) generateSemanticPOIRecommendations(ctx context.Context, us
 		}
 
 		// Generate embedding for this POI if it doesn't have one
-		embedding, err := l.embeddingService.GeneratePOIEmbedding(ctx, poi.Name, poi.DescriptionPOI, poi.Category)
+		embedding, err := l.embedding.GeneratePOIEmbedding(ctx, poi.Name, poi.DescriptionPOI, poi.Category)
 		if err != nil {
 			l.logger.WarnContext(ctx, "Failed to generate embedding for POI",
 				slog.Any("error", err),
@@ -1666,10 +1589,10 @@ func (l *ServiceImpl) generatePOIDataStream(
 			if cand.Content != nil {
 				for _, part := range cand.Content.Parts {
 					if part.Text != "" {
-						responseTextBuilder.WriteString(string(part.Text))
+						responseTextBuilder.WriteString(part.Text)
 						l.sendEvent(ctx, eventCh, types.StreamEvent{
 							Type:      "poi_detail_chunk",
-							Data:      map[string]string{"poi_name": poiName, "chunk": string(part.Text)},
+							Data:      map[string]string{"poi_name": poiName, "chunk": part.Text},
 							Timestamp: time.Now(),
 							EventID:   uuid.New().String(),
 						}, 3)
@@ -1783,8 +1706,9 @@ func (l *ServiceImpl) generateCityData(ctx context.Context, cityName string) (st
 	prompt := getCityDescriptionPrompt(cityName)
 	var responseText strings.Builder
 
-	// Try streaming
-	iter, err := l.aiClient.GenerateContentStream(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)})
+	// TODO GenerateContentStreamWithCache
+	cache := generateCityCacheKey(cityName)
+	iter, err := l.aiClient.GenerateContentStreamWithCache(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)}, cache)
 	if err == nil {
 		for resp, err := range iter {
 			if err != nil {
@@ -1795,7 +1719,7 @@ func (l *ServiceImpl) generateCityData(ctx context.Context, cityName string) (st
 				if cand.Content != nil {
 					for _, part := range cand.Content.Parts {
 						if part.Text != "" {
-							responseText.WriteString(string(part.Text))
+							responseText.WriteString(part.Text)
 						}
 					}
 				}
@@ -1813,7 +1737,7 @@ func (l *ServiceImpl) generateCityData(ctx context.Context, cityName string) (st
 			if cand.Content != nil {
 				for _, part := range cand.Content.Parts {
 					if part.Text != "" {
-						responseText.WriteString(string(part.Text))
+						responseText.WriteString(part.Text)
 					}
 				}
 			}

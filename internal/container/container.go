@@ -6,12 +6,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	ggSDK "github.com/FACorreiaa/go-genai-sdk"
 	database "github.com/FACorreiaa/go-poi-au-suggestions/app/db"
 	"github.com/FACorreiaa/go-poi-au-suggestions/config"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/auth"
 	llmChat "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/chat_prompt"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
-	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/interests"
 	itineraryList "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/list"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/poi"
@@ -103,7 +103,7 @@ func NewContainer(cfg *config.Config, logger *slog.Logger) (*Container, error) {
 		logger)
 	llmInteractionHandlerImpl := llmChat.NewLLMHandlerImpl(llmInteractionService, logger)
 
-	embeddingService, _ := generativeAI.NewEmbeddingService(context.Background(), logger)
+	embeddingService, _ := ggSDK.NewEmbeddingService(context.Background(), logger)
 	poiRepository := poi.NewRepository(pool, logger)
 	poiService := poi.NewServiceImpl(poiRepository, embeddingService, cityRepo, logger)
 	poiHandler := poi.NewHandlerImpl(poiService, logger)
