@@ -23,9 +23,17 @@ type Service interface {
 	GetListDetails(ctx context.Context, listID, userID uuid.UUID) (*types.ListWithItems, error)
 	UpdateListDetails(ctx context.Context, listID, userID uuid.UUID, params types.UpdateListRequest) (*types.List, error)
 	DeleteUserList(ctx context.Context, listID, userID uuid.UUID) error
+
+	// Generic list item methods (support all content types)
+	AddListItem(ctx context.Context, userID, listID uuid.UUID, params types.AddListItemRequest) (*types.ListItem, error)
+	UpdateListItem(ctx context.Context, userID, listID, itemID uuid.UUID, params types.UpdateListItemRequest) (*types.ListItem, error)
+	RemoveListItem(ctx context.Context, userID, listID, itemID uuid.UUID) error
+
+	// Legacy POI-specific methods (for backward compatibility)
 	AddPOIListItem(ctx context.Context, userID, listID, poiID uuid.UUID, params types.AddListItemRequest) (*types.ListItem, error)
 	UpdatePOIListItem(ctx context.Context, userID, listID, poiID uuid.UUID, params types.UpdateListItemRequest) (*types.ListItem, error)
 	RemovePOIListItem(ctx context.Context, userID, listID, poiID uuid.UUID) error
+
 	GetUserLists(ctx context.Context, userID uuid.UUID, isItinerary bool) ([]*types.List, error)
 }
 
@@ -301,6 +309,205 @@ func (s *ServiceImpl) DeleteUserList(ctx context.Context, listID, userID uuid.UU
 	return nil
 }
 
+// Generic list item methods (support all content types)
+
+// AddListItem adds any type of content to a list
+func (s *ServiceImpl) AddListItem(ctx context.Context, userID, listID uuid.UUID, params types.AddListItemRequest) (*types.ListItem, error) {
+	ctx, span := otel.Tracer("ItineraryListService").Start(ctx, "AddListItem", trace.WithAttributes(
+		attribute.String("list.id", listID.String()),
+		attribute.String("user.id", userID.String()),
+		attribute.String("item.id", params.ItemID.String()),
+		attribute.String("content.type", string(params.ContentType)),
+	))
+	defer span.End()
+
+	l := s.logger.With(slog.String("method", "AddListItem"),
+		slog.String("listID", listID.String()),
+		slog.String("userID", userID.String()),
+		slog.String("itemID", params.ItemID.String()),
+		slog.String("contentType", string(params.ContentType)))
+	l.DebugContext(ctx, "Adding item to list")
+
+	// Fetch the list to verify ownership
+	list, err := s.listRepository.GetList(ctx, listID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to fetch list", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "List not found")
+		return nil, fmt.Errorf("list not found: %w", err)
+	}
+
+	// Verify ownership
+	if list.UserID != userID {
+		l.WarnContext(ctx, "User does not own list",
+			slog.String("listOwnerID", list.UserID.String()))
+		span.SetStatus(codes.Error, "User does not own list")
+		return nil, fmt.Errorf("user does not own list")
+	}
+
+	// Create the list item with the new structure
+	item := types.ListItem{
+		ListID:                 listID,
+		ItemID:                 params.ItemID,
+		ContentType:            params.ContentType,
+		Position:               params.Position,
+		Notes:                  params.Notes,
+		DayNumber:              params.DayNumber,
+		TimeSlot:               params.TimeSlot,
+		Duration:               params.DurationMinutes,
+		SourceLlmInteractionID: params.SourceLlmInteractionID,
+		ItemAIDescription:      params.ItemAIDescription,
+		CreatedAt:              time.Now(),
+		UpdatedAt:              time.Now(),
+	}
+
+	// Add the item to the list
+	err = s.listRepository.AddListItem(ctx, item)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to add item to list", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to add item to list")
+		return nil, fmt.Errorf("failed to add item to list: %w", err)
+	}
+
+	l.InfoContext(ctx, "Item added to list successfully")
+	span.SetStatus(codes.Ok, "Item added to list")
+	return &item, nil
+}
+
+// UpdateListItem updates any type of content in a list
+func (s *ServiceImpl) UpdateListItem(ctx context.Context, userID, listID, itemID uuid.UUID, params types.UpdateListItemRequest) (*types.ListItem, error) {
+	ctx, span := otel.Tracer("ItineraryListService").Start(ctx, "UpdateListItem", trace.WithAttributes(
+		attribute.String("list.id", listID.String()),
+		attribute.String("user.id", userID.String()),
+		attribute.String("item.id", itemID.String()),
+	))
+	defer span.End()
+
+	l := s.logger.With(slog.String("method", "UpdateListItem"),
+		slog.String("listID", listID.String()),
+		slog.String("userID", userID.String()),
+		slog.String("itemID", itemID.String()))
+	l.DebugContext(ctx, "Updating item in list")
+
+	// Fetch the list to verify ownership
+	list, err := s.listRepository.GetList(ctx, listID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to fetch list", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "List not found")
+		return nil, fmt.Errorf("list not found: %w", err)
+	}
+
+	// Verify ownership
+	if list.UserID != userID {
+		l.WarnContext(ctx, "User does not own list",
+			slog.String("listOwnerID", list.UserID.String()))
+		span.SetStatus(codes.Error, "User does not own list")
+		return nil, fmt.Errorf("user does not own list")
+	}
+
+	// Fetch the current item by generic item ID
+	item, err := s.listRepository.GetListItemByID(ctx, listID, itemID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to fetch list item", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "List item not found")
+		return nil, fmt.Errorf("list item not found: %w", err)
+	}
+
+	// Update fields if provided
+	if params.ItemID != nil {
+		item.ItemID = *params.ItemID
+	}
+	if params.ContentType != nil {
+		item.ContentType = *params.ContentType
+	}
+	if params.Position != nil {
+		item.Position = *params.Position
+	}
+	if params.Notes != nil {
+		item.Notes = *params.Notes
+	}
+	if params.DayNumber != nil {
+		item.DayNumber = params.DayNumber
+	}
+	if params.TimeSlot != nil {
+		item.TimeSlot = params.TimeSlot
+	}
+	if params.DurationMinutes != nil {
+		item.Duration = params.DurationMinutes
+	}
+	if params.SourceLlmInteractionID != nil {
+		item.SourceLlmInteractionID = params.SourceLlmInteractionID
+	}
+	if params.ItemAIDescription != nil {
+		item.ItemAIDescription = *params.ItemAIDescription
+	}
+	item.UpdatedAt = time.Now()
+
+	// Update the item in the repository
+	err = s.listRepository.UpdateListItem(ctx, item)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to update list item", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to update list item")
+		return nil, fmt.Errorf("failed to update list item: %w", err)
+	}
+
+	l.InfoContext(ctx, "List item updated successfully")
+	span.SetStatus(codes.Ok, "List item updated")
+	return &item, nil
+}
+
+// RemoveListItem removes any type of content from a list
+func (s *ServiceImpl) RemoveListItem(ctx context.Context, userID, listID, itemID uuid.UUID) error {
+	ctx, span := otel.Tracer("ItineraryListService").Start(ctx, "RemoveListItem", trace.WithAttributes(
+		attribute.String("list.id", listID.String()),
+		attribute.String("user.id", userID.String()),
+		attribute.String("item.id", itemID.String()),
+	))
+	defer span.End()
+
+	l := s.logger.With(slog.String("method", "RemoveListItem"),
+		slog.String("listID", listID.String()),
+		slog.String("userID", userID.String()),
+		slog.String("itemID", itemID.String()))
+	l.DebugContext(ctx, "Removing item from list")
+
+	// Fetch the list to verify ownership
+	list, err := s.listRepository.GetList(ctx, listID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to fetch list", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "List not found")
+		return fmt.Errorf("list not found: %w", err)
+	}
+
+	// Verify ownership
+	if list.UserID != userID {
+		l.WarnContext(ctx, "User does not own list",
+			slog.String("listOwnerID", list.UserID.String()))
+		span.SetStatus(codes.Error, "User does not own list")
+		return fmt.Errorf("user does not own list")
+	}
+
+	// Delete the item by generic item ID
+	err = s.listRepository.DeleteListItemByID(ctx, listID, itemID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to delete list item", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to delete list item")
+		return fmt.Errorf("failed to delete list item: %w", err)
+	}
+
+	l.InfoContext(ctx, "List item deleted successfully")
+	span.SetStatus(codes.Ok, "List item deleted")
+	return nil
+}
+
+// Legacy POI-specific methods (for backward compatibility)
+
 // AddPOIListItem adds a POI to a list
 func (s *ServiceImpl) AddPOIListItem(ctx context.Context, userID, listID, poiID uuid.UUID, params types.AddListItemRequest) (*types.ListItem, error) {
 	ctx, span := otel.Tracer("ItineraryListService").Start(ctx, "AddPOIListItem", trace.WithAttributes(
@@ -343,7 +550,7 @@ func (s *ServiceImpl) AddPOIListItem(ctx context.Context, userID, listID, poiID 
 	// Create the list item
 	item := types.ListItem{
 		ListID:    listID,
-		PoiID:     poiID,
+		ItemID:    poiID,
 		Position:  params.Position,
 		Notes:     params.Notes,
 		DayNumber: params.DayNumber,

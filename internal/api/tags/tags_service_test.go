@@ -102,7 +102,7 @@ func TestTagsServiceImpl_GetTags(t *testing.T) {
 
 	t.Run("success - no tags found", func(t *testing.T) {
 		var expectedTags []*types.Tags
-		mockRepo.On("GetAll", ctx, userID).Return(expectedTags, nil).Once()
+		mockRepo.On("GetAll", mock.Anything, userID).Return(expectedTags, nil).Once()
 
 		tags, err := service.GetTags(ctx, userID)
 		require.NoError(t, err)
@@ -249,7 +249,7 @@ func TestTagsServiceImpl_Update(t *testing.T) {
 
 	t.Run("no fields to update (service passes to repo)", func(t *testing.T) {
 		emptyParams := types.UpdatePersonalTagParams{}
-		mockRepo.On("Update", ctx, userID, tagID, emptyParams).Return(nil).Once()
+		mockRepo.On("Update", mock.Anything, userID, tagID, emptyParams).Return(nil).Once()
 
 		err := service.Update(ctx, userID, tagID, emptyParams)
 		require.NoError(t, err) // Assuming repo handles empty updates gracefully

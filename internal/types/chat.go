@@ -112,6 +112,7 @@ type UserSavedItinerary struct {
 	ID                     uuid.UUID      `json:"id"`
 	UserID                 uuid.UUID      `json:"user_id"`
 	SourceLlmInteractionID pgtype.UUID    `json:"source_llm_interaction_id,omitempty"` // Nullable UUID for the source LLM interaction
+	SessionID              pgtype.UUID    `json:"session_id,omitempty"`                // Nullable UUID for the chat session
 	PrimaryCityID          pgtype.UUID    `json:"primary_city_id,omitempty"`           // Nullable UUID for the primary city
 	Title                  string         `json:"title"`
 	Description            sql.NullString `json:"description"`             // Use sql.NullString for nullable text fields
@@ -354,11 +355,16 @@ type RecentInteractionsResponse struct {
 
 // CityInteractions groups interactions for a specific city
 type CityInteractions struct {
-	CityName     string              `json:"city_name"`
-	CityID       *uuid.UUID          `json:"city_id,omitempty"`
-	Interactions []RecentInteraction `json:"interactions"`
-	POICount     int                 `json:"poi_count"`
-	LastActivity time.Time           `json:"last_activity"`
-	SessionID    uuid.UUID           `json:"session_id"`
-	Title        string              `json:"title"`
+	CityName          string                   `json:"city_name"`
+	CityID            *uuid.UUID               `json:"city_id,omitempty"`
+	Interactions      []RecentInteraction      `json:"interactions"`
+	POICount          int                      `json:"poi_count"`
+	LastActivity      time.Time                `json:"last_activity"`
+	SessionID         uuid.UUID                `json:"session_id"`
+	Title             string                   `json:"title"`
+	SavedItineraries  []UserSavedItinerary     `json:"saved_itineraries,omitempty"`
+	FavoritePOIs      []POIDetailedInfo        `json:"favorite_pois,omitempty"`
+	TotalInteractions int                      `json:"total_interactions"`
+	TotalFavorites    int                      `json:"total_favorites"`
+	TotalItineraries  int                      `json:"total_itineraries"`
 }

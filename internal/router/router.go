@@ -19,12 +19,14 @@ import (
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/statistics"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/tags"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/user"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/middleware"
 )
 
 // Config contains dependencies needed for the router setup
 type Config struct {
 	AuthHandler             *authMiddleware.HandlerImpl
 	AuthenticateMiddleware  func(http.Handler) http.Handler // Function signature for auth middleware
+	RateLimiter             *middleware.RateLimiter         // Rate limiter for LLM calls
 	Logger                  *slog.Logger
 	UserHandler             *user.HandlerImpl
 	InterestHandler         *interests.HandlerImpl
@@ -68,7 +70,8 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Get("/auth/google", cfg.AuthHandler.LoginWithGoogle)
 			r.Get("/auth/google/callback", cfg.AuthHandler.GoogleCallback)
 			r.Post("/auth/refresh", cfg.AuthHandler.RefreshToken) // Refresh tokens via HttpOnly cookie
-			r.Post("/llm/chat/stream/free", cfg.LLMInteractionHandler.StartChatMessageStreamFree)
+			// Apply rate limiting to free LLM endpoint
+			r.With(middleware.RateLimitMiddleware(cfg.RateLimiter, cfg.Logger)).Post("/llm/chat/stream/free", cfg.LLMInteractionHandler.StartChatMessageStreamFree)
 
 			// Public city routes
 			r.Mount("/cities", CityRoutes(cfg.CityHandler))
@@ -95,7 +98,7 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Mount("/user/interests", interestsRoutes(cfg.InterestHandler))
 			r.Mount("/user/search-profile", profilesRoutes(cfg.SearchProfileHandler))
 			r.Mount("/user/tags", tagsRoutes(cfg.TagsHandler))
-			r.Mount("/llm", LLMInteractionRoutes(cfg.LLMInteractionHandler))
+			r.Mount("/llm", LLMInteractionRoutes(cfg.LLMInteractionHandler, cfg.RateLimiter, cfg.Logger))
 			r.Mount("/pois", POIRoutes(cfg.PointsOfInterestHandler)) // Points of Interest routes
 			r.Mount("/itineraries", ItineraryListRoutes(cfg.ItineraryListHandler))
 			r.Mount("/recents", RecentsRoutes(cfg.RecentsHandler)) // Recent interactions routes
@@ -188,8 +191,11 @@ func profilesRoutes(HandlerImpl *profiles.HandlerImpl) http.Handler {
 	return r
 }
 
-func LLMInteractionRoutes(HandlerImpl *llmChat.HandlerImpl) http.Handler {
+func LLMInteractionRoutes(HandlerImpl *llmChat.HandlerImpl, rateLimiter *middleware.RateLimiter, logger *slog.Logger) http.Handler {
 	r := chi.NewRouter()
+
+	// Apply rate limiting to all LLM routes
+	r.Use(middleware.RateLimitMiddleware(rateLimiter, logger))
 
 	// Unified chat endpoints - more specific routes first
 	r.Post("/prompt-response/chat/sessions/stream/{profileID}", HandlerImpl.StartChatMessageStream)
@@ -251,6 +257,13 @@ func ItineraryListRoutes(h *itineraryList.HandlerImpl) http.Handler {
 	r.Put("/lists/{listID}", h.UpdateListDetailsHandler)                         // Update a specific list
 	r.Delete("/lists/{listID}", h.DeleteListHandler)                             // Delete a specific list
 	r.Post("/lists/{parentListID}/itineraries", h.CreateItineraryForListHandler) // Create an itinerary within a parent list
+	
+	// Generic list item endpoints (support all content types)
+	r.Post("/lists/{listID}/items", h.AddListItemHandler)                        // Add any content type to a list
+	r.Put("/lists/{listID}/items/{itemID}", h.UpdateListItemHandler)             // Update any item in a list
+	r.Delete("/lists/{listID}/items/{itemID}", h.RemoveListItemHandler)          // Remove any item from a list
+	
+	// Legacy POI-specific endpoints (for backward compatibility)
 	r.Post("/{itineraryID}/items", h.AddPOIListItemHandler)                      // Add a POI to an itinerary
 	r.Put("/{itineraryID}/items/{poiID}", h.UpdatePOIListItemHandler)            // Update a POI in an itinerary
 	r.Delete("/{itineraryID}/items/{poiID}", h.RemovePOIListItemHandler)         // Remove a POI from an itinerary

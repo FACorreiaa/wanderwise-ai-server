@@ -292,7 +292,7 @@ func getPOIDetailsPrompt(city string, lat, lon float64) string {
     		"address": "address of the point of interest",
     		"website": "website of the POI if available",
     		"phone_number": "phone number of the POI if available",
-    		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+    		"opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')"
     		"price_range": "price level if available",
             "category": "Primary category (e.g., Museum, Historical Site, Park, Restaurant, Bar)",
             "tags": ["tag1", "tag2", ...], -- Tags related to the POI
@@ -482,7 +482,7 @@ Generate a comprehensive travel response in JSON format with the following struc
                 "description_poi": "",
                 "address": "",
                 "website": "",
-                "opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+                "opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')"
 
             }
         ],
@@ -498,7 +498,7 @@ Generate a comprehensive travel response in JSON format with the following struc
                     "description_poi": "",
                     "address": "",
                     "website": "",
-                    "opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+                    "opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')"
 
                 }
             ]
@@ -529,7 +529,7 @@ Generate a hotel response in JSON format:
             "address": "",
             "phone_number": null,
             "website": null,
-            "opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+            "opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')"
             "price_range": null,
             "rating": 0,
             "tags": null,
@@ -561,7 +561,7 @@ Generate a restaurant response in JSON format:
             "address": "Complete address",
             "website": "Official website URL (if available)",
             "phone_number": "Phone number (if available)",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)",
+            "opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')",
 
             "price_level": "$|$$|$$$|$$$$",
             "cuisine_type": "Cuisine type",
@@ -594,7 +594,7 @@ Generate an activities response in JSON format:
             "description": "Description matching user activity preferences",
             "address": "Complete address",
             "website": "Official website URL (if available)",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)",
+            "opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')",
 
             "price_range": "Free|$|$$|$$$",
             "rating": 0,
@@ -652,7 +652,7 @@ Respond with JSON:
             "description_poi": "",
             "address": "",
             "website": "",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+                		"opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')"
 
         }
     ]
@@ -677,7 +677,7 @@ Respond with JSON:
             "description_poi": "",
             "address": "",
             "website": "",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+                		"opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')"
 ,
             "distance": <float>
         }
@@ -701,7 +701,7 @@ Respond with JSON:
             "description_poi": "",
             "address": "",
             "website": "",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+                		"opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')"
 ,
             "distance": <float>
         }
@@ -727,7 +727,7 @@ Respond with JSON:
             "address": "",
             "phone_number": null,
             "website": null,
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)",
+            "opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')",
             "price_range": null,
             "rating": 0,
             "tags": null,
@@ -754,7 +754,7 @@ Respond with JSON:
             "address": "",
             "phone_number": null,
             "website": null,
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)",
+            "opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')",
             "price_range": null,
             "rating": 0,
             "tags": null,
@@ -783,7 +783,7 @@ Respond with JSON:
             "address": "",
             "website": "",
             "phone_number": "",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+                		"opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')"
 ,
             "price_level": "$|$$|$$$|$$$$",
             "cuisine_type": "",
@@ -812,7 +812,7 @@ Respond with JSON:
             "address": "",
             "website": "",
             "phone_number": "",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+                		"opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')"
 ,
             "price_level": "$|$|$$|$$",
             "cuisine_type": "",
@@ -842,7 +842,7 @@ Respond with JSON:
             "description": "Description matching preferences",
             "address": "",
             "website": "",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+                		"opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')"
 ,
             "price_range": "Free|$|$$|$$$",
             "rating": 0,
@@ -869,7 +869,7 @@ Respond with JSON:
             "description": "Description matching preferences",
             "address": "",
             "website": "",
-                		"opening_hours": "JSONB, -- Store opening hours structured (e.g., OSM opening_hours format or custom JSON)"
+                		"opening_hours": "Opening hours as string (e.g., 'Mon-Fri 9:00-17:00, Sat 10:00-15:00')"
 ,
             "price_range": "Free|$|$$|$$$",
             "rating": 0,

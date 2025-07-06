@@ -31,10 +31,37 @@ type JWTConfig struct {
 	RefreshTokenTTL time.Duration `mapstructure:"refreshTokenTTL"` // e.g., "7d", "30d"
 }
 
+type RateLimitConfig struct {
+	// Enable/disable rate limiting
+	Enabled bool `mapstructure:"enabled"`
+	
+	// Anonymous users (not logged in)
+	AnonymousRequests struct {
+		PerMinute int `mapstructure:"perMinute"`
+		PerHour   int `mapstructure:"perHour"`
+		PerDay    int `mapstructure:"perDay"`
+	} `mapstructure:"anonymous"`
+	
+	// Logged in users (free tier)
+	LoggedInUsers struct {
+		PerMinute int `mapstructure:"perMinute"`
+		PerHour   int `mapstructure:"perHour"`
+		PerDay    int `mapstructure:"perDay"`
+	} `mapstructure:"loggedIn"`
+	
+	// Paying users (premium tier)
+	PayingUsers struct {
+		PerMinute int `mapstructure:"perMinute"`
+		PerHour   int `mapstructure:"perHour"`
+		PerDay    int `mapstructure:"perDay"`
+	} `mapstructure:"paying"`
+}
+
 type Config struct {
-	Mode         string    `mapstructure:"mode"`
-	Dotenv       string    `mapstructure:"dotenv"`
-	JWT          JWTConfig `mapstructure:"jwt"`
+	Mode         string          `mapstructure:"mode"`
+	Dotenv       string          `mapstructure:"dotenv"`
+	JWT          JWTConfig       `mapstructure:"jwt"`
+	RateLimit    RateLimitConfig `mapstructure:"rateLimit"`
 	HandlerImpls struct {
 		ExternalAPI struct {
 			Port      string `mapstrucutre:"port"`
@@ -109,6 +136,16 @@ func InitConfig() (*Config, error) {
 	}
 	if config.JWT.RefreshTokenTTL == 0 {
 		return nil, fmt.Errorf("JWT_REFRESH_TOKEN_TTL environment variable is required and must be a valid duration (e.g., 168h)")
+	}
+
+	// Handle rate limiting environment variable override
+	if rateLimitEnabled := v.GetString("RATE_LIMIT_ENABLED"); rateLimitEnabled != "" {
+		switch rateLimitEnabled {
+		case "true", "1", "yes", "on":
+			config.RateLimit.Enabled = true
+		case "false", "0", "no", "off":
+			config.RateLimit.Enabled = false
+		}
 	}
 
 	fmt.Println("Successfully loaded app configs...")

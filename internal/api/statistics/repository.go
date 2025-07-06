@@ -4,9 +4,10 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 var _ Repository = (*RepositoryImpl)(nil)
@@ -287,7 +288,7 @@ func (r *RepositoryImpl) LandingPageStatistics(ctx context.Context, userID uuid.
 
 	query := `
 	SELECT
-    (SELECT COUNT(id) FROM user_favorite_pois WHERE user_id = $1) AS saved_places,
+    (SELECT COUNT(id) FROM user_favorite_llm_pois WHERE user_id = $1) AS saved_places,
     (SELECT COUNT(id) FROM itineraries WHERE user_id = $1) AS itineraries,
     (SELECT COUNT(DISTINCT city_id) FROM itineraries WHERE user_id = $1) AS cities_explored,
     (SELECT COUNT(id) FROM chat_sessions WHERE user_id = $1) AS discoveries;

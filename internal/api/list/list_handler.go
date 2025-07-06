@@ -24,6 +24,10 @@ type Handler interface {
 	GetListDetailsHandler(w http.ResponseWriter, r *http.Request)
 	UpdateListDetailsHandler(w http.ResponseWriter, r *http.Request)
 	DeleteListHandler(w http.ResponseWriter, r *http.Request)
+	AddListItemHandler(w http.ResponseWriter, r *http.Request)
+	UpdateListItemHandler(w http.ResponseWriter, r *http.Request)
+	RemoveListItemHandler(w http.ResponseWriter, r *http.Request)
+	// Legacy POI-specific handlers (for backward compatibility)
 	AddPOIListItemHandler(w http.ResponseWriter, r *http.Request)
 	UpdatePOIListItemHandler(w http.ResponseWriter, r *http.Request)
 	RemovePOIListItemHandler(w http.ResponseWriter, r *http.Request)
@@ -333,6 +337,227 @@ func (h *HandlerImpl) DeleteListHandler(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Generic list item handlers that support different content types
+
+func (h *HandlerImpl) AddListItemHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "AddListItem")
+	defer span.End()
+	l := h.logger.With(slog.String("handler", "AddListItemHandler"))
+
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		l.ErrorContext(ctx, "User ID not found in context")
+		span.SetStatus(codes.Error, "Unauthorized - User ID missing")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid user ID format", slog.String("userID_str", userIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid User ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("user.id", userID.String()))
+
+	listIDStr := chi.URLParam(r, "listID")
+	listID, err := uuid.Parse(listIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid list ID format", slog.String("listID_str", listIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid List ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid list ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("list.id", listID.String()))
+
+	var req types.AddListItemRequest
+	if err := api.DecodeJSONBody(w, r, &req); err != nil {
+		l.ErrorContext(ctx, "Failed to decode or validate request", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Bad request")
+		return
+	}
+	span.SetAttributes(
+		attribute.String("item.id", req.ItemID.String()),
+		attribute.String("content.type", string(req.ContentType)),
+	)
+
+	l.DebugContext(ctx, "Attempting to add item to list",
+		slog.String("content_type", string(req.ContentType)),
+		slog.String("item_id", req.ItemID.String()),
+	)
+
+	listItem, err := h.service.AddListItem(ctx, userID, listID, req)
+	if err != nil {
+		l.ErrorContext(ctx, "Service failed to add item to list", slog.Any("error", err))
+		span.RecordError(err)
+		if strings.Contains(err.Error(), "not found") {
+			span.SetStatus(codes.Error, "Resource not found")
+			api.ErrorResponse(w, r, http.StatusNotFound, err.Error())
+		} else if strings.Contains(err.Error(), "does not own") {
+			span.SetStatus(codes.Error, "Forbidden")
+			api.ErrorResponse(w, r, http.StatusForbidden, err.Error())
+		} else {
+			span.SetStatus(codes.Error, "Failed to add item")
+			api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to add item to list: "+err.Error())
+		}
+		return
+	}
+
+	l.InfoContext(ctx, "Item added to list successfully",
+		slog.String("item_id", req.ItemID.String()),
+		slog.String("content_type", string(req.ContentType)),
+	)
+	span.SetStatus(codes.Ok, "Item added")
+	api.WriteJSONResponse(w, r, http.StatusCreated, listItem)
+}
+
+func (h *HandlerImpl) UpdateListItemHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "UpdateListItem")
+	defer span.End()
+	l := h.logger.With(slog.String("handler", "UpdateListItemHandler"))
+
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		l.ErrorContext(ctx, "User ID not found in context")
+		span.SetStatus(codes.Error, "Unauthorized - User ID missing")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid user ID format", slog.String("userID_str", userIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid User ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("user.id", userID.String()))
+
+	listIDStr := chi.URLParam(r, "listID")
+	listID, err := uuid.Parse(listIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid list ID format", slog.String("listID_str", listIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid List ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid list ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("list.id", listID.String()))
+
+	itemIDStr := chi.URLParam(r, "itemID")
+	itemID, err := uuid.Parse(itemIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid item ID format", slog.String("itemID_str", itemIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid Item ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid item ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("item.id", itemID.String()))
+
+	var req types.UpdateListItemRequest
+	if err := api.DecodeJSONBody(w, r, &req); err != nil {
+		l.ErrorContext(ctx, "Failed to decode or validate request", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Bad request")
+		return
+	}
+
+	l.DebugContext(ctx, "Attempting to update item in list")
+	updatedItem, err := h.service.UpdateListItem(ctx, userID, listID, itemID, req)
+	if err != nil {
+		l.ErrorContext(ctx, "Service failed to update item in list", slog.Any("error", err))
+		span.RecordError(err)
+		if strings.Contains(err.Error(), "not found") {
+			span.SetStatus(codes.Error, "Resource not found")
+			api.ErrorResponse(w, r, http.StatusNotFound, "Item or list not found")
+		} else if strings.Contains(err.Error(), "does not own") {
+			span.SetStatus(codes.Error, "Forbidden")
+			api.ErrorResponse(w, r, http.StatusForbidden, "You do not own this list")
+		} else {
+			span.SetStatus(codes.Error, "Failed to update item")
+			api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to update item: "+err.Error())
+		}
+		return
+	}
+
+	l.InfoContext(ctx, "Item in list updated successfully")
+	span.SetStatus(codes.Ok, "Item updated")
+	api.WriteJSONResponse(w, r, http.StatusOK, updatedItem)
+}
+
+func (h *HandlerImpl) RemoveListItemHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "RemoveListItem")
+	defer span.End()
+	l := h.logger.With(slog.String("handler", "RemoveListItemHandler"))
+
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		l.ErrorContext(ctx, "User ID not found in context")
+		span.SetStatus(codes.Error, "Unauthorized - User ID missing")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid user ID format", slog.String("userID_str", userIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid User ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("user.id", userID.String()))
+
+	listIDStr := chi.URLParam(r, "listID")
+	listID, err := uuid.Parse(listIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid list ID format", slog.String("listID_str", listIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid List ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid list ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("list.id", listID.String()))
+
+	itemIDStr := chi.URLParam(r, "itemID")
+	itemID, err := uuid.Parse(itemIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid item ID format", slog.String("itemID_str", itemIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid Item ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid item ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("item.id", itemID.String()))
+
+	l.DebugContext(ctx, "Attempting to remove item from list")
+	err = h.service.RemoveListItem(ctx, userID, listID, itemID)
+	if err != nil {
+		l.ErrorContext(ctx, "Service failed to remove item from list", slog.Any("error", err))
+		span.RecordError(err)
+		if strings.Contains(err.Error(), "not found") {
+			span.SetStatus(codes.Error, "Resource not found")
+			api.ErrorResponse(w, r, http.StatusNotFound, "Item or list not found")
+		} else if strings.Contains(err.Error(), "does not own") {
+			span.SetStatus(codes.Error, "Forbidden")
+			api.ErrorResponse(w, r, http.StatusForbidden, "You do not own this list")
+		} else {
+			span.SetStatus(codes.Error, "Failed to remove item")
+			api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to remove item: "+err.Error())
+		}
+		return
+	}
+
+	l.InfoContext(ctx, "Item removed from list successfully")
+	span.SetStatus(codes.Ok, "Item removed")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Legacy POI-specific handlers (for backward compatibility)
+
 func (h *HandlerImpl) AddPOIListItemHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "AddPOIListItem")
 	defer span.End()
@@ -373,10 +598,10 @@ func (h *HandlerImpl) AddPOIListItemHandler(w http.ResponseWriter, r *http.Reque
 		span.SetStatus(codes.Error, "Bad request")
 		return
 	}
-	span.SetAttributes(attribute.String("poi.id", req.PoiID.String()))
+	span.SetAttributes(attribute.String("poi.id", req.ItemID.String()))
 
 	l.DebugContext(ctx, "Attempting to add POI to itinerary")
-	listItem, err := h.service.AddPOIListItem(ctx, userID, itineraryID, req.PoiID, req)
+	listItem, err := h.service.AddPOIListItem(ctx, userID, itineraryID, req.ItemID, req)
 	if err != nil {
 		l.ErrorContext(ctx, "Service failed to add POI to itinerary", slog.Any("error", err))
 		span.RecordError(err)
@@ -393,7 +618,7 @@ func (h *HandlerImpl) AddPOIListItemHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	l.InfoContext(ctx, "POI added to itinerary successfully", slog.String("poi_id", req.PoiID.String()))
+	l.InfoContext(ctx, "POI added to itinerary successfully", slog.String("poi_id", req.ItemID.String()))
 	span.SetStatus(codes.Ok, "POI added")
 	api.WriteJSONResponse(w, r, http.StatusCreated, listItem)
 }

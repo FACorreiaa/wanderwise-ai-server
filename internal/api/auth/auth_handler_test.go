@@ -120,8 +120,8 @@ func TestLoginHandlerImpl(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		assert.NoError(t, err)
 
-		assert.Equal(t, "access-token", response["accessToken"])
-		assert.Equal(t, "refresh-token", response["refreshToken"])
+		assert.Equal(t, "access-token", response["access_token"])
+		assert.Equal(t, "Login successful", response["message"])
 
 		mockService.AssertExpectations(t)
 	})
@@ -232,6 +232,7 @@ func TestRegisterHandlerImpl(t *testing.T) {
 			"username": "testuser",
 			"email":    "test@example.com",
 			"password": "password123",
+			"role":     "user",
 		}
 		body, _ := json.Marshal(registerRequest)
 
@@ -241,7 +242,7 @@ func TestRegisterHandlerImpl(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		// Set up expectations
-		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], "user").Return(nil)
+		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], registerRequest["role"]).Return(nil)
 
 		// Call the HandlerImpl
 		HandlerImpl.Register(w, req)
@@ -299,6 +300,7 @@ func TestRegisterHandlerImpl(t *testing.T) {
 			"username": "testuser",
 			"email":    "existing@example.com",
 			"password": "password123",
+			"role":     "user",
 		}
 		body, _ := json.Marshal(registerRequest)
 
@@ -308,7 +310,7 @@ func TestRegisterHandlerImpl(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		// Set up expectations
-		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], "user").Return(types.ErrConflict).Once()
+		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], registerRequest["role"]).Return(types.ErrConflict).Once()
 
 		// Call the HandlerImpl
 		HandlerImpl.Register(w, req)
@@ -325,6 +327,7 @@ func TestRegisterHandlerImpl(t *testing.T) {
 			"username": "testuser",
 			"email":    "test@example.com",
 			"password": "password123",
+			"role":     "user",
 		}
 		body, _ := json.Marshal(registerRequest)
 
@@ -334,7 +337,7 @@ func TestRegisterHandlerImpl(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		// Set up expectations
-		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], "user").Return(errors.New("internal error")).Once()
+		mockService.On("Register", mock.Anything, registerRequest["username"], registerRequest["email"], registerRequest["password"], registerRequest["role"]).Return(errors.New("internal error")).Once()
 
 		// Call the HandlerImpl
 		HandlerImpl.Register(w, req)

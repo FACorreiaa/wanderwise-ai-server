@@ -37,9 +37,11 @@ type Repository interface {
 	RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID) error
 
 	RemoveLLMPoiFromFavourite(ctx context.Context, userID, llmPoiID uuid.UUID) error
+	RemoveLLMPoiFromFavouriteByName(ctx context.Context, userID uuid.UUID, poiName string) error
 	CheckPoiExists(ctx context.Context, poiID uuid.UUID) (bool, error)
 	CheckLlmPoiExists(ctx context.Context, llmPoiID uuid.UUID) (bool, error)
 	FindLLMPOIByNameAndCity(ctx context.Context, name, city string) (uuid.UUID, error)
+	FindLLMPOIByName(ctx context.Context, name string) (uuid.UUID, error)
 	CreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error)
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
@@ -220,11 +222,11 @@ func (r *RepositoryImpl) FindPoiByNameAndCity(ctx context.Context, name string, 
 func (r *RepositoryImpl) GetPOIsByCityAndDistance(ctx context.Context, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error) {
 	userPoint := fmt.Sprintf("SRID=4326;POINT(%f %f)", userLocation.UserLon, userLocation.UserLat)
 	query := `
-        SELECT 
-            id, name, 
-            ST_X(location::geometry) AS longitude, 
-            ST_Y(location::geometry) AS latitude, 
-            poi_type AS category, 
+        SELECT
+            id, name,
+            ST_X(location::geometry) AS longitude,
+            ST_Y(location::geometry) AS latitude,
+            poi_type AS category,
             ai_summary AS description_poi,
             ST_Distance(location::geography, ST_GeomFromText($1, 4326)::geography) AS distance
         FROM points_of_interest
@@ -321,6 +323,7 @@ func (r *RepositoryImpl) RemovePoiFromFavourites(ctx context.Context, userID, po
 }
 
 func (r *RepositoryImpl) RemoveLLMPoiFromFavourite(ctx context.Context, userID, llmPoiID uuid.UUID) error {
+	// Try direct removal first
 	query := `
 		DELETE FROM user_favorite_llm_pois
 		WHERE user_id = $1 AND llm_poi_id = $2
@@ -329,8 +332,36 @@ func (r *RepositoryImpl) RemoveLLMPoiFromFavourite(ctx context.Context, userID, 
 	if err != nil {
 		return fmt.Errorf("failed to remove LLM POI from favourites: %w", err)
 	}
-	if result.RowsAffected() == 0 {
+
+	rowsAffected := result.RowsAffected()
+	r.logger.InfoContext(ctx, "Delete query result", slog.Int64("rows_affected", rowsAffected))
+
+	if rowsAffected == 0 {
 		return fmt.Errorf("no favourite LLM POI found to remove")
+	}
+	return nil
+}
+
+// RemoveLLMPoiFromFavouriteByName removes a favorite LLM POI by matching the POI name
+func (r *RepositoryImpl) RemoveLLMPoiFromFavouriteByName(ctx context.Context, userID uuid.UUID, poiName string) error {
+	query := `
+		DELETE FROM user_favorite_llm_pois
+		WHERE user_id = $1 AND llm_poi_id IN (
+			SELECT id FROM llm_pois WHERE name = $2
+		)
+	`
+	result, err := r.pgpool.Exec(ctx, query, userID, poiName)
+	if err != nil {
+		return fmt.Errorf("failed to remove LLM POI from favourites by name: %w", err)
+	}
+
+	rowsAffected := result.RowsAffected()
+	r.logger.InfoContext(ctx, "Delete by name query result",
+		slog.String("poiName", poiName),
+		slog.Int64("rows_affected", rowsAffected))
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no favourite LLM POI found to remove with name: %s", poiName)
 	}
 	return nil
 }
@@ -343,11 +374,70 @@ func (r *RepositoryImpl) GetFavouritePOIsByUserID(ctx context.Context, userID uu
 	defer tx.Rollback(ctx)
 	query := `
 		SELECT
-			p.id, p.name, ST_X(p.location) AS longitude, ST_Y(p.location) AS latitude,
-			p.poi_type AS category, p.ai_summary AS description_poi
-		FROM points_of_interest p
-		INNER JOIN user_favorite_pois uf ON p.id = uf.poi_id
-		WHERE uf.user_id = $1
+    favorite_id,
+    notes,
+    added_at,
+    id,
+    name,
+    longitude,
+    latitude,
+    category,
+    description_poi,
+    address,
+    website,
+    phone_number,
+    opening_hours,
+    rating,
+    price_level,
+    poi_source
+FROM (
+         -- Regular POI favorites
+         SELECT
+             ufp.id as favorite_id,
+             ufp.notes,
+             ufp.added_at,
+             poi.id,
+             poi.name,
+             ST_X(poi.location) AS longitude,
+             ST_Y(poi.location) AS latitude,
+             poi.poi_type AS category,
+             poi.description AS description_poi,
+             poi.address,
+             poi.website,
+             poi.phone_number,
+             poi.opening_hours,
+             poi.average_rating as rating,
+             poi.price_level::text as price_level,
+             'regular' as poi_source
+         FROM user_favorite_pois ufp
+                  INNER JOIN points_of_interest poi ON ufp.poi_id = poi.id
+         WHERE ufp.user_id = $1
+
+         UNION ALL
+
+         -- LLM POI favorites
+         SELECT
+             uflp.id as favorite_id,
+             uflp.notes,
+             uflp.added_at,
+             llm_poi.id,
+             llm_poi.name,
+             llm_poi.longitude,
+             llm_poi.latitude,
+             llm_poi.category,
+             llm_poi.description AS description_poi,
+             llm_poi.address,
+             llm_poi.website,
+             llm_poi.phone_number,
+             llm_poi.opening_hours,
+             llm_poi.rating,
+             llm_poi.price_level,
+             'llm' as poi_source
+         FROM user_favorite_llm_pois uflp
+                  INNER JOIN llm_poi ON uflp.llm_poi_id = llm_poi.id
+         WHERE uflp.user_id = $1
+     ) combined_favorites
+ORDER BY added_at DESC;
 	`
 	rows, err := tx.Query(ctx, query, userID)
 	if err != nil {
@@ -357,10 +447,57 @@ func (r *RepositoryImpl) GetFavouritePOIsByUserID(ctx context.Context, userID uu
 	var pois []types.POIDetailedInfo
 	for rows.Next() {
 		var poi types.POIDetailedInfo
-		err := rows.Scan(&poi.ID, &poi.Name, &poi.Longitude, &poi.Latitude, &poi.Category, &poi.DescriptionPOI)
+		var favoriteID uuid.UUID
+		var notes *string
+		var addedAt time.Time
+		var address, website, phoneNumber *string
+		var openingHours *string
+		var rating *float64
+		var priceLevel *string
+		var poiSource string
+
+		err := rows.Scan(
+			&favoriteID,         // favorite_id
+			&notes,              // notes
+			&addedAt,            // added_at
+			&poi.ID,             // id
+			&poi.Name,           // name
+			&poi.Longitude,      // longitude
+			&poi.Latitude,       // latitude
+			&poi.Category,       // category
+			&poi.DescriptionPOI, // description_poi
+			&address,            // address
+			&website,            // website
+			&phoneNumber,        // phone_number
+			&openingHours,       // opening_hours
+			&rating,             // rating
+			&priceLevel,         // price_level
+			&poiSource,          // poi_source
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan favourite POI row: %w", err)
 		}
+
+		// Set optional fields
+		if address != nil {
+			poi.Address = *address
+		}
+		if website != nil {
+			poi.Website = *website
+		}
+		if phoneNumber != nil {
+			poi.PhoneNumber = *phoneNumber
+		}
+		//if openingHours != nil {
+		//poi.OpeningHours = openingHours
+		//}
+		if rating != nil {
+			poi.Rating = *rating
+		}
+		if priceLevel != nil {
+			poi.PriceLevel = *priceLevel
+		}
+
 		pois = append(pois, poi)
 	}
 	if err = rows.Err(); err != nil {
@@ -422,7 +559,7 @@ func (r *RepositoryImpl) FindPOIDetails(ctx context.Context, cityID uuid.UUID, l
 	defer span.End()
 
 	query := `
-        SELECT 
+        SELECT
             id, name, description, latitude, longitude, address, website, phone_number,
             opening_hours, price_range, category, tags, images, rating, llm_interaction_id
         FROM poi_details
@@ -482,7 +619,7 @@ func (r *RepositoryImpl) SavePOIDetails(ctx context.Context, poi types.POIDetail
 	// Check for duplicate POI by name and location (within 100m radius)
 	// Updated to work without city constraint for discover endpoint
 	duplicateCheckQuery := `
-		SELECT id FROM poi_details 
+		SELECT id FROM poi_details
 		WHERE LOWER(name) = LOWER($1)
 		AND ST_DWithin(
 			location::geography,
@@ -653,7 +790,7 @@ func (r *RepositoryImpl) FindHotelDetails(ctx context.Context, cityID uuid.UUID,
 	defer span.End()
 
 	query := `
-        SELECT 
+        SELECT
             id, name, description, latitude, longitude, address, website, phone_number,
             opening_hours, price_range, category, tags, images, rating, llm_interaction_id
         FROM hotel_details
@@ -762,7 +899,7 @@ func (r *RepositoryImpl) GetHotelByID(ctx context.Context, hotelID uuid.UUID) (*
 	defer span.End()
 
 	query := `
-		SELECT 
+		SELECT
 			id, name, description, latitude, longitude, address, website, phone_number,
 			opening_hours, price_range, category, tags, images, rating, llm_interaction_id
 		FROM hotel_details
@@ -800,7 +937,7 @@ func (r *RepositoryImpl) FindRestaurantDetails(ctx context.Context, cityID uuid.
 	defer span.End()
 
 	query := `
-        SELECT 
+        SELECT
             id, name, description, latitude, longitude, address, website, phone_number,
             opening_hours, price_level, category, tags, images, rating, cuisine_type, llm_interaction_id
         FROM restaurant_details
@@ -965,7 +1102,7 @@ func (r *RepositoryImpl) GetRestaurantByID(ctx context.Context, restaurantID uui
 	defer span.End()
 
 	query := `
-        SELECT 
+        SELECT
             id, name, description, latitude, longitude, address, website, phone_number,
             opening_hours, price_level, category, tags, images, rating, cuisine_type, llm_interaction_id
         FROM restaurant_details
@@ -1009,12 +1146,12 @@ func (r *RepositoryImpl) SearchPOIs(ctx context.Context, filter types.POIFilter)
 
 	// Base query using PostGIS for geospatial filtering
 	query := `
-        SELECT 
-            id, 
-            name, 
-            description, 
-            ST_X(location::geometry) AS longitude, 
-            ST_Y(location::geometry) AS latitude, 
+        SELECT
+            id,
+            name,
+            description,
+            ST_X(location::geometry) AS longitude,
+            ST_Y(location::geometry) AS latitude,
             category,
             ST_Distance(
                 location,
@@ -1117,8 +1254,8 @@ func (r *RepositoryImpl) GetItinerary(ctx context.Context, userID, itineraryID u
 	defer span.End()
 
 	query := `
-		SELECT 
-			id, user_id, source_llm_interaction_id, primary_city_id, title, description,
+		SELECT
+			id, user_id, source_llm_interaction_id, session_id, primary_city_id, title, description,
 			markdown_content, tags, estimated_duration_days, estimated_cost_level, is_public
 		FROM user_saved_itineraries
 		WHERE id = $1 AND user_id = $2
@@ -1130,6 +1267,7 @@ func (r *RepositoryImpl) GetItinerary(ctx context.Context, userID, itineraryID u
 		&itinerary.ID,
 		&itinerary.UserID,
 		&itinerary.SourceLlmInteractionID,
+		&itinerary.SessionID,
 		&itinerary.PrimaryCityID,
 		&itinerary.Title,
 		&itinerary.Description,
@@ -1164,8 +1302,8 @@ func (r *RepositoryImpl) GetItineraries(ctx context.Context, userID uuid.UUID, p
 
 	offset := (page - 1) * pageSize
 	query := `
-		SELECT 
-			id, user_id, source_llm_interaction_id, primary_city_id, title, description,
+		SELECT
+			id, user_id, source_llm_interaction_id, session_id, primary_city_id, title, description,
 			markdown_content, tags, estimated_duration_days, estimated_cost_level, is_public
 		FROM user_saved_itineraries
 		WHERE user_id = $1
@@ -1185,6 +1323,7 @@ func (r *RepositoryImpl) GetItineraries(ctx context.Context, userID uuid.UUID, p
 			&itinerary.ID,
 			&itinerary.UserID,
 			&itinerary.SourceLlmInteractionID,
+			&itinerary.SessionID,
 			&itinerary.PrimaryCityID,
 			&itinerary.Title,
 			&itinerary.Description,
@@ -1462,12 +1601,12 @@ func (r *RepositoryImpl) FindSimilarPOIs(ctx context.Context, queryEmbedding []f
 	}(), ","))
 
 	query := `
-        SELECT 
-            id, 
-            name, 
-            description, 
-            ST_X(location::geometry) AS longitude, 
-            ST_Y(location::geometry) AS latitude, 
+        SELECT
+            id,
+            name,
+            description,
+            ST_X(location::geometry) AS longitude,
+            ST_Y(location::geometry) AS latitude,
             poi_type AS category,
             1 - (embedding <=> $1::vector) AS similarity_score
         FROM points_of_interest
@@ -1555,12 +1694,12 @@ func (r *RepositoryImpl) FindSimilarPOIsByCity(ctx context.Context, queryEmbeddi
 	}(), ","))
 
 	query := `
-        SELECT 
-            id, 
-            name, 
-            description, 
-            ST_X(location::geometry) AS longitude, 
-            ST_Y(location::geometry) AS latitude, 
+        SELECT
+            id,
+            name,
+            description,
+            ST_X(location::geometry) AS longitude,
+            ST_Y(location::geometry) AS latitude,
             poi_type AS category,
             1 - (embedding <=> $1::vector) AS similarity_score
         FROM points_of_interest
@@ -1657,23 +1796,23 @@ func (r *RepositoryImpl) SearchPOIsHybrid(ctx context.Context, filter types.POIF
 
 	// Hybrid search combining spatial distance and semantic similarity
 	query := `
-        SELECT 
-            id, 
-            name, 
-            description, 
-            ST_X(location::geometry) AS longitude, 
-            ST_Y(location::geometry) AS latitude, 
+        SELECT
+            id,
+            name,
+            description,
+            ST_X(location::geometry) AS longitude,
+            ST_Y(location::geometry) AS latitude,
             poi_type AS category,
             ST_Distance(
                 location,
                 ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
             ) AS distance_meters,
-            CASE 
+            CASE
                 WHEN embedding IS NOT NULL THEN 1 - (embedding <=> $6::vector)
-                ELSE 0 
+                ELSE 0
             END AS similarity_score,
             -- Hybrid score: weighted combination of spatial proximity and semantic similarity
-            CASE 
+            CASE
                 WHEN embedding IS NOT NULL THEN
                     (1 - $5) * (1 / (1 + ST_Distance(location, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) / 1000)) +
                     $5 * (1 - (embedding <=> $6::vector))
@@ -1794,7 +1933,7 @@ func (r *RepositoryImpl) UpdatePOIEmbedding(ctx context.Context, poiID uuid.UUID
 	}(), ","))
 
 	query := `
-        UPDATE points_of_interest 
+        UPDATE points_of_interest
         SET embedding = $1::vector, embedding_generated_at = NOW()
         WHERE id = $2
     `
@@ -1839,12 +1978,12 @@ func (r *RepositoryImpl) GetPOIsWithoutEmbeddings(ctx context.Context, limit int
 	l := r.logger.With(slog.String("method", "GetPOIsWithoutEmbeddings"))
 
 	query := `
-        SELECT 
-            id, 
-            name, 
-            description, 
-            ST_X(location::geometry) AS longitude, 
-            ST_Y(location::geometry) AS latitude, 
+        SELECT
+            id,
+            name,
+            description,
+            ST_X(location::geometry) AS longitude,
+            ST_Y(location::geometry) AS latitude,
             poi_type AS category,
             city_id
         FROM points_of_interest
@@ -1915,9 +2054,9 @@ func (r *RepositoryImpl) GetPOIsByLocationAndDistance(ctx context.Context, lat, 
 
 	// Build the query with optional category filter
 	baseQuery := `
-					SELECT 
-						id, 
-						name, 
+					SELECT
+						id,
+						name,
 						description,
 						longitude,
 						latitude,
@@ -1935,9 +2074,9 @@ func (r *RepositoryImpl) GetPOIsByLocationAndDistance(ctx context.Context, lat, 
 						COALESCE(rating_count, 0) as rating_count,
 						COALESCE(is_sponsored, false) as is_sponsored
 					FROM (
-						SELECT 
-							id, 
-							name, 
+						SELECT
+							id,
+							name,
 							COALESCE(description, '') as description,
 							ST_X(location) as longitude,
 							ST_Y(location) as latitude,
@@ -1956,8 +2095,8 @@ func (r *RepositoryImpl) GetPOIsByLocationAndDistance(ctx context.Context, lat, 
 							is_sponsored
 						FROM points_of_interest
 						WHERE ST_DWithin(
-							location::geography, 
-							ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, 
+							location::geography,
+							ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
 							$3
 						)
 					) sub
@@ -2224,12 +2363,12 @@ func (l *RepositoryImpl) FindLLMPOIByNameAndCity(ctx context.Context, name, city
 	defer span.End()
 
 	query := `
-		SELECT id 
-		FROM llm_poi 
+		SELECT id
+		FROM llm_poi
 		WHERE LOWER(name) = LOWER($1) AND LOWER(city) = LOWER($2)
 		LIMIT 1
 	`
-	
+
 	var id uuid.UUID
 	err := l.pgpool.QueryRow(ctx, query, name, city).Scan(&id)
 	if err != nil {
@@ -2238,8 +2377,33 @@ func (l *RepositoryImpl) FindLLMPOIByNameAndCity(ctx context.Context, name, city
 		}
 		return uuid.Nil, fmt.Errorf("failed to find LLM POI: %w", err)
 	}
-	
+
 	span.SetAttributes(attribute.String("poi.name", name), attribute.String("poi.city", city))
+	return id, nil
+}
+
+// FindLLMPOIByName finds an existing LLM POI by name across all cities
+func (l *RepositoryImpl) FindLLMPOIByName(ctx context.Context, name string) (uuid.UUID, error) {
+	ctx, span := otel.Tracer("POIRepository").Start(ctx, "FindLLMPOIByName")
+	defer span.End()
+
+	query := `
+		SELECT id
+		FROM llm_poi
+		WHERE LOWER(name) = LOWER($1)
+		LIMIT 1
+	`
+
+	var id uuid.UUID
+	err := l.pgpool.QueryRow(ctx, query, name).Scan(&id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return uuid.Nil, fmt.Errorf("LLM POI not found")
+		}
+		return uuid.Nil, fmt.Errorf("failed to find LLM POI: %w", err)
+	}
+
+	span.SetAttributes(attribute.String("poi.name", name))
 	return id, nil
 }
 
@@ -2249,29 +2413,29 @@ func (l *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDet
 	defer span.End()
 
 	newID := uuid.New()
-	
+
 	query := `
 		INSERT INTO llm_poi (
-			id, llm_interaction_id, city, name, latitude, longitude, 
-			category, description, address, website, phone_number, 
+			id, llm_interaction_id, city, name, latitude, longitude,
+			category, description, address, website, phone_number,
 			opening_hours, price_level, tags, images, rating,
 			created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 		)
 	`
-	
+
 	// Convert slices to JSON for storage
 	tagsJSON, _ := json.Marshal(poiData.Tags)
 	imagesJSON, _ := json.Marshal(poiData.Images)
 	openingHoursJSON, _ := json.Marshal(poiData.OpeningHours)
-	
+
 	// Use LLM interaction ID directly, but handle invalid UUIDs
 	var llmInteractionID *uuid.UUID
 	if poiData.LlmInteractionID != uuid.Nil {
 		llmInteractionID = &poiData.LlmInteractionID
 	}
-	
+
 	now := time.Now()
 	_, err := l.pgpool.Exec(ctx, query,
 		newID,
@@ -2293,17 +2457,17 @@ func (l *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDet
 		now,
 		now,
 	)
-	
+
 	if err != nil {
 		span.RecordError(err)
 		return uuid.Nil, fmt.Errorf("failed to create LLM POI: %w", err)
 	}
-	
+
 	span.SetAttributes(
 		attribute.String("poi.id", newID.String()),
 		attribute.String("poi.name", poiData.Name),
 		attribute.String("poi.city", poiData.City),
 	)
-	
+
 	return newID, nil
 }

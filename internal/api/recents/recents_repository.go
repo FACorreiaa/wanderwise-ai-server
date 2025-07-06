@@ -23,6 +23,8 @@ type Repository interface {
 	GetCityPOIsByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.POIDetailedInfo, error)
 	GetCityHotelsByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.HotelDetailedInfo, error)
 	GetCityRestaurantsByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.RestaurantDetailedInfo, error)
+	GetCityItinerariesByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.UserSavedItinerary, error)
+	GetCityFavorites(ctx context.Context, userID uuid.UUID, cityName string) ([]types.POIDetailedInfo, error)
 }
 
 type RepositoryImpl struct {
@@ -542,4 +544,233 @@ func (r *RepositoryImpl) GetCityRestaurantsByInteraction(ctx context.Context, us
 	span.SetStatus(codes.Ok, "City restaurants retrieved")
 
 	return restaurants, nil
+}
+
+// GetCityItinerariesByInteraction gets all saved itineraries for a city from user's interactions
+func (r *RepositoryImpl) GetCityItinerariesByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.UserSavedItinerary, error) {
+	ctx, span := otel.Tracer("RecentsRepository").Start(ctx, "GetCityItinerariesByInteraction", trace.WithAttributes(
+		attribute.String("user_id", userID.String()),
+		attribute.String("city_name", cityName),
+	))
+	defer span.End()
+
+	l := r.logger.With(slog.String("method", "GetCityItinerariesByInteraction"))
+
+	query := `
+		SELECT DISTINCT 
+			usi.id,
+			usi.user_id,
+			usi.source_llm_interaction_id,
+			usi.session_id,
+			usi.primary_city_id,
+			usi.title,
+			usi.description,
+			usi.markdown_content,
+			usi.tags,
+			usi.estimated_duration_days,
+			usi.estimated_cost_level,
+			usi.is_public,
+			usi.created_at,
+			usi.updated_at
+		FROM user_saved_itineraries usi
+		JOIN llm_interactions li ON (usi.source_llm_interaction_id = li.id OR usi.session_id IN (
+			SELECT DISTINCT session_id FROM llm_interactions WHERE user_id = $1 AND city_name = $2
+		))
+		WHERE usi.user_id = $1 
+		ORDER BY usi.created_at DESC
+	`
+
+	rows, err := r.pgpool.Query(ctx, query, userID, cityName)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to query city itineraries", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Database query failed")
+		return nil, fmt.Errorf("failed to query city itineraries: %w", err)
+	}
+	defer rows.Close()
+
+	var itineraries []types.UserSavedItinerary
+	for rows.Next() {
+		var itinerary types.UserSavedItinerary
+
+		err := rows.Scan(
+			&itinerary.ID,
+			&itinerary.UserID,
+			&itinerary.SourceLlmInteractionID,
+			&itinerary.SessionID,
+			&itinerary.PrimaryCityID,
+			&itinerary.Title,
+			&itinerary.Description,
+			&itinerary.MarkdownContent,
+			&itinerary.Tags,
+			&itinerary.EstimatedDurationDays,
+			&itinerary.EstimatedCostLevel,
+			&itinerary.IsPublic,
+			&itinerary.CreatedAt,
+			&itinerary.UpdatedAt,
+		)
+		if err != nil {
+			l.WarnContext(ctx, "Failed to scan itinerary row", slog.Any("error", err))
+			continue
+		}
+
+		itineraries = append(itineraries, itinerary)
+	}
+
+	if err := rows.Err(); err != nil {
+		l.ErrorContext(ctx, "Error iterating itinerary rows", slog.Any("error", err))
+		span.RecordError(err)
+		return nil, fmt.Errorf("error iterating itinerary rows: %w", err)
+	}
+
+	l.InfoContext(ctx, "Successfully retrieved city itineraries",
+		slog.String("city_name", cityName),
+		slog.Int("itinerary_count", len(itineraries)))
+
+	span.SetAttributes(attribute.Int("results.itineraries", len(itineraries)))
+	span.SetStatus(codes.Ok, "City itineraries retrieved")
+
+	return itineraries, nil
+}
+
+// GetCityFavorites gets all favorite POIs for a city (both regular and LLM POIs)
+func (r *RepositoryImpl) GetCityFavorites(ctx context.Context, userID uuid.UUID, cityName string) ([]types.POIDetailedInfo, error) {
+	ctx, span := otel.Tracer("RecentsRepository").Start(ctx, "GetCityFavorites", trace.WithAttributes(
+		attribute.String("user_id", userID.String()),
+		attribute.String("city_name", cityName),
+	))
+	defer span.End()
+
+	l := r.logger.With(slog.String("method", "GetCityFavorites"))
+
+	// Query both regular POI favorites and LLM POI favorites
+	query := `
+		-- Regular POI favorites
+		SELECT DISTINCT 
+			pd.id,
+			pd.name,
+			pd.latitude,
+			pd.longitude,
+			pd.description,
+			pd.address,
+			pd.website,
+			pd.phone_number,
+			pd.opening_hours,
+			pd.price_range,
+			pd.category,
+			pd.tags,
+			pd.images,
+			pd.rating,
+			pd.created_at
+		FROM poi_details pd
+		JOIN user_favorite_pois ufp ON pd.id = ufp.poi_id
+		JOIN cities c ON pd.city_id = c.id
+		WHERE ufp.user_id = $1 AND LOWER(c.name) = LOWER($2)
+		
+		UNION
+		
+		-- LLM POI favorites
+		SELECT DISTINCT 
+			lp.id,
+			lp.name,
+			lp.latitude,
+			lp.longitude,
+			lp.description,
+			lp.address,
+			lp.website,
+			lp.phone_number,
+			lp.opening_hours,
+			lp.price_range,
+			lp.category,
+			lp.tags,
+			lp.images,
+			lp.rating,
+			lp.created_at
+		FROM llm_poi lp
+		JOIN user_favorite_llm_pois uflp ON lp.id = uflp.llm_poi_id
+		JOIN llm_interactions li ON lp.llm_interaction_id = li.id
+		WHERE uflp.user_id = $1 AND LOWER(li.city_name) = LOWER($2)
+		
+		ORDER BY created_at DESC
+	`
+
+	rows, err := r.pgpool.Query(ctx, query, userID, cityName)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to query city favorites", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Database query failed")
+		return nil, fmt.Errorf("failed to query city favorites: %w", err)
+	}
+	defer rows.Close()
+
+	var pois []types.POIDetailedInfo
+	for rows.Next() {
+		var poi types.POIDetailedInfo
+		var description, address, website, phoneNumber, openingHours, priceRange, category *string
+		var tags, images []string
+
+		err := rows.Scan(
+			&poi.ID,
+			&poi.Name,
+			&poi.Latitude,
+			&poi.Longitude,
+			&description,
+			&address,
+			&website,
+			&phoneNumber,
+			&openingHours,
+			&priceRange,
+			&category,
+			&tags,
+			&images,
+			&poi.Rating,
+			&poi.CreatedAt,
+		)
+		if err != nil {
+			l.WarnContext(ctx, "Failed to scan favorite POI row", slog.Any("error", err))
+			continue
+		}
+
+		// Handle nullable fields
+		if description != nil {
+			poi.Description = *description
+		}
+		if address != nil {
+			poi.Address = *address
+		}
+		if website != nil {
+			poi.Website = *website
+		}
+		if phoneNumber != nil {
+			poi.PhoneNumber = *phoneNumber
+		}
+		if openingHours != nil {
+			poi.OpeningHours = map[string]string{"general": *openingHours}
+		}
+		if priceRange != nil {
+			poi.PriceRange = *priceRange
+		}
+		if category != nil {
+			poi.Category = *category
+		}
+		poi.Tags = tags
+		poi.Images = images
+
+		pois = append(pois, poi)
+	}
+
+	if err := rows.Err(); err != nil {
+		l.ErrorContext(ctx, "Error iterating favorite POI rows", slog.Any("error", err))
+		span.RecordError(err)
+		return nil, fmt.Errorf("error iterating favorite POI rows: %w", err)
+	}
+
+	l.InfoContext(ctx, "Successfully retrieved city favorites",
+		slog.String("city_name", cityName),
+		slog.Int("favorite_count", len(pois)))
+
+	span.SetAttributes(attribute.Int("results.favorites", len(pois)))
+	span.SetStatus(codes.Ok, "City favorites retrieved")
+
+	return pois, nil
 }

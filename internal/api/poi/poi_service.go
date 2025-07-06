@@ -10,15 +10,16 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
-	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/google/uuid"
 	"github.com/patrickmn/go-cache"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
+	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 var _ Service = (*ServiceImpl)(nil)
@@ -27,6 +28,7 @@ var _ Service = (*ServiceImpl)(nil)
 type Service interface {
 	AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) (uuid.UUID, error)
 	RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) error
+	RemovePoiFromFavouritesByName(ctx context.Context, userID uuid.UUID, poiName string) error
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
 
@@ -47,7 +49,7 @@ type Service interface {
 
 	// Discover Service
 	GetGeneralPOIByDistance(ctx context.Context, userID uuid.UUID, lat, lon, distance float64) ([]types.POIDetailedInfo, error) //, categoryFilter string
-	
+
 	// LLM POI management
 	FindOrCreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error)
 }
@@ -128,6 +130,16 @@ func (s *ServiceImpl) RemovePoiFromFavourites(ctx context.Context, userID, poiID
 			s.logger.Error("failed to remove POI from favourites", "error", err)
 			return err
 		}
+	}
+	return nil
+}
+
+// RemovePoiFromFavouritesByName removes a favorite LLM POI by name as a fallback
+func (s *ServiceImpl) RemovePoiFromFavouritesByName(ctx context.Context, userID uuid.UUID, poiName string) error {
+	err := s.poiRepository.RemoveLLMPoiFromFavouriteByName(ctx, userID, poiName)
+	if err != nil {
+		s.logger.Error("failed to remove LLM POI from favourites by name", "error", err)
+		return err
 	}
 	return nil
 }
@@ -781,4 +793,17 @@ func (s *ServiceImpl) FindOrCreateLLMPOI(ctx context.Context, poiData *types.POI
 	s.logger.InfoContext(ctx, "Created new LLM POI", "name", poiData.Name, "id", newID)
 	span.SetAttributes(attribute.String("operation", "created_new"))
 	return newID, nil
+}
+
+// FindLLMPOIByName finds an LLM POI by name, searching across all cities
+func (s *ServiceImpl) FindLLMPOIByName(ctx context.Context, poiName string) (uuid.UUID, error) {
+	ctx, span := otel.Tracer("POIService").Start(ctx, "FindLLMPOIByName", trace.WithAttributes(
+		attribute.String("poi.name", poiName),
+	))
+	defer span.End()
+
+	// For removal purposes, we need to find the POI by name
+	// Since we don't have city context, we'll search by name only
+	// This could be enhanced later to include city context if needed
+	return s.poiRepository.FindLLMPOIByName(ctx, poiName)
 }
