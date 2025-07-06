@@ -37,6 +37,7 @@ type Repository interface {
 	RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID) error
 
 	RemoveLLMPoiFromFavourite(ctx context.Context, userID, llmPoiID uuid.UUID) error
+	RemoveLLMPoiFromFavouriteByName(ctx context.Context, userID uuid.UUID, poiName string) error
 	CheckPoiExists(ctx context.Context, poiID uuid.UUID) (bool, error)
 	CheckLlmPoiExists(ctx context.Context, llmPoiID uuid.UUID) (bool, error)
 	FindLLMPOIByNameAndCity(ctx context.Context, name, city string) (uuid.UUID, error)
@@ -322,30 +323,11 @@ func (r *RepositoryImpl) RemovePoiFromFavourites(ctx context.Context, userID, po
 }
 
 func (r *RepositoryImpl) RemoveLLMPoiFromFavourite(ctx context.Context, userID, llmPoiID uuid.UUID) error {
-	// Debug: Check what's in the favorites table for this user
-	checkQuery := `SELECT id, llm_poi_id FROM user_favorite_llm_pois WHERE user_id = $1`
-	rows, err := r.pgpool.Query(ctx, checkQuery, userID)
-	if err == nil {
-		defer rows.Close()
-		r.logger.InfoContext(ctx, "Current user LLM favorites before deletion:")
-		for rows.Next() {
-			var id, poi_id uuid.UUID
-			if err := rows.Scan(&id, &poi_id); err == nil {
-				r.logger.InfoContext(ctx, "Found favorite", 
-					slog.String("favorite_id", id.String()),
-					slog.String("llm_poi_id", poi_id.String()))
-			}
-		}
-	}
-
+	// Try direct removal first
 	query := `
 		DELETE FROM user_favorite_llm_pois
 		WHERE user_id = $1 AND llm_poi_id = $2
 	`
-	r.logger.InfoContext(ctx, "Executing delete query",
-		slog.String("userID", userID.String()),
-		slog.String("llmPoiID", llmPoiID.String()))
-		
 	result, err := r.pgpool.Exec(ctx, query, userID, llmPoiID)
 	if err != nil {
 		return fmt.Errorf("failed to remove LLM POI from favourites: %w", err)
@@ -356,6 +338,30 @@ func (r *RepositoryImpl) RemoveLLMPoiFromFavourite(ctx context.Context, userID, 
 	
 	if rowsAffected == 0 {
 		return fmt.Errorf("no favourite LLM POI found to remove")
+	}
+	return nil
+}
+
+// RemoveLLMPoiFromFavouriteByName removes a favorite LLM POI by matching the POI name
+func (r *RepositoryImpl) RemoveLLMPoiFromFavouriteByName(ctx context.Context, userID uuid.UUID, poiName string) error {
+	query := `
+		DELETE FROM user_favorite_llm_pois
+		WHERE user_id = $1 AND llm_poi_id IN (
+			SELECT id FROM llm_pois WHERE name = $2
+		)
+	`
+	result, err := r.pgpool.Exec(ctx, query, userID, poiName)
+	if err != nil {
+		return fmt.Errorf("failed to remove LLM POI from favourites by name: %w", err)
+	}
+	
+	rowsAffected := result.RowsAffected()
+	r.logger.InfoContext(ctx, "Delete by name query result", 
+		slog.String("poiName", poiName),
+		slog.Int64("rows_affected", rowsAffected))
+	
+	if rowsAffected == 0 {
+		return fmt.Errorf("no favourite LLM POI found to remove with name: %s", poiName)
 	}
 	return nil
 }

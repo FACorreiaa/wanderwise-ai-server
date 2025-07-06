@@ -28,6 +28,7 @@ var _ Service = (*ServiceImpl)(nil)
 type Service interface {
 	AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) (uuid.UUID, error)
 	RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) error
+	RemovePoiFromFavouritesByName(ctx context.Context, userID uuid.UUID, poiName string) error
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
 
@@ -129,6 +130,16 @@ func (s *ServiceImpl) RemovePoiFromFavourites(ctx context.Context, userID, poiID
 			s.logger.Error("failed to remove POI from favourites", "error", err)
 			return err
 		}
+	}
+	return nil
+}
+
+// RemovePoiFromFavouritesByName removes a favorite LLM POI by name as a fallback
+func (s *ServiceImpl) RemovePoiFromFavouritesByName(ctx context.Context, userID uuid.UUID, poiName string) error {
+	err := s.poiRepository.RemoveLLMPoiFromFavouriteByName(ctx, userID, poiName)
+	if err != nil {
+		s.logger.Error("failed to remove LLM POI from favourites by name", "error", err)
+		return err
 	}
 	return nil
 }

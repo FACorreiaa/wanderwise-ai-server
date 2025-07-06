@@ -227,17 +227,25 @@ func (h *HandlerImpl) RemovePoiFromFavourites(w http.ResponseWriter, r *http.Req
 		actualPoiID = poiID
 	}
 
-	// Debug: log what we're about to remove
-	l.InfoContext(ctx, "About to remove from favorites",
-		slog.String("userID", userID.String()),
-		slog.String("originalID", req.ID),
-		slog.String("actualPoiID", actualPoiID.String()),
-		slog.Bool("isLlmPoi", req.IsLlmPoi))
-
-	if err := h.poiService.RemovePoiFromFavourites(ctx, userID, actualPoiID, req.IsLlmPoi); err != nil {
-		l.ErrorContext(ctx, "Failed to remove POI from favourites", slog.Any("error", err))
-		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to remove POI from favourites: %s", err.Error()))
-		return
+	// Try to remove by ID first
+	err = h.poiService.RemovePoiFromFavourites(ctx, userID, actualPoiID, req.IsLlmPoi)
+	if err != nil {
+		l.WarnContext(ctx, "Failed to remove POI by ID, trying name-based removal", slog.Any("error", err))
+		
+		// If direct ID removal fails and we have POI data, try removing by name
+		if req.IsLlmPoi && req.POIData != nil && req.POIData.Name != "" {
+			l.InfoContext(ctx, "Attempting name-based removal", slog.String("poiName", req.POIData.Name))
+			err = h.poiService.RemovePoiFromFavouritesByName(ctx, userID, req.POIData.Name)
+			if err != nil {
+				l.ErrorContext(ctx, "Failed to remove POI by name", slog.Any("error", err))
+				api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to remove POI from favourites: %s", err.Error()))
+				return
+			}
+		} else {
+			l.ErrorContext(ctx, "Failed to remove POI from favourites", slog.Any("error", err))
+			api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to remove POI from favourites: %s", err.Error()))
+			return
+		}
 	}
 	l.InfoContext(ctx, "POI removed from favourites successfully")
 	api.WriteJSONResponse(w, r, http.StatusOK, map[string]string{"message": "POI removed from favourites successfully"})
