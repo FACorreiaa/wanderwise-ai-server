@@ -19,7 +19,7 @@ import (
 var _ Repository = (*RepositoryImpl)(nil)
 
 type Repository interface {
-	GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, limit int) (*types.RecentInteractionsResponse, error)
+	GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.RecentInteractionsResponse, error)
 	GetCityPOIsByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.POIDetailedInfo, error)
 	GetCityHotelsByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.HotelDetailedInfo, error)
 	GetCityRestaurantsByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.RestaurantDetailedInfo, error)
@@ -40,9 +40,10 @@ func NewRepository(pgpool *pgxpool.Pool, logger *slog.Logger) *RepositoryImpl {
 }
 
 // GetUserRecentInteractions fetches recent interactions grouped by city
-func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, limit int) (*types.RecentInteractionsResponse, error) {
+func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.RecentInteractionsResponse, error) {
 	ctx, span := otel.Tracer("RecentsRepository").Start(ctx, "GetUserRecentInteractions", trace.WithAttributes(
 		attribute.String("user_id", userID.String()),
+		attribute.Int("page", page),
 		attribute.Int("limit", limit),
 	))
 	defer span.End()
@@ -50,26 +51,31 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 	l := r.logger.With(slog.String("method", "GetUserRecentInteractions"))
 
 	query := `
-		SELECT DISTINCT
-			l.city_name,
-			MAX(l.created_at) as last_activity,
-			COUNT(*) as interaction_count,
-			l.session_id,
-			CASE 
-				WHEN l.city_name IS NOT NULL AND l.city_name != '' 
-				THEN 'Trip to ' || l.city_name
-				ELSE 'Travel Planning'
-			END as title
-		FROM llm_interactions l 
-		WHERE user_id = $1 
-			AND city_name != '' 
-			AND city_name IS NOT NULL
-		GROUP BY l.city_name, l.session_id 
-		ORDER BY last_activity DESC 
-		LIMIT $2
-	`
+        SELECT DISTINCT
+            l.city_name,
+            MAX(l.created_at) as last_activity,
+            COUNT(*) as interaction_count,
+            l.session_id,
+            CASE 
+                WHEN l.city_name IS NOT NULL AND l.city_name != '' 
+                THEN 'Trip to ' || l.city_name
+                ELSE 'Travel Planning'
+            END as title
+        FROM llm_interactions l 
+        WHERE user_id = $1 
+            AND city_name != '' 
+            AND city_name IS NOT NULL
+        GROUP BY l.city_name, l.session_id 
+        ORDER BY last_activity DESC 
+        LIMIT $2 OFFSET $3
+    `
+	offset := (page - 1) * limit
 
-	rows, err := r.pgpool.Query(ctx, query, userID, limit)
+	l.InfoContext(ctx, "Executing query",
+		slog.String("query", query),
+		slog.Any("params", []interface{}{userID, limit, offset}))
+
+	rows, err := r.pgpool.Query(ctx, query, userID, limit, offset)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to query recent interactions", slog.Any("error", err))
 		span.RecordError(err)
@@ -92,7 +98,6 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 			continue
 		}
 
-		// Get detailed interactions for this city
 		interactions, err := r.getCityInteractions(ctx, userID, cityName)
 		if err != nil {
 			l.WarnContext(ctx, "Failed to get interactions for city",
@@ -101,7 +106,6 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 			continue
 		}
 
-		// Count POIs for this city
 		poiCount, err := r.getCityPOICount(ctx, userID, cityName)
 		if err != nil {
 			l.WarnContext(ctx, "Failed to get POI count for city",
@@ -113,6 +117,7 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 		cities = append(cities, types.CityInteractions{
 			CityName:     cityName,
 			Interactions: interactions,
+			SessionIDs:   []uuid.UUID{sessionID},
 			POICount:     poiCount,
 			LastActivity: lastActivity,
 			SessionID:    sessionID,
@@ -126,7 +131,21 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
-	total := len(cities)
+	var total int
+	countQuery := `
+        SELECT COUNT(DISTINCT (l.city_name, l.session_id)) 
+        FROM llm_interactions l
+        WHERE user_id = $1 
+            AND city_name != '' 
+            AND city_name IS NOT NULL
+    `
+	err = r.pgpool.QueryRow(ctx, countQuery, userID).Scan(&total)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to query total recent interactions count", slog.Any("error", err))
+		// Handle the error - you could return an error or default to 0
+		return nil, fmt.Errorf("failed to get total count: %w", err)
+	}
+
 	l.InfoContext(ctx, "Successfully retrieved recent interactions",
 		slog.Int("cities_count", total),
 		slog.String("user_id", userID.String()))

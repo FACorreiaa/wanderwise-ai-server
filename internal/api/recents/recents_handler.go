@@ -40,7 +40,8 @@ func NewHandler(service Service, logger *slog.Logger) *HandlerImpl {
 // @Tags recents
 // @Accept json
 // @Produce json
-// @Param limit query int false "Limit number of cities (default: 10, max: 50)"
+// @Param page query int false "Page number (default: 1)"
+// @Param limit query int false "Limit number of cities per page (default: 10, max: 50)"
 // @Success 200 {object} types.RecentInteractionsResponse
 // @Failure 400 {object} map[string]string
 // @Failure 401 {object} map[string]string
@@ -72,12 +73,25 @@ func (h *HandlerImpl) GetUserRecentInteractions(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Parse page parameter
+	page := 1 // default
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if parsedPage, err := strconv.Atoi(pageStr); err == nil {
+			page = parsedPage
+		}
+	}
+
 	// Parse limit parameter
 	limit := 10 // default
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if parsedLimit, err := strconv.Atoi(limitStr); err == nil {
 			limit = parsedLimit
 		}
+	}
+
+	// Validate page
+	if page <= 0 {
+		page = 1
 	}
 
 	// Validate limit
@@ -90,15 +104,17 @@ func (h *HandlerImpl) GetUserRecentInteractions(w http.ResponseWriter, r *http.R
 
 	l.InfoContext(ctx, "Processing get recent interactions request", 
 		slog.String("user_id", userID.String()),
+		slog.Int("page", page),
 		slog.Int("limit", limit))
 
 	span.SetAttributes(
 		attribute.String("user_id", userID.String()),
+		attribute.Int("page", page),
 		attribute.Int("limit", limit),
 	)
 
 	// Call service to get recent interactions
-	response, err := h.service.GetUserRecentInteractions(ctx, userID, limit)
+	response, err := h.service.GetUserRecentInteractions(ctx, userID, page, limit)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to get recent interactions", slog.Any("error", err))
 		span.RecordError(err)

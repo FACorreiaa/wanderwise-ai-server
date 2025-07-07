@@ -49,14 +49,14 @@ func NewLLMHandlerImpl(llmInteractionService LlmInteractiontService, logger *slo
 	}
 }
 
-func (HandlerImpl *HandlerImpl) SaveItenerary(w http.ResponseWriter, r *http.Request) {
+func (h *HandlerImpl) SaveItenerary(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "SaveItenerary", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
 		semconv.HTTPRouteKey.String("/llm_interaction/save_itinerary"),
 	))
 	defer span.End()
 
-	l := HandlerImpl.logger.With(slog.String("HandlerImpl", "SaveItenerary"))
+	l := h.logger.With(slog.String("HandlerImpl", "SaveItenerary"))
 	l.DebugContext(ctx, "Saving itinerary")
 
 	userIDStr, ok := auth.GetUserIDFromContext(ctx)
@@ -94,7 +94,7 @@ func (HandlerImpl *HandlerImpl) SaveItenerary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	savedItinerary, err := HandlerImpl.llmInteractionService.SaveItenerary(ctx, userID, req)
+	savedItinerary, err := h.llmInteractionService.SaveItenerary(ctx, userID, req)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to save itinerary", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to save itinerary: %s", err.Error()))
@@ -105,14 +105,14 @@ func (HandlerImpl *HandlerImpl) SaveItenerary(w http.ResponseWriter, r *http.Req
 	api.WriteJSONResponse(w, r, http.StatusCreated, savedItinerary)
 }
 
-func (HandlerImpl *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *http.Request) {
+func (h *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetUserChatSessions", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
 		semconv.HTTPRouteKey.String("/llm/prompt-response/chat/sessions/user/{profileID}"),
 	))
 	defer span.End()
 
-	l := HandlerImpl.logger.With(slog.String("HandlerImpl", "GetUserChatSessions"))
+	l := h.logger.With(slog.String("HandlerImpl", "GetUserChatSessions"))
 	l.DebugContext(ctx, "Getting user chat sessions")
 
 	// Get user ID from context
@@ -133,7 +133,7 @@ func (HandlerImpl *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *ht
 	l = l.With(slog.String("userID", userID.String()))
 
 	// Get chat sessions from service
-	sessions, err := HandlerImpl.llmInteractionService.GetUserChatSessions(ctx, userID)
+	sessions, err := h.llmInteractionService.GetUserChatSessions(ctx, userID)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to get user chat sessions", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to get chat sessions: %s", err.Error()))
@@ -144,14 +144,14 @@ func (HandlerImpl *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *ht
 	api.WriteJSONResponse(w, r, http.StatusOK, sessions)
 }
 
-func (HandlerImpl *HandlerImpl) RemoveItenerary(w http.ResponseWriter, r *http.Request) {
+func (h *HandlerImpl) RemoveItenerary(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "RemoveItenerary", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
 		semconv.HTTPRouteKey.String("/llm_interaction/remove_itinerary"),
 	))
 	defer span.End()
 
-	l := HandlerImpl.logger.With(slog.String("HandlerImpl", "RemoveItenerary"))
+	l := h.logger.With(slog.String("HandlerImpl", "RemoveItenerary"))
 	l.DebugContext(ctx, "Removing itinerary")
 
 	userIDStr, ok := auth.GetUserIDFromContext(ctx)
@@ -180,7 +180,7 @@ func (HandlerImpl *HandlerImpl) RemoveItenerary(w http.ResponseWriter, r *http.R
 	span.SetAttributes(attribute.String("app.itinerary.id", itineraryID.String()))
 	l = l.With(slog.String("itineraryID", itineraryID.String()))
 
-	if err := HandlerImpl.llmInteractionService.RemoveItenerary(ctx, userID, itineraryID); err != nil {
+	if err := h.llmInteractionService.RemoveItenerary(ctx, userID, itineraryID); err != nil {
 		l.ErrorContext(ctx, "Failed to remove itinerary", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to remove itinerary: %s", err.Error()))
 		return
@@ -190,14 +190,14 @@ func (HandlerImpl *HandlerImpl) RemoveItenerary(w http.ResponseWriter, r *http.R
 	api.WriteJSONResponse(w, r, http.StatusNoContent, nil)
 }
 
-func (HandlerImpl *HandlerImpl) GetPOIDetails(w http.ResponseWriter, r *http.Request) {
+func (h *HandlerImpl) GetPOIDetails(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetPOIDetails", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
 		semconv.HTTPRouteKey.String("/llm_interaction/get_poi_details"),
 	))
 	defer span.End()
 
-	l := HandlerImpl.logger.With(slog.String("HandlerImpl", "GetPOIDetails"))
+	l := h.logger.With(slog.String("HandlerImpl", "GetPOIDetails"))
 	l.DebugContext(ctx, "Get POI details")
 
 	// Authenticate user
@@ -250,7 +250,7 @@ func (HandlerImpl *HandlerImpl) GetPOIDetails(w http.ResponseWriter, r *http.Req
 	}
 
 	// Call service to get POI details
-	pois, err := HandlerImpl.llmInteractionService.GetPOIDetailedInfosResponse(ctx, userID, serviceReq.CityName, serviceReq.Latitude, serviceReq.Longitude)
+	pois, err := h.llmInteractionService.GetPOIDetailedInfosResponse(ctx, userID, serviceReq.CityName, serviceReq.Latitude, serviceReq.Longitude)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to fetch POI details", slog.Any("error", err))
 		span.SetStatus(codes.Error, "Service error")
@@ -286,7 +286,11 @@ func (h *HandlerImpl) writeSSEError(w http.ResponseWriter, errorMsg string) {
 		Timestamp: time.Now(),
 		EventID:   uuid.New().String(),
 	}
-	data, _ := json.Marshal(event)
+	data, err := json.Marshal(event)
+	if err != nil {
+
+		return
+	}
 	fmt.Fprintf(w, "id: %s\n", event.EventID)
 	fmt.Fprintf(w, "event: %s\n", event.Type)
 	fmt.Fprintf(w, "data: %s\n\n", data)

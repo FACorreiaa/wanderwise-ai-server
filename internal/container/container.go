@@ -6,12 +6,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	generativeAI "github.com/FACorreiaa/go-genai-sdk/lib"
+
 	database "github.com/FACorreiaa/go-poi-au-suggestions/app/db"
 	"github.com/FACorreiaa/go-poi-au-suggestions/config"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/auth"
 	llmChat "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/chat_prompt"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
-	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/interests"
 	itineraryList "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/list"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/poi"

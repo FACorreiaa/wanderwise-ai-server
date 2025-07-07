@@ -349,22 +349,22 @@ type RecentInteraction struct {
 
 // RecentInteractionsResponse groups interactions by city
 type RecentInteractionsResponse struct {
-	Cities []CityInteractions `json:"cities"`
-	Total  int                `json:"total"`
+	Cities  []CityInteractions `json:"cities"`
+	Total   int                `json:"total"`
+	Page    int                `json:"page"`
+	Limit   int                `json:"limit"`
+	HasMore bool               `json:"has_more"`
 }
 
 // CityInteractions groups interactions for a specific city
 type CityInteractions struct {
-	CityName          string                   `json:"city_name"`
-	CityID            *uuid.UUID               `json:"city_id,omitempty"`
-	Interactions      []RecentInteraction      `json:"interactions"`
-	POICount          int                      `json:"poi_count"`
-	LastActivity      time.Time                `json:"last_activity"`
-	SessionID         uuid.UUID                `json:"session_id"`
-	Title             string                   `json:"title"`
-	SavedItineraries  []UserSavedItinerary     `json:"saved_itineraries,omitempty"`
-	FavoritePOIs      []POIDetailedInfo        `json:"favorite_pois,omitempty"`
-	TotalInteractions int                      `json:"total_interactions"`
-	TotalFavorites    int                      `json:"total_favorites"`
-	TotalItineraries  int                      `json:"total_itineraries"`
+	CityName         string              `json:"city_name"`
+	SessionID        uuid.UUID           `json:"session_id"`
+	Interactions     []RecentInteraction `json:"interactions"`
+	POICount         int                 `json:"poi_count"`
+	LastActivity     time.Time           `json:"last_activity"`
+	SessionIDs       []uuid.UUID         `json:"session_ids"` // Changed from SessionID
+	Title            string              `json:"title"`
+	TotalFavorites   *int                `json:"total_favorites,omitempty"`
+	TotalItineraries *int                `json:"total_itineraries,omitempty"`
 }

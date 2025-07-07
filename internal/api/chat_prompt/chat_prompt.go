@@ -767,7 +767,7 @@ Respond with JSON:
 
 func getDiningPrompt(cityName string, lat, lon float64, basePreferences string) string {
 	return fmt.Sprintf(`
-You are a restaurant recommendation assistant. Find dining options in %s near coordinates %.4f, %.4f.
+You are a restaurant recommendation assistant. Find 10 dining options in %s near coordinates %.4f, %.4f.
 USER PREFERENCES:
 %s
 Respond with JSON:

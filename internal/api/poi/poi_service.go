@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -17,8 +18,9 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	generativeAI "github.com/FACorreiaa/go-genai-sdk/lib"
+
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
-	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
@@ -58,7 +60,7 @@ type ServiceImpl struct {
 	logger           *slog.Logger
 	poiRepository    Repository
 	embeddingService *generativeAI.EmbeddingService
-	aiClient         *generativeAI.AIClient
+	aiClient         *generativeAI.LLMChatClient
 	cityRepo         city.Repository
 	cache            *cache.Cache
 }
@@ -67,8 +69,8 @@ func NewServiceImpl(poiRepository Repository,
 	embeddingService *generativeAI.EmbeddingService,
 	cityRepo city.Repository,
 	logger *slog.Logger) *ServiceImpl {
-
-	aiClient, err := generativeAI.NewAIClient(context.Background())
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	aiClient, err := generativeAI.NewLLMChatClient(context.Background(), apiKey)
 	if err != nil {
 		logger.Error("Failed to initialize AI client", slog.Any("error", err))
 		// For now, set to nil and handle gracefully in methods

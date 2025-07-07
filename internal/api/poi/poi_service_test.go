@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
+	generativeAI "github.com/FACorreiaa/go-genai-sdk/lib"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types" // Ensure this path is correct
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"

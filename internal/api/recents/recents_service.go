@@ -18,7 +18,7 @@ import (
 var _ Service = (*ServiceImpl)(nil)
 
 type Service interface {
-	GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, limit int) (*types.RecentInteractionsResponse, error)
+	GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.RecentInteractionsResponse, error)
 	GetCityDetailsForUser(ctx context.Context, userID uuid.UUID, cityName string) (*types.CityInteractions, error)
 }
 
@@ -35,14 +35,20 @@ func NewService(repo Repository, logger *slog.Logger) *ServiceImpl {
 }
 
 // GetUserRecentInteractions retrieves recent interactions for a user
-func (s *ServiceImpl) GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, limit int) (*types.RecentInteractionsResponse, error) {
+func (s *ServiceImpl) GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.RecentInteractionsResponse, error) {
 	ctx, span := otel.Tracer("RecentsService").Start(ctx, "GetUserRecentInteractions", trace.WithAttributes(
 		attribute.String("user_id", userID.String()),
+		attribute.Int("page", page),
 		attribute.Int("limit", limit),
 	))
 	defer span.End()
 
 	l := s.logger.With(slog.String("method", "GetUserRecentInteractions"))
+
+	// Validate page
+	if page <= 0 {
+		page = 1
+	}
 
 	// Validate limit
 	if limit <= 0 {
@@ -54,10 +60,11 @@ func (s *ServiceImpl) GetUserRecentInteractions(ctx context.Context, userID uuid
 
 	l.InfoContext(ctx, "Getting user recent interactions",
 		slog.String("user_id", userID.String()),
+		slog.Int("page", page),
 		slog.Int("limit", limit))
 
 	// Get recent interactions from repository
-	response, err := s.repo.GetUserRecentInteractions(ctx, userID, limit)
+	response, err := s.repo.GetUserRecentInteractions(ctx, userID, page, limit)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to get recent interactions", slog.Any("error", err))
 		span.RecordError(err)
@@ -98,7 +105,7 @@ func (s *ServiceImpl) GetCityDetailsForUser(ctx context.Context, userID uuid.UUI
 		slog.String("city_name", cityName))
 
 	// Get recent interactions to find the city data
-	recentResponse, err := s.repo.GetUserRecentInteractions(ctx, userID, 50) // Get more to find the city
+	recentResponse, err := s.repo.GetUserRecentInteractions(ctx, userID, 1, 50) // Get more to find the city
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to get recent interactions", slog.Any("error", err))
 		span.RecordError(err)
@@ -184,15 +191,15 @@ func (s *ServiceImpl) GetCityDetailsForUser(ctx context.Context, userID uuid.UUI
 	}
 
 	cityDetails := &types.CityInteractions{
-		CityName:          cityName,
-		Interactions:      interactions,
-		POICount:          poiCount,
-		LastActivity:      lastActivity,
-		SavedItineraries:  itineraries,
-		FavoritePOIs:      favorites,
-		TotalInteractions: len(interactions),
-		TotalFavorites:    len(favorites),
-		TotalItineraries:  len(itineraries),
+		CityName:     cityName,
+		Interactions: interactions,
+		POICount:     poiCount,
+		LastActivity: lastActivity,
+		//SavedItineraries:  itineraries,
+		//FavoritePOIs:      favorites,
+		//TotalInteractions: len(interactions),
+		//TotalFavorites:    len(favorites),
+		//TotalItineraries:  len(itineraries),
 	}
 
 	l.InfoContext(ctx, "Successfully retrieved city details",

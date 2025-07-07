@@ -10,6 +10,7 @@ import (
 	"log"
 	"log/slog"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -25,8 +26,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/genai"
 
+	generativeAI "github.com/FACorreiaa/go-genai-sdk/lib"
+
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
-	generativeAI "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/generative_ai"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/interests"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/poi"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/profiles"
@@ -80,9 +82,8 @@ type ServiceImpl struct {
 	searchProfileRepo  profiles.Repository
 	searchProfileSvc   profiles.Service // Add service for enhanced methods
 	tagsRepo           tags.Repository
-	aiClient           *generativeAI.AIClient
+	aiClient           *generativeAI.LLMChatClient
 	embeddingService   *generativeAI.EmbeddingService
-	ragService         *generativeAI.RAGService
 	llmInteractionRepo Repository
 	cityRepo           city.Repository
 	poiRepo            poi.Repository
@@ -103,7 +104,8 @@ func NewLlmInteractiontService(interestRepo interests.Repository,
 	poiRepo poi.Repository,
 	logger *slog.Logger) *ServiceImpl {
 	ctx := context.Background()
-	aiClient, _ := generativeAI.NewAIClient(ctx)
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	aiClient, _ := generativeAI.NewLLMChatClient(ctx, apiKey)
 
 	// Initialize embedding service
 	embeddingService, err := generativeAI.NewEmbeddingService(ctx, logger)
@@ -112,12 +114,8 @@ func NewLlmInteractiontService(interestRepo interests.Repository,
 	}
 
 	// Initialize RAG service
-	ragService, err := generativeAI.NewRAGService(ctx, logger)
-	if err != nil {
-		log.Fatalf("Failed to create RAG service: %v", err) // Terminate if initialization fails
-	}
 
-	cache := cache.New(24*time.Hour, 1*time.Hour) // Cache for 24 hours with cleanup every hour
+	c := cache.New(24*time.Hour, 1*time.Hour) // Cache for 24 hours with cleanup every hour
 	service := &ServiceImpl{
 		logger:             logger,
 		tagsRepo:           tagsRepo,
@@ -126,11 +124,10 @@ func NewLlmInteractiontService(interestRepo interests.Repository,
 		searchProfileSvc:   searchProfileSvc,
 		aiClient:           aiClient,
 		embeddingService:   embeddingService,
-		ragService:         ragService,
 		llmInteractionRepo: llmInteractionRepo,
 		cityRepo:           cityRepo,
 		poiRepo:            poiRepo,
-		cache:              cache,
+		cache:              c,
 		deadLetterCh:       make(chan types.StreamEvent, 100),
 		intentClassifier:   &types.SimpleIntentClassifier{},
 	}
@@ -874,7 +871,7 @@ func (l *ServiceImpl) generatePOIData(ctx context.Context, poiName, cityName str
 	prompt := generatedContinuedConversationPrompt(poiName, cityName)
 
 	// Generate LLM response
-	response, err := l.aiClient.GenerateContent(ctx, prompt, nil)
+	response, err := l.aiClient.GenerateContent(ctx, prompt, "", nil)
 	if err != nil {
 		span.RecordError(err)
 		return types.POIDetailedInfo{}, fmt.Errorf("failed to generate POI data: %w", err)
@@ -1987,9 +1984,6 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 	return fmt.Sprintf("I've added %s to your itinerary.", poiName), nil
 }
 
-/*
-** Unified Response
- */
 // ProcessUnifiedChatMessageStream handles unified chat with optimized streaming based on Google GenAI patterns
 func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userID, profileID uuid.UUID, cityName, message string, userLocation *types.UserLocation, eventCh chan<- types.StreamEvent) error {
 	startTime := time.Now() // Track when processing starts
