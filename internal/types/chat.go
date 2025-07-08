@@ -368,3 +368,12 @@ type CityInteractions struct {
 	TotalFavorites   *int                `json:"total_favorites,omitempty"`
 	TotalItineraries *int                `json:"total_itineraries,omitempty"`
 }
+
+// RecentInteractionsFilter defines filters for recent interactions
+type RecentInteractionsFilter struct {
+	SortBy          string `json:"sort_by"`           // last_activity, city_name, interaction_count, poi_count
+	SortOrder       string `json:"sort_order"`        // asc, desc
+	Search          string `json:"search"`            // Search term for city name
+	MinInteractions int    `json:"min_interactions"`  // Minimum number of interactions
+	MaxInteractions int    `json:"max_interactions"`  // Maximum number of interactions
+}

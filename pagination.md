@@ -1,7 +1,6 @@
-Why did my discover page stopped working ? It should call the getNearbyPOIs point but somehow its now calling it when clicking on the tab. 
-
 My pagination in /recents is working wonderfully. 
 After that, I want to implemement also server side order by and server side filtering.
+Make all the changes needed on the frontend (client folder) and on the backend (server folder)
 
 After that I want to diversify my discover tab:
 - Currently discover gets alot of things from user location.

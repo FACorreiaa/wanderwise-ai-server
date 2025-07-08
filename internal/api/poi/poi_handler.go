@@ -141,11 +141,11 @@ func (h *HandlerImpl) AddPoiToFavourites(w http.ResponseWriter, r *http.Request)
 	}
 
 	l.InfoContext(ctx, "Itinerary saved successfully")
-	
+
 	// Return response with the actual POI ID that was stored
 	response := map[string]interface{}{
-		"id": savedItinerary,
-		"poi_id": actualPoiID.String(),
+		"id":      savedItinerary,
+		"poi_id":  actualPoiID.String(),
 		"message": "POI added to favourites successfully",
 	}
 	api.WriteJSONResponse(w, r, http.StatusCreated, response)
@@ -211,7 +211,7 @@ func (h *HandlerImpl) RemovePoiFromFavourites(w http.ResponseWriter, r *http.Req
 		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid POI ID format")
 		return
 	}
-	
+
 	// For LLM POIs, we might need to resolve the ID since the frontend might send the original POI ID
 	// but we need the actual database ID that was created/found during the add operation
 	if req.IsLlmPoi && req.POIData != nil {
@@ -231,7 +231,7 @@ func (h *HandlerImpl) RemovePoiFromFavourites(w http.ResponseWriter, r *http.Req
 	err = h.poiService.RemovePoiFromFavourites(ctx, userID, actualPoiID, req.IsLlmPoi)
 	if err != nil {
 		l.WarnContext(ctx, "Failed to remove POI by ID, trying name-based removal", slog.Any("error", err))
-		
+
 		// If direct ID removal fails and we have POI data, try removing by name
 		if req.IsLlmPoi && req.POIData != nil && req.POIData.Name != "" {
 			l.InfoContext(ctx, "Attempting name-based removal", slog.String("poiName", req.POIData.Name))
@@ -982,7 +982,7 @@ func (h *HandlerImpl) GenerateEmbeddingsForPOIs(w http.ResponseWriter, r *http.R
 	})
 }
 
-// TODO GetPOIsByDistance test this
+// GetNearbyRecommendations get nearby recommendations
 func (HandlerImpl *HandlerImpl) GetNearbyRecommendations(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetPOIsByDistance", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
