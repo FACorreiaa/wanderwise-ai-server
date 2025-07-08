@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -132,16 +133,63 @@ func (h *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *http.Request
 	span.SetAttributes(semconv.EnduserIDKey.String(userID.String()))
 	l = l.With(slog.String("userID", userID.String()))
 
-	// Get chat sessions from service
-	sessions, err := h.llmInteractionService.GetUserChatSessions(ctx, userID)
+	// Parse pagination parameters
+	page := 1 // default
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if parsedPage, err := strconv.Atoi(pageStr); err == nil {
+			page = parsedPage
+		}
+	}
+
+	limit := 10 // default
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil {
+			limit = parsedLimit
+		}
+	}
+
+	// Validate page
+	if page <= 0 {
+		page = 1
+	}
+
+	// Validate limit
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	l.InfoContext(ctx, "Processing get user chat sessions request", 
+		slog.String("user_id", userID.String()),
+		slog.Int("page", page),
+		slog.Int("limit", limit))
+
+	span.SetAttributes(
+		attribute.String("user_id", userID.String()),
+		attribute.Int("page", page),
+		attribute.Int("limit", limit),
+	)
+
+	// Get chat sessions from service with pagination
+	response, err := h.llmInteractionService.GetUserChatSessions(ctx, userID, page, limit)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to get user chat sessions", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to get chat sessions: %s", err.Error()))
 		return
 	}
 
-	l.InfoContext(ctx, "Successfully retrieved user chat sessions", slog.Int("sessionCount", len(sessions)))
-	api.WriteJSONResponse(w, r, http.StatusOK, sessions)
+	l.InfoContext(ctx, "Successfully retrieved user chat sessions", 
+		slog.Int("sessionCount", len(response.Sessions)),
+		slog.Int("total", response.Total))
+
+	span.SetAttributes(
+		attribute.Int("response.sessions_count", len(response.Sessions)),
+		attribute.Int("response.total", response.Total),
+	)
+	
+	api.WriteJSONResponse(w, r, http.StatusOK, response)
 }
 
 func (h *HandlerImpl) RemoveItenerary(w http.ResponseWriter, r *http.Request) {

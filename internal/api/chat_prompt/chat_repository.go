@@ -36,7 +36,7 @@ type Repository interface {
 	// Session methods
 	CreateSession(ctx context.Context, session types.ChatSession) error
 	GetSession(ctx context.Context, sessionID uuid.UUID) (*types.ChatSession, error)
-	GetUserChatSessions(ctx context.Context, userID uuid.UUID) ([]types.ChatSession, error)
+	GetUserChatSessions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.ChatSessionsResponse, error)
 	UpdateSession(ctx context.Context, session types.ChatSession) error
 	AddMessageToSession(ctx context.Context, sessionID uuid.UUID, message types.ConversationMessage) error
 
@@ -786,20 +786,31 @@ func (r *RepositoryImpl) GetSession(ctx context.Context, sessionID uuid.UUID) (*
 	return &session, nil
 }
 
-// GetUserChatSessions retrieves chat history from LLM interactions grouped by session/city, ordered by most recent first
-func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UUID) ([]types.ChatSession, error) {
+// GetUserChatSessions retrieves paginated chat history from LLM interactions grouped by session/city, ordered by most recent first
+func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.ChatSessionsResponse, error) {
 	ctx, span := otel.Tracer("LlmInteractionRepo").Start(ctx, "GetUserChatSessions", trace.WithAttributes(
 		semconv.DBSystemKey.String(semconv.DBSystemPostgreSQL.Value.AsString()),
 		attribute.String("db.operation", "SELECT"),
 		attribute.String("db.sql.table", "llm_interactions"),
 		attribute.String("user.id", userID.String()),
+		attribute.Int("page", page),
+		attribute.Int("limit", limit),
 	))
 	defer span.End()
 
+	r.logger.InfoContext(ctx, "Getting paginated user chat sessions",
+		slog.String("user_id", userID.String()),
+		slog.Int("page", page),
+		slog.Int("limit", limit))
+
+	// Calculate offset
+	offset := (page - 1) * limit
+
+	// Main query with pagination
 	query := `
         WITH grouped_interactions AS (
             SELECT 
-                COALESCE(session_id, city_name || '_' || DATE(created_at)) as session_key,
+                COALESCE(session_id::text, city_name || '_' || DATE(created_at)) as session_key,
                 user_id,
                 city_name,
                 MIN(created_at) as first_interaction,
@@ -847,10 +858,35 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
             interactions
         FROM grouped_interactions
         ORDER BY last_interaction DESC
-        LIMIT 50
+        LIMIT $2 OFFSET $3
     `
 
-	rows, err := r.pgpool.Query(ctx, query, userID)
+	// Count query for total records
+	countQuery := `
+        WITH grouped_interactions AS (
+            SELECT 
+                COALESCE(session_id::text, city_name || '_' || DATE(created_at)) as session_key,
+                user_id,
+                city_name
+            FROM llm_interactions 
+            WHERE user_id = $1 AND prompt IS NOT NULL
+            GROUP BY session_key, user_id, city_name
+        )
+        SELECT COUNT(*) FROM grouped_interactions
+    `
+
+	// Execute count query first
+	var total int
+	err := r.pgpool.QueryRow(ctx, countQuery, userID).Scan(&total)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to get total count")
+		r.logger.ErrorContext(ctx, "Failed to get total chat sessions count", slog.Any("error", err))
+		return nil, fmt.Errorf("failed to get total count: %w", err)
+	}
+
+	// Execute main query
+	rows, err := r.pgpool.Query(ctx, query, userID, limit, offset)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Failed to query LLM interactions")
@@ -998,8 +1034,34 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 		return nil, fmt.Errorf("error iterating through LLM interaction rows: %w", err)
 	}
 
-	span.SetAttributes(attribute.Int("sessions.count", len(sessions)))
-	return sessions, nil
+	// Calculate hasMore
+	hasMore := (page * limit) < total
+
+	response := &types.ChatSessionsResponse{
+		Sessions: sessions,
+		Total:    total,
+		Page:     page,
+		Limit:    limit,
+		HasMore:  hasMore,
+	}
+
+	r.logger.InfoContext(ctx, "Successfully retrieved paginated chat sessions",
+		slog.String("user_id", userID.String()),
+		slog.Int("sessions_count", len(sessions)),
+		slog.Int("total", total),
+		slog.Int("page", page),
+		slog.Int("limit", limit),
+		slog.Bool("has_more", hasMore))
+
+	span.SetAttributes(
+		attribute.Int("sessions.count", len(sessions)),
+		attribute.Int("sessions.total", total),
+		attribute.Int("response.page", page),
+		attribute.Int("response.limit", limit),
+		attribute.Bool("response.has_more", hasMore),
+	)
+	span.SetStatus(codes.Ok, "Chat sessions retrieved successfully")
+	return response, nil
 }
 
 // Helper function to parse time from interface{}

@@ -68,7 +68,7 @@ type LlmInteractiontService interface {
 	ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityName, message string, userLocation *types.UserLocation, eventCh chan<- types.StreamEvent) error
 
 	// Chat session management
-	GetUserChatSessions(ctx context.Context, userID uuid.UUID) ([]types.ChatSession, error)
+	GetUserChatSessions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.ChatSessionsResponse, error)
 }
 
 type IntentClassifier interface {
@@ -628,17 +628,21 @@ func (l *ServiceImpl) RemoveItenerary(ctx context.Context, userID, itineraryID u
 	return nil
 }
 
-// GetUserChatSessions retrieves all chat sessions for a user
-func (l *ServiceImpl) GetUserChatSessions(ctx context.Context, userID uuid.UUID) ([]types.ChatSession, error) {
+// GetUserChatSessions retrieves paginated chat sessions for a user
+func (l *ServiceImpl) GetUserChatSessions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.ChatSessionsResponse, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GetUserChatSessions", trace.WithAttributes(
 		attribute.String("user.id", userID.String()),
+		attribute.Int("page", page),
+		attribute.Int("limit", limit),
 	))
 	defer span.End()
 
-	l.logger.InfoContext(ctx, "Retrieving chat sessions for user",
-		slog.String("userID", userID.String()))
+	l.logger.InfoContext(ctx, "Retrieving paginated chat sessions for user",
+		slog.String("userID", userID.String()),
+		slog.Int("page", page),
+		slog.Int("limit", limit))
 
-	sessions, err := l.llmInteractionRepo.GetUserChatSessions(ctx, userID)
+	response, err := l.llmInteractionRepo.GetUserChatSessions(ctx, userID, page, limit)
 	if err != nil {
 		l.logger.ErrorContext(ctx, "Failed to get user chat sessions", slog.Any("error", err))
 		span.RecordError(err)
@@ -646,12 +650,20 @@ func (l *ServiceImpl) GetUserChatSessions(ctx context.Context, userID uuid.UUID)
 		return nil, fmt.Errorf("failed to get user chat sessions: %w", err)
 	}
 
-	l.logger.InfoContext(ctx, "Successfully retrieved chat sessions",
+	l.logger.InfoContext(ctx, "Successfully retrieved paginated chat sessions",
 		slog.String("userID", userID.String()),
-		slog.Int("sessionCount", len(sessions)))
-	span.SetAttributes(attribute.Int("sessions.count", len(sessions)))
+		slog.Int("sessionCount", len(response.Sessions)),
+		slog.Int("total", response.Total),
+		slog.Int("page", response.Page),
+		slog.Int("limit", response.Limit))
+	span.SetAttributes(
+		attribute.Int("sessions.count", len(response.Sessions)),
+		attribute.Int("sessions.total", response.Total),
+		attribute.Int("response.page", response.Page),
+		attribute.Int("response.limit", response.Limit),
+	)
 	span.SetStatus(codes.Ok, "Chat sessions retrieved successfully")
-	return sessions, nil
+	return response, nil
 }
 
 // getPOIDetailedInfos returns a formatted string with POI details.
