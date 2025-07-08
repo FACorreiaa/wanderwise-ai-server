@@ -102,10 +102,10 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
             COUNT(*) as interaction_count,
             (
                 SELECT session_id 
-                FROM llm_interactions li2 
-                WHERE li2.user_id = l.user_id 
-                  AND li2.city_name = l.city_name 
-                ORDER BY li2.created_at DESC 
+                FROM llm_interactions llmi 
+                WHERE llmi.user_id = l.user_id 
+                  AND llmi.city_name = l.city_name 
+                ORDER BY llmi.created_at DESC 
                 LIMIT 1
             ) as session_id,
             CASE 
@@ -124,12 +124,12 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
         GROUP BY l.city_name, l.user_id
         %s
     `, strings.Join(whereConditions, " AND "),
-       func() string {
-           if len(havingConditions) > 0 {
-               return "HAVING " + strings.Join(havingConditions, " AND ")
-           }
-           return ""
-       }())
+		func() string {
+			if len(havingConditions) > 0 {
+				return "HAVING " + strings.Join(havingConditions, " AND ")
+			}
+			return ""
+		}())
 
 	query := fmt.Sprintf(`
         SELECT 
@@ -210,12 +210,12 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
         GROUP BY l.city_name, l.user_id
         %s
     `, strings.Join(whereConditions, " AND "),
-       func() string {
-           if len(havingConditions) > 0 {
-               return "HAVING " + strings.Join(havingConditions, " AND ")
-           }
-           return ""
-       }())
+		func() string {
+			if len(havingConditions) > 0 {
+				return "HAVING " + strings.Join(havingConditions, " AND ")
+			}
+			return ""
+		}())
 
 	// For count, we need to count the results from the grouped query
 	countWrapperQuery := fmt.Sprintf("SELECT COUNT(*) FROM (%s) as grouped_results", countSubquery)
