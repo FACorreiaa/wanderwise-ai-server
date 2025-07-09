@@ -107,7 +107,6 @@ func (r *RepositoryImpl) SavePoi(ctx context.Context, poi types.POIDetailedInfo,
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("failed to start transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
 
 	// Validate coordinates
 	if poi.Latitude < -90 || poi.Latitude > 90 || poi.Longitude < -180 || poi.Longitude > 180 {
@@ -130,8 +129,10 @@ func (r *RepositoryImpl) SavePoi(ctx context.Context, poi types.POIDetailedInfo,
 		poi.Category, "loci_ai", poi.DescriptionPOI,
 	).Scan(&id); err != nil {
 		if err == pgx.ErrNoRows {
+			_ = tx.Rollback(ctx)
 			return uuid.Nil, nil
 		}
+		_ = tx.Rollback(ctx)
 		return uuid.Nil, fmt.Errorf("failed to insert POI: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -144,28 +145,19 @@ func (r *RepositoryImpl) SavePoi(ctx context.Context, poi types.POIDetailedInfo,
 }
 
 func (r *RepositoryImpl) FindPoiByNameAndCity(ctx context.Context, name string, cityID uuid.UUID) (*types.POIDetailedInfo, error) {
-	tx, err := r.pgpool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	query := `
         SELECT name, description, ST_Y(location) as lat, ST_X(location) as lon, poi_type
         FROM points_of_interest
         WHERE name = $1 AND city_id = $2
     `
 	var poi types.POIDetailedInfo
-	if err = tx.QueryRow(ctx, query, name, cityID).Scan(
+	if err := r.pgpool.QueryRow(ctx, query, name, cityID).Scan(
 		&poi.Name, &poi.DescriptionPOI, &poi.Latitude, &poi.Longitude, &poi.Category,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to find POI: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	// Log the successful retrieval
 	r.logger.Info("POI found successfully",
@@ -368,11 +360,6 @@ func (r *RepositoryImpl) RemoveLLMPoiFromFavouriteByName(ctx context.Context, us
 }
 
 func (r *RepositoryImpl) GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error) {
-	tx, err := r.pgpool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
 	query := `
 		SELECT
     favorite_id,
@@ -440,7 +427,7 @@ FROM (
      ) combined_favorites
 ORDER BY added_at DESC;
 	`
-	rows, err := tx.Query(ctx, query, userID)
+	rows, err := r.pgpool.Query(ctx, query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query favourite POIs: %w", err)
 	}
@@ -504,26 +491,17 @@ ORDER BY added_at DESC;
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating favourite POI rows: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
-	}
 	r.logger.Info("Favourite POIs retrieved successfully", slog.String("userID", userID.String()), slog.Int("count", len(pois)))
 	return pois, nil
 }
 
 func (r *RepositoryImpl) GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error) {
-	tx, err := r.pgpool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	query := `
 		SELECT id, name, description, ST_X(location) AS longitude, ST_Y(location) AS latitude, poi_type
 		FROM points_of_interest
 		WHERE city_id = $1
 	`
-	rows, err := tx.Query(ctx, query, cityID)
+	rows, err := r.pgpool.Query(ctx, query, cityID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query POIs by city ID: %w", err)
 	}
@@ -541,10 +519,6 @@ func (r *RepositoryImpl) GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) 
 
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating POI rows: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	r.logger.Info("POIs retrieved successfully by city ID", slog.String("cityID", cityID.String()), slog.Int("count", len(pois)))
@@ -657,7 +631,6 @@ func (r *RepositoryImpl) SavePOIDetails(ctx context.Context, poi types.POIDetail
 		span.SetStatus(codes.Error, "Failed to begin transaction")
 		return uuid.Nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
 
 	poiID := uuid.New()
 
@@ -680,6 +653,7 @@ func (r *RepositoryImpl) SavePOIDetails(ctx context.Context, poi types.POIDetail
 		uuid.NullUUID{UUID: poi.LlmInteractionID, Valid: poi.LlmInteractionID != uuid.Nil},
 	)
 	if err != nil {
+		_ = tx.Rollback(ctx)
 		r.logger.ErrorContext(ctx, "Failed to save POI details",
 			slog.Any("error", err),
 			slog.String("poi_name", poi.Name),
@@ -700,13 +674,13 @@ func (r *RepositoryImpl) SavePOIDetails(ctx context.Context, poi types.POIDetail
 		case "€", "$", "free", "Free", "1":
 			level := 1
 			priceLevel = &level
-		case "€€", "$$", "budget", "Budget", "2":
+		case "€€", "$", "budget", "Budget", "2":
 			level := 2
 			priceLevel = &level
-		case "€€€", "$$$", "moderate", "Moderate", "3":
+		case "€€€", "$$", "moderate", "Moderate", "3":
 			level := 3
 			priceLevel = &level
-		case "€€€€", "$$$$", "expensive", "Expensive", "4":
+		case "€€€€", "$$", "expensive", "Expensive", "4":
 			level := 4
 			priceLevel = &level
 		case "luxury", "Luxury", "premium", "Premium", "5":
@@ -742,6 +716,7 @@ func (r *RepositoryImpl) SavePOIDetails(ctx context.Context, poi types.POIDetail
 		"loci_ai", poi.Description, poi.Tags,
 	)
 	if err != nil {
+		_ = tx.Rollback(ctx)
 		r.logger.ErrorContext(ctx, "Failed to save POI to points_of_interest",
 			slog.Any("error", err),
 			slog.String("poi_name", poi.Name),
@@ -1539,35 +1514,57 @@ func (r *RepositoryImpl) SavePOItoPointsOfInterest(ctx context.Context, poi type
 	return poiID, nil
 }
 
+type ItineraryPOISource struct {
+	pois      []types.POIDetailedInfo
+	itineraryID uuid.UUID
+	idx       int
+}
+
+func (ips *ItineraryPOISource) Next() bool {
+	ips.idx++
+	return ips.idx < len(ips.pois)
+}
+
+func (ips *ItineraryPOISource) Values() ([]interface{}, error) {
+	poi := ips.pois[ips.idx]
+	return []interface{}{ips.itineraryID, poi.ID, ips.idx, poi.DescriptionPOI}, nil
+}
+
+func (ips *ItineraryPOISource) Err() error {
+	return nil
+}
+
 func (r *RepositoryImpl) SaveItineraryPOIs(ctx context.Context, itineraryID uuid.UUID, pois []types.POIDetailedInfo) error {
 	ctx, span := otel.Tracer("LlmInteractionRepo").Start(ctx, "SaveItineraryPOIs")
 	defer span.End()
 
-	batch := &pgx.Batch{}
-	query := `
-        INSERT INTO itinerary_pois (itinerary_id, poi_id, order_index, ai_description)
-        VALUES ($1, $2, $3, $4)
-    `
-	for i, poi := range pois {
-		poiID, err := r.SavePOItoPointsOfInterest(ctx, poi, poi.CityID) // Assume CityID is added to POIDetailedInfo or passed separately
+	for i := range pois {
+		poiID, err := r.SavePOItoPointsOfInterest(ctx, pois[i], pois[i].CityID) // Assume CityID is added to POIDetailedInfo or passed separately
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to ensure POI in points_of_interest: %w", err)
 		}
-		aiDescription := poi.DescriptionPOI // Use description from llm_suggested_pois
-		batch.Queue(query, itineraryID, poiID, i, aiDescription)
+		pois[i].ID = poiID
 	}
 
-	br := r.pgpool.SendBatch(ctx, batch)
-	defer br.Close()
-
-	for i := 0; i < len(pois); i++ {
-		_, err := br.Exec()
-		if err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("failed to save itinerary POI at index %d: %w", i, err)
-		}
+	source := &ItineraryPOISource{
+		pois:      pois,
+		itineraryID: itineraryID,
+		idx:       -1,
 	}
+
+	_, err := r.pgpool.CopyFrom(
+		ctx,
+		pgx.Identifier{"itinerary_pois"},
+		[]string{"itinerary_id", "poi_id", "order_index", "ai_description"},
+		source,
+	)
+
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to save itinerary POIs: %w", err)
+	}
+
 	span.SetAttributes(attribute.Int("pois.count", len(pois)))
 	return nil
 }
