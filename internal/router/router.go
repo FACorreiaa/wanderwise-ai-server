@@ -102,7 +102,7 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Mount("/pois", POIRoutes(cfg.PointsOfInterestHandler)) // Points of Interest routes
 			r.Mount("/itineraries", ItineraryListRoutes(cfg.ItineraryListHandler))
 			r.Mount("/recents", RecentsRoutes(cfg.RecentsHandler)) // Recent interactions routes
-			
+
 			// Mount protected statistics routes with different paths to avoid conflicts
 			r.Route("/user-statistics", func(r chi.Router) {
 				r.Get("/poi/detailed", cfg.StatisticsHandler.GetDetailedPOIStatisticsHandler)
@@ -207,6 +207,7 @@ func LLMInteractionRoutes(HandlerImpl *llmChat.HandlerImpl, rateLimiter *middlew
 	// LLM interaction routes
 	r.Get("/prompt-response/poi/details", HandlerImpl.GetPOIDetails)                 // GET http://localhost:8000/api/v1/llm/prompt-response/{interactionID}
 	r.Post("/prompt-response/bookmark", HandlerImpl.SaveItenerary)                   // POST http://localhost:8000/api/v1/llm/prompt-response
+	r.Get("/prompt-response/bookmarks", HandlerImpl.GetBookmarkedItineraries)        // GET http://localhost:8000/api/v1/llm/prompt-response/bookmarks
 	r.Delete("/prompt-response/bookmark/{itineraryID}", HandlerImpl.RemoveItenerary) // DELETE http://localhost:8000/api/v1/llm/bookmark/{bookmarkID}
 	// r.Get("/prompt-response/city/hotel/preferences", HandlerImpl.GetHotelsByPreference) // GET http://localhost:8000/api/v1/pois/city/hotel/preferences
 	// r.Get("/prompt-response/city/hotel/nearby", HandlerImpl.GetHotelsNearby)            // GET http://localhost:8000/api/v1/pois/city/restaurant/preferences
@@ -229,12 +230,12 @@ func POIRoutes(HandlerImpl *poi.HandlerImpl) http.Handler {
 	r.Get("/itineraries/itinerary/{itinerary_id}", HandlerImpl.GetItinerary)    // GET /api/v1/itineraries/{uuid}
 	r.Put("/itineraries/itinerary/{itinerary_id}", HandlerImpl.UpdateItinerary) // PUT /api/v1/itineraries/{uuid}
 	r.Get("/nearby", HandlerImpl.GetNearbyRecommendations)                      // GET http://localhost:8000/api/v1/llm/prompt-response/poi/nearby
-	
+
 	// Domain-specific discover routes
-	r.Get("/discover/restaurants", HandlerImpl.GetNearbyRestaurants)            // GET http://localhost:8000/api/v1/pois/discover/restaurants
-	r.Get("/discover/activities", HandlerImpl.GetNearbyActivities)              // GET http://localhost:8000/api/v1/pois/discover/activities
-	r.Get("/discover/hotels", HandlerImpl.GetNearbyHotels)                      // GET http://localhost:8000/api/v1/pois/discover/hotels
-	r.Get("/discover/attractions", HandlerImpl.GetNearbyAttractions)            // GET http://localhost:8000/api/v1/pois/discover/attractions
+	r.Get("/discover/restaurants", HandlerImpl.GetNearbyRestaurants) // GET http://localhost:8000/api/v1/pois/discover/restaurants
+	r.Get("/discover/activities", HandlerImpl.GetNearbyActivities)   // GET http://localhost:8000/api/v1/pois/discover/activities
+	r.Get("/discover/hotels", HandlerImpl.GetNearbyHotels)           // GET http://localhost:8000/api/v1/pois/discover/hotels
+	r.Get("/discover/attractions", HandlerImpl.GetNearbyAttractions) // GET http://localhost:8000/api/v1/pois/discover/attractions
 
 	// Traditional search
 	r.Get("/search", HandlerImpl.GetPOIs) // GET http://localhost:8000/api/v1/pois/search
@@ -263,16 +264,16 @@ func ItineraryListRoutes(h *itineraryList.HandlerImpl) http.Handler {
 	r.Put("/lists/{listID}", h.UpdateListDetailsHandler)                         // Update a specific list
 	r.Delete("/lists/{listID}", h.DeleteListHandler)                             // Delete a specific list
 	r.Post("/lists/{parentListID}/itineraries", h.CreateItineraryForListHandler) // Create an itinerary within a parent list
-	
+
 	// Generic list item endpoints (support all content types)
-	r.Post("/lists/{listID}/items", h.AddListItemHandler)                        // Add any content type to a list
-	r.Put("/lists/{listID}/items/{itemID}", h.UpdateListItemHandler)             // Update any item in a list
-	r.Delete("/lists/{listID}/items/{itemID}", h.RemoveListItemHandler)          // Remove any item from a list
-	
+	r.Post("/lists/{listID}/items", h.AddListItemHandler)               // Add any content type to a list
+	r.Put("/lists/{listID}/items/{itemID}", h.UpdateListItemHandler)    // Update any item in a list
+	r.Delete("/lists/{listID}/items/{itemID}", h.RemoveListItemHandler) // Remove any item from a list
+
 	// Legacy POI-specific endpoints (for backward compatibility)
-	r.Post("/{itineraryID}/items", h.AddPOIListItemHandler)                      // Add a POI to an itinerary
-	r.Put("/{itineraryID}/items/{poiID}", h.UpdatePOIListItemHandler)            // Update a POI in an itinerary
-	r.Delete("/{itineraryID}/items/{poiID}", h.RemovePOIListItemHandler)         // Remove a POI from an itinerary
+	r.Post("/{itineraryID}/items", h.AddPOIListItemHandler)              // Add a POI to an itinerary
+	r.Put("/{itineraryID}/items/{poiID}", h.UpdatePOIListItemHandler)    // Update a POI in an itinerary
+	r.Delete("/{itineraryID}/items/{poiID}", h.RemovePOIListItemHandler) // Remove a POI from an itinerary
 	return r
 }
 
@@ -297,9 +298,8 @@ func StatisticsRoutes(h *statistics.HandlerImpl) http.Handler {
 	r := chi.NewRouter()
 
 	// Public statistics endpoints (no authentication required)
-	r.Get("/main-page", h.GetMainPageStatisticsHandler)       // GET http://localhost:8000/api/v1/statistics/main-page
-	r.Get("/main-page/stream", h.StatisticsSSEHandler)        // GET http://localhost:8000/api/v1/statistics/main-page/stream (SSE)
+	r.Get("/main-page", h.GetMainPageStatisticsHandler) // GET http://localhost:8000/api/v1/statistics/main-page
+	r.Get("/main-page/stream", h.StatisticsSSEHandler)  // GET http://localhost:8000/api/v1/statistics/main-page/stream (SSE)
 
 	return r
 }
-

@@ -29,6 +29,7 @@ type Repository interface {
 	SaveLlmSuggestedPOIsBatch(ctx context.Context, pois []types.POIDetailedInfo, userID, searchProfileID, llmInteractionID, cityID uuid.UUID) error
 	GetLlmSuggestedPOIsByInteractionSortedByDistance(ctx context.Context, llmInteractionID uuid.UUID, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error)
 	AddChatToBookmark(ctx context.Context, itinerary *types.UserSavedItinerary) (uuid.UUID, error)
+	GetBookmarkedItineraries(ctx context.Context, userID uuid.UUID, page, limit int) (*types.PaginatedUserItinerariesResponse, error)
 	RemoveChatFromBookmark(ctx context.Context, userID, itineraryID uuid.UUID) error
 	GetInteractionByID(ctx context.Context, interactionID uuid.UUID) (*types.LlmInteraction, error)
 	GetLatestInteractionBySessionID(ctx context.Context, sessionID uuid.UUID) (*types.LlmInteraction, error)
@@ -723,6 +724,98 @@ func (r *RepositoryImpl) RemoveChatFromBookmark(ctx context.Context, userID, iti
 
 	span.SetStatus(codes.Ok, "Itinerary removed successfully")
 	return nil
+}
+
+func (r *RepositoryImpl) GetBookmarkedItineraries(ctx context.Context, userID uuid.UUID, page, limit int) (*types.PaginatedUserItinerariesResponse, error) {
+	ctx, span := otel.Tracer("LlmInteractionRepo").Start(ctx, "GetBookmarkedItineraries", trace.WithAttributes(
+		semconv.DBSystemPostgreSQL,
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.sql.table", "user_saved_itineraries"),
+		attribute.String("user.id", userID.String()),
+		attribute.Int("page", page),
+		attribute.Int("limit", limit),
+	))
+	defer span.End()
+
+	// Calculate offset
+	offset := (page - 1) * limit
+
+	// Get total count
+	var totalCount int
+	countQuery := `SELECT COUNT(*) FROM user_saved_itineraries WHERE user_id = $1`
+	err := r.pgpool.QueryRow(ctx, countQuery, userID).Scan(&totalCount)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to count bookmarked itineraries")
+		return nil, fmt.Errorf("failed to count bookmarked itineraries: %w", err)
+	}
+
+	// Get paginated results
+	query := `
+		SELECT 
+			id, user_id, source_llm_interaction_id, session_id, primary_city_id, 
+			title, description, markdown_content, tags, estimated_duration_days, 
+			estimated_cost_level, is_public, created_at, updated_at
+		FROM user_saved_itineraries 
+		WHERE user_id = $1 
+		ORDER BY created_at DESC 
+		LIMIT $2 OFFSET $3
+	`
+
+	rows, err := r.pgpool.Query(ctx, query, userID, limit, offset)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to query bookmarked itineraries")
+		return nil, fmt.Errorf("failed to query bookmarked itineraries: %w", err)
+	}
+	defer rows.Close()
+
+	var itineraries []types.UserSavedItinerary
+	for rows.Next() {
+		var itinerary types.UserSavedItinerary
+		var tags []string
+
+		err := rows.Scan(
+			&itinerary.ID,
+			&itinerary.UserID,
+			&itinerary.SourceLlmInteractionID,
+			&itinerary.SessionID,
+			&itinerary.PrimaryCityID,
+			&itinerary.Title,
+			&itinerary.Description,
+			&itinerary.MarkdownContent,
+			&tags,
+			&itinerary.EstimatedDurationDays,
+			&itinerary.EstimatedCostLevel,
+			&itinerary.IsPublic,
+			&itinerary.CreatedAt,
+			&itinerary.UpdatedAt,
+		)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "Failed to scan itinerary row")
+			return nil, fmt.Errorf("failed to scan itinerary row: %w", err)
+		}
+
+		itinerary.Tags = tags
+		itineraries = append(itineraries, itinerary)
+	}
+
+	if err := rows.Err(); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Row iteration error")
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	response := &types.PaginatedUserItinerariesResponse{
+		Itineraries:  itineraries,
+		TotalRecords: totalCount,
+		Page:         page,
+		PageSize:     limit,
+	}
+
+	span.SetStatus(codes.Ok, "Bookmarked itineraries retrieved successfully")
+	return response, nil
 }
 
 // sessions

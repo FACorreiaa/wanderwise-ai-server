@@ -674,13 +674,13 @@ func (r *RepositoryImpl) SavePOIDetails(ctx context.Context, poi types.POIDetail
 		case "€", "$", "free", "Free", "1":
 			level := 1
 			priceLevel = &level
-		case "€€", "$", "budget", "Budget", "2":
+		case "€€", "$$", "budget", "Budget", "2":
 			level := 2
 			priceLevel = &level
-		case "€€€", "$$", "moderate", "Moderate", "3":
+		case "€€€", "$$$", "moderate", "Moderate", "3":
 			level := 3
 			priceLevel = &level
-		case "€€€€", "$$", "expensive", "Expensive", "4":
+		case "€€€€", "$$$$", "expensive", "Expensive", "4":
 			level := 4
 			priceLevel = &level
 		case "luxury", "Luxury", "premium", "Premium", "5":
@@ -1515,9 +1515,9 @@ func (r *RepositoryImpl) SavePOItoPointsOfInterest(ctx context.Context, poi type
 }
 
 type ItineraryPOISource struct {
-	pois      []types.POIDetailedInfo
+	pois        []types.POIDetailedInfo
 	itineraryID uuid.UUID
-	idx       int
+	idx         int
 }
 
 func (ips *ItineraryPOISource) Next() bool {
@@ -1548,9 +1548,9 @@ func (r *RepositoryImpl) SaveItineraryPOIs(ctx context.Context, itineraryID uuid
 	}
 
 	source := &ItineraryPOISource{
-		pois:      pois,
+		pois:        pois,
 		itineraryID: itineraryID,
-		idx:       -1,
+		idx:         -1,
 	}
 
 	_, err := r.pgpool.CopyFrom(

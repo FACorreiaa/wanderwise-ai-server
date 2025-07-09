@@ -28,6 +28,7 @@ var _ Handler = (*HandlerImpl)(nil)
 
 type Handler interface {
 	SaveItenerary(w http.ResponseWriter, r *http.Request)
+	GetBookmarkedItineraries(w http.ResponseWriter, r *http.Request)
 	RemoveItenerary(w http.ResponseWriter, r *http.Request)
 	GetPOIDetails(w http.ResponseWriter, r *http.Request)
 
@@ -106,6 +107,67 @@ func (h *HandlerImpl) SaveItenerary(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSONResponse(w, r, http.StatusCreated, savedItinerary)
 }
 
+func (h *HandlerImpl) GetBookmarkedItineraries(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetBookmarkedItineraries", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/llm_interaction/bookmarks"),
+	))
+	defer span.End()
+
+	l := h.logger.With(slog.String("HandlerImpl", "GetBookmarkedItineraries"))
+	l.DebugContext(ctx, "Getting bookmarked itineraries")
+
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		l.ErrorContext(ctx, "User ID not found in context")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid user ID format", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+
+	// Parse pagination parameters
+	page := 1
+	limit := 10
+
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	response, err := h.llmInteractionService.GetBookmarkedItineraries(ctx, userID, page, limit)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to retrieve bookmarked itineraries")
+		l.ErrorContext(ctx, "Failed to retrieve bookmarked itineraries", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to retrieve bookmarked itineraries")
+		return
+	}
+
+	span.SetAttributes(
+		attribute.Int("total_records", response.TotalRecords),
+		attribute.Int("page", response.Page),
+		attribute.Int("page_size", response.PageSize),
+		attribute.Int("returned_count", len(response.Itineraries)),
+	)
+	span.SetStatus(codes.Ok, "Bookmarked itineraries retrieved successfully")
+
+	api.WriteJSONResponse(w, r, http.StatusOK, response)
+
+}
+
 func (h *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetUserChatSessions", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -161,7 +223,7 @@ func (h *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *http.Request
 		limit = 50
 	}
 
-	l.InfoContext(ctx, "Processing get user chat sessions request", 
+	l.InfoContext(ctx, "Processing get user chat sessions request",
 		slog.String("user_id", userID.String()),
 		slog.Int("page", page),
 		slog.Int("limit", limit))
@@ -180,7 +242,7 @@ func (h *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	l.InfoContext(ctx, "Successfully retrieved user chat sessions", 
+	l.InfoContext(ctx, "Successfully retrieved user chat sessions",
 		slog.Int("sessionCount", len(response.Sessions)),
 		slog.Int("total", response.Total))
 
@@ -188,7 +250,7 @@ func (h *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *http.Request
 		attribute.Int("response.sessions_count", len(response.Sessions)),
 		attribute.Int("response.total", response.Total),
 	)
-	
+
 	api.WriteJSONResponse(w, r, http.StatusOK, response)
 }
 

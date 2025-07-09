@@ -53,6 +53,7 @@ var _ LlmInteractiontService = (*ServiceImpl)(nil)
 // LlmInteractiontService defines the business logic contract for user operations.
 type LlmInteractiontService interface {
 	SaveItenerary(ctx context.Context, userID uuid.UUID, req types.BookmarkRequest) (uuid.UUID, error)
+	GetBookmarkedItineraries(ctx context.Context, userID uuid.UUID, page, limit int) (*types.PaginatedUserItinerariesResponse, error)
 	RemoveItenerary(ctx context.Context, userID, itineraryID uuid.UUID) error
 	GetPOIDetailedInfosResponse(ctx context.Context, userID uuid.UUID, city string, lat, lon float64) (*types.POIDetailedInfo, error)
 
@@ -604,6 +605,40 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 	span.SetAttributes(attribute.String("saved_itinerary.id", savedID.String()))
 	span.SetStatus(codes.Ok, "Bookmark saved successfully")
 	return savedID, nil
+}
+
+func (l *ServiceImpl) GetBookmarkedItineraries(ctx context.Context, userID uuid.UUID, page, limit int) (*types.PaginatedUserItinerariesResponse, error) {
+	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GetBookmarkedItineraries", trace.WithAttributes(
+		attribute.String("user.id", userID.String()),
+		attribute.Int("page", page),
+		attribute.Int("limit", limit),
+	))
+	defer span.End()
+
+	l.logger.InfoContext(ctx, "Retrieving bookmarked itineraries",
+		slog.String("userID", userID.String()),
+		slog.Int("page", page),
+		slog.Int("limit", limit))
+
+	response, err := l.llmInteractionRepo.GetBookmarkedItineraries(ctx, userID, page, limit)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to retrieve bookmarked itineraries")
+		return nil, fmt.Errorf("failed to retrieve bookmarked itineraries: %w", err)
+	}
+
+	l.logger.InfoContext(ctx, "Successfully retrieved bookmarked itineraries",
+		slog.String("userID", userID.String()),
+		slog.Int("totalRecords", response.TotalRecords),
+		slog.Int("page", response.Page),
+		slog.Int("pageSize", response.PageSize))
+
+	span.SetAttributes(
+		attribute.Int("total_records", response.TotalRecords),
+		attribute.Int("returned_count", len(response.Itineraries)),
+	)
+	span.SetStatus(codes.Ok, "Bookmarked itineraries retrieved successfully")
+	return response, nil
 }
 
 func (l *ServiceImpl) RemoveItenerary(ctx context.Context, userID, itineraryID uuid.UUID) error {
