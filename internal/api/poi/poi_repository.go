@@ -31,6 +31,7 @@ type Repository interface {
 	//GetPOIsByNamesAndCitySortedByDistance(ctx context.Context, names []string, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error)
 	GetPOIsByCityAndDistance(ctx context.Context, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error)
 	GetPOIsByLocationAndDistance(ctx context.Context, lat, lon, radiusMeters float64) ([]types.POIDetailedInfo, error)
+	GetPOIsByLocationAndDistanceWithCategory(ctx context.Context, lat, lon, radiusMeters float64, category string) ([]types.POIDetailedInfo, error)
 	//GetPOIsByLocationAndDistanceWithFilters(ctx context.Context, lat, lon, radiusMeters float64, filters map[string]string) ([]types.POIDetailedInfo, error)
 	AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID) (uuid.UUID, error)
 	AddLLMPoiToFavourite(ctx context.Context, userID uuid.UUID, llmPoiID uuid.UUID) (uuid.UUID, error)
@@ -2241,6 +2242,191 @@ func (r *RepositoryImpl) GetPOIsByLocationAndDistance(ctx context.Context, lat, 
 		slog.Float64("radius_km", radiusMeters/1000))
 	span.SetAttributes(attribute.Int("results.count", len(pois)))
 	span.SetStatus(codes.Ok, "POIs by location and distance retrieved")
+
+	return pois, nil
+}
+
+// GetPOIsByLocationAndDistanceWithCategory retrieves POIs within a specified radius from a given location filtered by category
+func (r *RepositoryImpl) GetPOIsByLocationAndDistanceWithCategory(ctx context.Context, lat, lon, radiusMeters float64, category string) ([]types.POIDetailedInfo, error) {
+	ctx, span := otel.Tracer("POIRepository").Start(ctx, "GetPOIsByLocationAndDistanceWithCategory", trace.WithAttributes(
+		attribute.Float64("location.lat", lat),
+		attribute.Float64("location.lon", lon),
+		attribute.Float64("radius.meters", radiusMeters),
+		attribute.String("category", category),
+	))
+	defer span.End()
+
+	l := r.logger.With(slog.String("method", "GetPOIsByLocationAndDistanceWithCategory"))
+
+	// Build the query with category filter
+	baseQuery := `
+					SELECT
+						id,
+						name,
+						description,
+						longitude,
+						latitude,
+						category,
+						address,
+						website,
+						phone_number,
+						opening_hours,
+						poi_type,
+						price_level,
+						rating,
+						ROUND(CAST(distance_meters / 1000.0 AS numeric), 2) as distance,
+						city_id,
+						COALESCE(tags, '{}') as tags,
+						COALESCE(rating_count, 0) as rating_count,
+						COALESCE(is_sponsored, false) as is_sponsored
+					FROM (
+						SELECT
+							id,
+							name,
+							COALESCE(description, '') as description,
+							ST_X(location) as longitude,
+							ST_Y(location) as latitude,
+							COALESCE(category, '') as category,
+							COALESCE(address, '') as address,
+							COALESCE(website, '') as website,
+							COALESCE(phone_number, '') as phone_number,
+							opening_hours,
+							COALESCE(poi_type, '') as poi_type,
+							price_level,
+							COALESCE(average_rating, 0) as rating,
+							ST_Distance(location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) as distance_meters,
+							city_id,
+							tags,
+							rating_count,
+							is_sponsored
+						FROM points_of_interest
+						WHERE ST_DWithin(
+							location::geography,
+							ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+							$3
+						)
+						AND LOWER(category) = LOWER($4)
+					) sub
+					ORDER BY distance ASC LIMIT 50
+				`
+
+	var args []interface{}
+	args = append(args, lon, lat, radiusMeters, category) // $1, $2, $3, $4
+
+	l.DebugContext(ctx, "Executing POI distance query with category filter",
+		slog.String("query", baseQuery),
+		slog.Float64("lat", lat),
+		slog.Float64("lon", lon),
+		slog.Float64("radius_meters", radiusMeters),
+		slog.String("category", category))
+
+	rows, err := r.pgpool.Query(ctx, baseQuery, args...)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to query POIs by location, distance and category", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Database query failed")
+		return nil, fmt.Errorf("failed to query POIs by location, distance and category: %w", err)
+	}
+	defer rows.Close()
+
+	var pois []types.POIDetailedInfo
+	for rows.Next() {
+		var poi types.POIDetailedInfo
+		var description, address, website, phoneNumber, poiType sql.NullString
+		var openingHours sql.NullString // JSONB can be scanned as string
+		var priceLevel sql.NullInt32
+		var rating sql.NullFloat64
+		var cityID sql.NullString
+		var tagsRaw []byte // Postgres array of text
+		var ratingCount sql.NullInt32
+		var isSponsored sql.NullBool
+
+		err := rows.Scan(
+			&poi.ID,
+			&poi.Name,
+			&description,
+			&poi.Longitude,
+			&poi.Latitude,
+			&poi.Category,
+			&address,
+			&website,
+			&phoneNumber,
+			&openingHours,
+			&poiType,
+			&priceLevel,
+			&rating,
+			&poi.Distance,
+			&cityID,
+			&tagsRaw,
+			&ratingCount,
+			&isSponsored,
+		)
+		if err != nil {
+			l.ErrorContext(ctx, "Failed to scan POI row", slog.Any("error", err))
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "Row scan failed")
+			return nil, fmt.Errorf("failed to scan POI row: %w", err)
+		}
+
+		// Handle nullable fields
+		if description.Valid {
+			poi.DescriptionPOI = description.String
+		}
+		if address.Valid {
+			poi.Address = address.String
+		}
+		if website.Valid {
+			poi.Website = website.String
+		}
+		if phoneNumber.Valid {
+			poi.PhoneNumber = phoneNumber.String
+		}
+		if openingHours.Valid {
+			poi.OpeningHours = map[string]string{"general": openingHours.String}
+		}
+		if poiType.Valid {
+			poi.Category = poiType.String
+		}
+		if priceLevel.Valid {
+			poi.PriceLevel = fmt.Sprintf("%d", priceLevel.Int32)
+		}
+		if rating.Valid {
+			poi.Rating = rating.Float64
+		}
+		if cityID.Valid {
+			poi.City = cityID.String
+		}
+
+		// Parse tags from JSON array
+		if len(tagsRaw) > 0 {
+			var tags []string
+			err := json.Unmarshal(tagsRaw, &tags)
+			if err != nil {
+				l.WarnContext(ctx, "Failed to parse tags", slog.Any("error", err))
+				poi.Tags = []string{}
+			} else {
+				poi.Tags = tags
+			}
+		} else {
+			poi.Tags = []string{}
+		}
+
+		pois = append(pois, poi)
+	}
+
+	if err = rows.Err(); err != nil {
+		l.ErrorContext(ctx, "Row iteration error", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Row iteration failed")
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	l.InfoContext(ctx, "POIs by location, distance and category found",
+		slog.Int("count", len(pois)),
+		slog.Float64("radius_km", radiusMeters/1000),
+		slog.String("category", category))
+	span.SetAttributes(attribute.Int("results.count", len(pois)))
+	span.SetStatus(codes.Ok, "POIs by location, distance and category retrieved")
 
 	return pois, nil
 }

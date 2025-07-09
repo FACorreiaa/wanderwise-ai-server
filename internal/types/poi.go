@@ -52,33 +52,34 @@ type POIFilters struct {
 // }
 
 type POIDetailedInfo struct {
-	ID               uuid.UUID `json:"id,omitempty"`
-	City             string    `json:"city"`
-	CityID           uuid.UUID `json:"city_id"`
-	Name             string    `json:"name"`
-	DescriptionPOI   string    `json:"description_poi,omitempty"`
-	Distance         float64   `json:"distance"`
-	Latitude         float64   `json:"latitude,omitempty"`
-	Longitude        float64   `json:"longitude,omitempty"`
-	Category         string    `json:"category"`
-	Description      string    `json:"description"`
-	Rating           float64   `json:"rating"`
-	Address          string    `json:"address"`
-	PhoneNumber      string    `json:"phone_number"`
-	Website          string    `json:"website"`
+	ID               uuid.UUID         `json:"id,omitempty"`
+	City             string            `json:"city"`
+	CityID           uuid.UUID         `json:"city_id"`
+	Name             string            `json:"name"`
+	DescriptionPOI   string            `json:"description_poi,omitempty"`
+	Distance         float64           `json:"distance"`
+	Latitude         float64           `json:"latitude,omitempty"`
+	Longitude        float64           `json:"longitude,omitempty"`
+	Category         string            `json:"category"`
+	Description      string            `json:"description"`
+	Rating           float64           `json:"rating"`
+	Address          string            `json:"address"`
+	PhoneNumber      string            `json:"phone_number"`
+	Website          string            `json:"website"`
 	OpeningHours     map[string]string `json:"opening_hours"`
-	Images           []string  `json:"images,omitempty"`
-	PriceRange       string    `json:"price_range"`
-	PriceLevel       string    `json:"price_level"`
-	Reviews          []string  `json:"reviews"`
-	LlmInteractionID uuid.UUID `json:"llm_interaction_id"`
-	Tags             []string  `json:"tags,omitempty"`
-	Priority         int       `json:"priority,omitempty"` // Popularity score 1-10
-	CreatedAt        time.Time `json:"created_at"`
-	CuisineType      string    `json:"cuisine_type,omitempty"` // For restaurants
-	StarRating       string    `json:"star_rating,omitempty"`  // For hotels
-	Err              error     `json:"-"`
-	Source           string    `json:"source,omitempty"` // Source of the POI data (e.g., "google", "yelp", etc.)
+	Images           []string          `json:"images,omitempty"`
+	PriceRange       string            `json:"price_range"`
+	PriceLevel       string            `json:"price_level"`
+	Reviews          []string          `json:"reviews"`
+	LlmInteractionID uuid.UUID         `json:"llm_interaction_id"`
+	Tags             []string          `json:"tags,omitempty"`
+	Priority         int               `json:"priority,omitempty"` // Popularity score 1-10
+	CreatedAt        time.Time         `json:"created_at"`
+	CuisineType      string            `json:"cuisine_type,omitempty"` // For restaurants
+	StarRating       string            `json:"star_rating,omitempty"`  // For hotels
+	Amenities        string            `json:"amenities"`
+	Err              error             `json:"-"`
+	Source           string            `json:"source,omitempty"` // Source of the POI data (e.g., "google", "yelp", etc.)
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for POIDetailedInfo

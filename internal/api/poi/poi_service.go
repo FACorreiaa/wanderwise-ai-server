@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,12 @@ type Service interface {
 
 	// Discover Service
 	GetGeneralPOIByDistance(ctx context.Context, userID uuid.UUID, lat, lon, distance float64) ([]types.POIDetailedInfo, error) //, categoryFilter string
+
+	// Domain-specific discover services
+	GetNearbyRestaurants(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, cuisineType, priceRange string) ([]types.POIDetailedInfo, error)
+	GetNearbyActivities(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, activityType, duration string) ([]types.POIDetailedInfo, error)
+	GetNearbyHotels(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, starRating, amenities string) ([]types.POIDetailedInfo, error)
+	GetNearbyAttractions(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, attractionType, isOutdoor string) ([]types.POIDetailedInfo, error)
 
 	// LLM POI management
 	FindOrCreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error)
@@ -808,4 +815,345 @@ func (s *ServiceImpl) FindLLMPOIByName(ctx context.Context, poiName string) (uui
 	// Since we don't have city context, we'll search by name only
 	// This could be enhanced later to include city context if needed
 	return s.poiRepository.FindLLMPOIByName(ctx, poiName)
+}
+
+// GetNearbyRestaurants get nearby restaurants with optional filters
+func (s *ServiceImpl) GetNearbyRestaurants(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, cuisineType, priceRange string) ([]types.POIDetailedInfo, error) {
+	ctx, span := otel.Tracer("POIService").Start(ctx, "GetNearbyRestaurants", trace.WithAttributes(
+		attribute.Float64("location.lat", lat),
+		attribute.Float64("location.lon", lon),
+		attribute.Float64("distance", distance),
+		attribute.String("cuisine_type", cuisineType),
+		attribute.String("price_range", priceRange),
+	))
+	defer span.End()
+
+	// Build cache key with domain-specific filters
+	cacheKey := fmt.Sprintf("restaurants_%f_%f_%f_%s_%s_%s", lat, lon, distance, userID.String(), cuisineType, priceRange)
+	
+	if cached, found := s.cache.Get(cacheKey); found {
+		if pois, ok := cached.([]types.POIDetailedInfo); ok {
+			s.logger.InfoContext(ctx, "Serving restaurants from cache", "key", cacheKey)
+			return pois, nil
+		}
+	}
+
+	s.logger.InfoContext(ctx, "Querying restaurants from database", "lat", lat, "lon", lon, "distance", distance)
+	
+	// Get restaurants from database with filters
+	restaurants, err := s.poiRepository.GetPOIsByLocationAndDistanceWithCategory(ctx, lat, lon, distance, "restaurant")
+	if err == nil && len(restaurants) > 0 {
+		// Apply domain-specific filters
+		filteredRestaurants := s.filterRestaurants(restaurants, cuisineType, priceRange)
+		
+		// Mark as database source
+		for i := range filteredRestaurants {
+			filteredRestaurants[i].Source = "points_of_interest"
+		}
+		
+		s.cache.Set(cacheKey, filteredRestaurants, cache.DefaultExpiration)
+		return filteredRestaurants, nil
+	}
+
+	s.logger.InfoContext(ctx, "No restaurants found in database, falling back to LLM generation")
+	
+	// Generate restaurants using LLM with domain-specific prompt
+	genAIResponse, err := s.generateRestaurantsFromLLM(ctx, userID, lat, lon, distance, cuisineType, priceRange)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	enrichedRestaurants := s.enrichAndFilterLLMResponse(ctx, genAIResponse.GeneralPOI, lat, lon, distance)
+	for i := range enrichedRestaurants {
+		enrichedRestaurants[i].Source = "llm_suggested_pois"
+	}
+
+	s.cache.Set(cacheKey, enrichedRestaurants, cache.DefaultExpiration)
+	return enrichedRestaurants, nil
+}
+
+// GetNearbyActivities get nearby activities with optional filters
+func (s *ServiceImpl) GetNearbyActivities(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, activityType, duration string) ([]types.POIDetailedInfo, error) {
+	ctx, span := otel.Tracer("POIService").Start(ctx, "GetNearbyActivities", trace.WithAttributes(
+		attribute.Float64("location.lat", lat),
+		attribute.Float64("location.lon", lon),
+		attribute.Float64("distance", distance),
+		attribute.String("activity_type", activityType),
+		attribute.String("duration", duration),
+	))
+	defer span.End()
+
+	// Build cache key with domain-specific filters
+	cacheKey := fmt.Sprintf("activities_%f_%f_%f_%s_%s_%s", lat, lon, distance, userID.String(), activityType, duration)
+	
+	if cached, found := s.cache.Get(cacheKey); found {
+		if pois, ok := cached.([]types.POIDetailedInfo); ok {
+			s.logger.InfoContext(ctx, "Serving activities from cache", "key", cacheKey)
+			return pois, nil
+		}
+	}
+
+	s.logger.InfoContext(ctx, "Querying activities from database", "lat", lat, "lon", lon, "distance", distance)
+	
+	// Get activities from database with filters
+	activities, err := s.poiRepository.GetPOIsByLocationAndDistanceWithCategory(ctx, lat, lon, distance, "activity")
+	if err == nil && len(activities) > 0 {
+		// Apply domain-specific filters
+		filteredActivities := s.filterActivities(activities, activityType, duration)
+		
+		// Mark as database source
+		for i := range filteredActivities {
+			filteredActivities[i].Source = "points_of_interest"
+		}
+		
+		s.cache.Set(cacheKey, filteredActivities, cache.DefaultExpiration)
+		return filteredActivities, nil
+	}
+
+	s.logger.InfoContext(ctx, "No activities found in database, falling back to LLM generation")
+	
+	// Generate activities using LLM with domain-specific prompt
+	genAIResponse, err := s.generateActivitiesFromLLM(ctx, userID, lat, lon, distance, activityType, duration)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	enrichedActivities := s.enrichAndFilterLLMResponse(ctx, genAIResponse.GeneralPOI, lat, lon, distance)
+	for i := range enrichedActivities {
+		enrichedActivities[i].Source = "llm_suggested_pois"
+	}
+
+	s.cache.Set(cacheKey, enrichedActivities, cache.DefaultExpiration)
+	return enrichedActivities, nil
+}
+
+// GetNearbyHotels get nearby hotels with optional filters
+func (s *ServiceImpl) GetNearbyHotels(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, starRating, amenities string) ([]types.POIDetailedInfo, error) {
+	ctx, span := otel.Tracer("POIService").Start(ctx, "GetNearbyHotels", trace.WithAttributes(
+		attribute.Float64("location.lat", lat),
+		attribute.Float64("location.lon", lon),
+		attribute.Float64("distance", distance),
+		attribute.String("star_rating", starRating),
+		attribute.String("amenities", amenities),
+	))
+	defer span.End()
+
+	// Build cache key with domain-specific filters
+	cacheKey := fmt.Sprintf("hotels_%f_%f_%f_%s_%s_%s", lat, lon, distance, userID.String(), starRating, amenities)
+	
+	if cached, found := s.cache.Get(cacheKey); found {
+		if pois, ok := cached.([]types.POIDetailedInfo); ok {
+			s.logger.InfoContext(ctx, "Serving hotels from cache", "key", cacheKey)
+			return pois, nil
+		}
+	}
+
+	s.logger.InfoContext(ctx, "Querying hotels from database", "lat", lat, "lon", lon, "distance", distance)
+	
+	// Get hotels from database with filters
+	hotels, err := s.poiRepository.GetPOIsByLocationAndDistanceWithCategory(ctx, lat, lon, distance, "hotel")
+	if err == nil && len(hotels) > 0 {
+		// Apply domain-specific filters
+		filteredHotels := s.filterHotels(hotels, starRating, amenities)
+		
+		// Mark as database source
+		for i := range filteredHotels {
+			filteredHotels[i].Source = "points_of_interest"
+		}
+		
+		s.cache.Set(cacheKey, filteredHotels, cache.DefaultExpiration)
+		return filteredHotels, nil
+	}
+
+	s.logger.InfoContext(ctx, "No hotels found in database, falling back to LLM generation")
+	
+	// Generate hotels using LLM with domain-specific prompt
+	genAIResponse, err := s.generateHotelsFromLLM(ctx, userID, lat, lon, distance, starRating, amenities)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	enrichedHotels := s.enrichAndFilterLLMResponse(ctx, genAIResponse.GeneralPOI, lat, lon, distance)
+	for i := range enrichedHotels {
+		enrichedHotels[i].Source = "llm_suggested_pois"
+	}
+
+	s.cache.Set(cacheKey, enrichedHotels, cache.DefaultExpiration)
+	return enrichedHotels, nil
+}
+
+// GetNearbyAttractions get nearby attractions with optional filters
+func (s *ServiceImpl) GetNearbyAttractions(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, attractionType, isOutdoor string) ([]types.POIDetailedInfo, error) {
+	ctx, span := otel.Tracer("POIService").Start(ctx, "GetNearbyAttractions", trace.WithAttributes(
+		attribute.Float64("location.lat", lat),
+		attribute.Float64("location.lon", lon),
+		attribute.Float64("distance", distance),
+		attribute.String("attraction_type", attractionType),
+		attribute.String("is_outdoor", isOutdoor),
+	))
+	defer span.End()
+
+	// Build cache key with domain-specific filters
+	cacheKey := fmt.Sprintf("attractions_%f_%f_%f_%s_%s_%s", lat, lon, distance, userID.String(), attractionType, isOutdoor)
+	
+	if cached, found := s.cache.Get(cacheKey); found {
+		if pois, ok := cached.([]types.POIDetailedInfo); ok {
+			s.logger.InfoContext(ctx, "Serving attractions from cache", "key", cacheKey)
+			return pois, nil
+		}
+	}
+
+	s.logger.InfoContext(ctx, "Querying attractions from database", "lat", lat, "lon", lon, "distance", distance)
+	
+	// Get attractions from database with filters
+	attractions, err := s.poiRepository.GetPOIsByLocationAndDistanceWithCategory(ctx, lat, lon, distance, "attraction")
+	if err == nil && len(attractions) > 0 {
+		// Apply domain-specific filters
+		filteredAttractions := s.filterAttractions(attractions, attractionType, isOutdoor)
+		
+		// Mark as database source
+		for i := range filteredAttractions {
+			filteredAttractions[i].Source = "points_of_interest"
+		}
+		
+		s.cache.Set(cacheKey, filteredAttractions, cache.DefaultExpiration)
+		return filteredAttractions, nil
+	}
+
+	s.logger.InfoContext(ctx, "No attractions found in database, falling back to LLM generation")
+	
+	// Generate attractions using LLM with domain-specific prompt
+	genAIResponse, err := s.generateAttractionsFromLLM(ctx, userID, lat, lon, distance, attractionType, isOutdoor)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	enrichedAttractions := s.enrichAndFilterLLMResponse(ctx, genAIResponse.GeneralPOI, lat, lon, distance)
+	for i := range enrichedAttractions {
+		enrichedAttractions[i].Source = "llm_suggested_pois"
+	}
+
+	s.cache.Set(cacheKey, enrichedAttractions, cache.DefaultExpiration)
+	return enrichedAttractions, nil
+}
+
+// Helper functions for domain-specific filtering
+func (s *ServiceImpl) filterRestaurants(restaurants []types.POIDetailedInfo, cuisineType, priceRange string) []types.POIDetailedInfo {
+	if cuisineType == "" && priceRange == "" {
+		return restaurants
+	}
+	
+	filtered := make([]types.POIDetailedInfo, 0)
+	for _, restaurant := range restaurants {
+		// Filter by cuisine type
+		if cuisineType != "" && restaurant.Category != cuisineType {
+			continue
+		}
+		// Filter by price range
+		if priceRange != "" && restaurant.PriceLevel != priceRange {
+			continue
+		}
+		filtered = append(filtered, restaurant)
+	}
+	return filtered
+}
+
+func (s *ServiceImpl) filterActivities(activities []types.POIDetailedInfo, activityType, duration string) []types.POIDetailedInfo {
+	if activityType == "" && duration == "" {
+		return activities
+	}
+	
+	filtered := make([]types.POIDetailedInfo, 0)
+	for _, activity := range activities {
+		// Filter by activity type
+		if activityType != "" && activity.Category != activityType {
+			continue
+		}
+		// Filter by duration (using description as proxy for duration since TimeToSpend field doesn't exist)
+		if duration != "" && !strings.Contains(strings.ToLower(activity.Description), strings.ToLower(duration)) {
+			continue
+		}
+		filtered = append(filtered, activity)
+	}
+	return filtered
+}
+
+func (s *ServiceImpl) filterHotels(hotels []types.POIDetailedInfo, starRating, amenities string) []types.POIDetailedInfo {
+	if starRating == "" && amenities == "" {
+		return hotels
+	}
+	
+	filtered := make([]types.POIDetailedInfo, 0)
+	for _, hotel := range hotels {
+		// Filter by star rating
+		if starRating != "" && hotel.PriceLevel != starRating {
+			continue
+		}
+		// Filter by amenities (basic string matching)
+		if amenities != "" {
+			if !strings.Contains(strings.ToLower(hotel.Amenities), strings.ToLower(amenities)) {
+				continue
+			}
+		}
+		filtered = append(filtered, hotel)
+	}
+	return filtered
+}
+
+func (s *ServiceImpl) filterAttractions(attractions []types.POIDetailedInfo, attractionType, isOutdoor string) []types.POIDetailedInfo {
+	if attractionType == "" && isOutdoor == "" {
+		return attractions
+	}
+	
+	filtered := make([]types.POIDetailedInfo, 0)
+	for _, attraction := range attractions {
+		// Filter by attraction type
+		if attractionType != "" && attraction.Category != attractionType {
+			continue
+		}
+		// Filter by outdoor/indoor (basic tag matching)
+		if isOutdoor != "" {
+			hasOutdoorTag := false
+			for _, tag := range attraction.Tags {
+				if (isOutdoor == "true" && tag == "outdoor") || (isOutdoor == "false" && tag == "indoor") {
+					hasOutdoorTag = true
+					break
+				}
+			}
+			if !hasOutdoorTag {
+				continue
+			}
+		}
+		filtered = append(filtered, attraction)
+	}
+	return filtered
+}
+
+// Placeholder LLM generation functions - these would need to be implemented with domain-specific prompts
+func (s *ServiceImpl) generateRestaurantsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, cuisineType, priceRange string) (*types.GenAIResponse, error) {
+	// For now, use the general LLM generation with modified prompt
+	// This would be enhanced with restaurant-specific prompts
+	return s.generatePOIsFromLLM(ctx, userID, lat, lon, distance)
+}
+
+func (s *ServiceImpl) generateActivitiesFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, activityType, duration string) (*types.GenAIResponse, error) {
+	// For now, use the general LLM generation with modified prompt
+	// This would be enhanced with activity-specific prompts
+	return s.generatePOIsFromLLM(ctx, userID, lat, lon, distance)
+}
+
+func (s *ServiceImpl) generateHotelsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, starRating, amenities string) (*types.GenAIResponse, error) {
+	// For now, use the general LLM generation with modified prompt
+	// This would be enhanced with hotel-specific prompts
+	return s.generatePOIsFromLLM(ctx, userID, lat, lon, distance)
+}
+
+func (s *ServiceImpl) generateAttractionsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, attractionType, isOutdoor string) (*types.GenAIResponse, error) {
+	// For now, use the general LLM generation with modified prompt
+	// This would be enhanced with attraction-specific prompts
+	return s.generatePOIsFromLLM(ctx, userID, lat, lon, distance)
 }

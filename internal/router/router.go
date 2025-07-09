@@ -229,6 +229,12 @@ func POIRoutes(HandlerImpl *poi.HandlerImpl) http.Handler {
 	r.Get("/itineraries/itinerary/{itinerary_id}", HandlerImpl.GetItinerary)    // GET /api/v1/itineraries/{uuid}
 	r.Put("/itineraries/itinerary/{itinerary_id}", HandlerImpl.UpdateItinerary) // PUT /api/v1/itineraries/{uuid}
 	r.Get("/nearby", HandlerImpl.GetNearbyRecommendations)                      // GET http://localhost:8000/api/v1/llm/prompt-response/poi/nearby
+	
+	// Domain-specific discover routes
+	r.Get("/discover/restaurants", HandlerImpl.GetNearbyRestaurants)            // GET http://localhost:8000/api/v1/pois/discover/restaurants
+	r.Get("/discover/activities", HandlerImpl.GetNearbyActivities)              // GET http://localhost:8000/api/v1/pois/discover/activities
+	r.Get("/discover/hotels", HandlerImpl.GetNearbyHotels)                      // GET http://localhost:8000/api/v1/pois/discover/hotels
+	r.Get("/discover/attractions", HandlerImpl.GetNearbyAttractions)            // GET http://localhost:8000/api/v1/pois/discover/attractions
 
 	// Traditional search
 	r.Get("/search", HandlerImpl.GetPOIs) // GET http://localhost:8000/api/v1/pois/search

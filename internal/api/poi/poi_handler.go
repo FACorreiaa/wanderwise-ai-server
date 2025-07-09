@@ -1,6 +1,7 @@
 package poi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -45,6 +46,12 @@ type Handler interface {
 
 	// GetNearbyRecommendations(w http.ResponseWriter, r *http.Request)
 	GetNearbyRecommendations(w http.ResponseWriter, r *http.Request)
+
+	// Domain-specific discover endpoints
+	GetNearbyRestaurants(w http.ResponseWriter, r *http.Request)
+	GetNearbyActivities(w http.ResponseWriter, r *http.Request)
+	GetNearbyHotels(w http.ResponseWriter, r *http.Request)
+	GetNearbyAttractions(w http.ResponseWriter, r *http.Request)
 }
 
 type HandlerImpl struct {
@@ -1056,4 +1063,238 @@ func (HandlerImpl *HandlerImpl) GetNearbyRecommendations(w http.ResponseWriter, 
 
 	l.InfoContext(ctx, "Successfully fetched POIs")
 	span.SetStatus(codes.Ok, "Success")
+}
+
+// GetNearbyRestaurants get nearby restaurants
+func (HandlerImpl *HandlerImpl) GetNearbyRestaurants(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetNearbyRestaurants", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/pois/nearby/restaurants"),
+	))
+	defer span.End()
+
+	l := HandlerImpl.logger.With(slog.String("HandlerImpl", "GetNearbyRestaurants"))
+	l.DebugContext(ctx, "Fetching nearby restaurants")
+
+	// Parse common location parameters
+	lat, lon, distance, userID, err := HandlerImpl.parseLocationParams(ctx, r)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to parse location parameters", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Get additional restaurant-specific parameters
+	cuisineType := r.URL.Query().Get("cuisine_type")
+	priceRange := r.URL.Query().Get("price_range")
+
+	// Get restaurants from service
+	pois, err := HandlerImpl.poiService.GetNearbyRestaurants(ctx, userID, lat, lon, distance, cuisineType, priceRange)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get nearby restaurants", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get nearby restaurants")
+		return
+	}
+
+	// Prepare response
+	response := struct {
+		Restaurants []types.POIDetailedInfo `json:"restaurants"`
+	}{Restaurants: pois}
+
+	// Encode response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		l.ErrorContext(ctx, "Failed to encode response", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to encode response")
+		return
+	}
+
+	l.InfoContext(ctx, "Successfully fetched nearby restaurants")
+	span.SetStatus(codes.Ok, "Success")
+}
+
+// GetNearbyActivities get nearby activities
+func (HandlerImpl *HandlerImpl) GetNearbyActivities(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetNearbyActivities", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/pois/nearby/activities"),
+	))
+	defer span.End()
+
+	l := HandlerImpl.logger.With(slog.String("HandlerImpl", "GetNearbyActivities"))
+	l.DebugContext(ctx, "Fetching nearby activities")
+
+	// Parse common location parameters
+	lat, lon, distance, userID, err := HandlerImpl.parseLocationParams(ctx, r)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to parse location parameters", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Get additional activity-specific parameters
+	activityType := r.URL.Query().Get("activity_type")
+	duration := r.URL.Query().Get("duration")
+
+	// Get activities from service
+	pois, err := HandlerImpl.poiService.GetNearbyActivities(ctx, userID, lat, lon, distance, activityType, duration)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get nearby activities", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get nearby activities")
+		return
+	}
+
+	// Prepare response
+	response := struct {
+		Activities []types.POIDetailedInfo `json:"activities"`
+	}{Activities: pois}
+
+	// Encode response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		l.ErrorContext(ctx, "Failed to encode response", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to encode response")
+		return
+	}
+
+	l.InfoContext(ctx, "Successfully fetched nearby activities")
+	span.SetStatus(codes.Ok, "Success")
+}
+
+// GetNearbyHotels get nearby hotels
+func (HandlerImpl *HandlerImpl) GetNearbyHotels(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetNearbyHotels", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/pois/nearby/hotels"),
+	))
+	defer span.End()
+
+	l := HandlerImpl.logger.With(slog.String("HandlerImpl", "GetNearbyHotels"))
+	l.DebugContext(ctx, "Fetching nearby hotels")
+
+	// Parse common location parameters
+	lat, lon, distance, userID, err := HandlerImpl.parseLocationParams(ctx, r)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to parse location parameters", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Get additional hotel-specific parameters
+	starRating := r.URL.Query().Get("star_rating")
+	amenities := r.URL.Query().Get("amenities")
+
+	// Get hotels from service
+	pois, err := HandlerImpl.poiService.GetNearbyHotels(ctx, userID, lat, lon, distance, starRating, amenities)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get nearby hotels", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get nearby hotels")
+		return
+	}
+
+	// Prepare response
+	response := struct {
+		Hotels []types.POIDetailedInfo `json:"hotels"`
+	}{Hotels: pois}
+
+	// Encode response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		l.ErrorContext(ctx, "Failed to encode response", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to encode response")
+		return
+	}
+
+	l.InfoContext(ctx, "Successfully fetched nearby hotels")
+	span.SetStatus(codes.Ok, "Success")
+}
+
+// GetNearbyAttractions get nearby attractions/points of interest
+func (HandlerImpl *HandlerImpl) GetNearbyAttractions(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetNearbyAttractions", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/pois/nearby/attractions"),
+	))
+	defer span.End()
+
+	l := HandlerImpl.logger.With(slog.String("HandlerImpl", "GetNearbyAttractions"))
+	l.DebugContext(ctx, "Fetching nearby attractions")
+
+	// Parse common location parameters
+	lat, lon, distance, userID, err := HandlerImpl.parseLocationParams(ctx, r)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to parse location parameters", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Get additional attraction-specific parameters
+	attractionType := r.URL.Query().Get("attraction_type")
+	isOutdoor := r.URL.Query().Get("is_outdoor")
+
+	// Get attractions from service
+	pois, err := HandlerImpl.poiService.GetNearbyAttractions(ctx, userID, lat, lon, distance, attractionType, isOutdoor)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get nearby attractions", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get nearby attractions")
+		return
+	}
+
+	// Prepare response
+	response := struct {
+		Attractions []types.POIDetailedInfo `json:"attractions"`
+	}{Attractions: pois}
+
+	// Encode response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		l.ErrorContext(ctx, "Failed to encode response", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to encode response")
+		return
+	}
+
+	l.InfoContext(ctx, "Successfully fetched nearby attractions")
+	span.SetStatus(codes.Ok, "Success")
+}
+
+// Helper function to parse common location parameters
+func (HandlerImpl *HandlerImpl) parseLocationParams(ctx context.Context, r *http.Request) (float64, float64, float64, uuid.UUID, error) {
+	// Get query parameters
+	latStr := r.URL.Query().Get("lat")
+	lonStr := r.URL.Query().Get("lon")
+	distanceStr := r.URL.Query().Get("distance")
+
+	// Parse latitude
+	lat, err := strconv.ParseFloat(latStr, 64)
+	if err != nil {
+		return 0, 0, 0, uuid.Nil, fmt.Errorf("invalid latitude")
+	}
+
+	// Parse longitude
+	lon, err := strconv.ParseFloat(lonStr, 64)
+	if err != nil {
+		return 0, 0, 0, uuid.Nil, fmt.Errorf("invalid longitude")
+	}
+
+	// Parse distance
+	distance, err := strconv.ParseFloat(distanceStr, 64)
+	if err != nil || distance <= 0 {
+		return 0, 0, 0, uuid.Nil, fmt.Errorf("invalid distance")
+	}
+
+	// Get user ID from context
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		return 0, 0, 0, uuid.Nil, fmt.Errorf("authentication required")
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return 0, 0, 0, uuid.Nil, fmt.Errorf("invalid user ID format")
+	}
+
+	return lat, lon, distance, userID, nil
 }
