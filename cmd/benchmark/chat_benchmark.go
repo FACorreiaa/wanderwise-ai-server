@@ -35,17 +35,17 @@ type UserLocation struct {
 
 // BenchmarkResult represents the result of a benchmark test
 type BenchmarkResult struct {
-	TestName        string
-	Message         string
-	Duration        time.Duration
-	EventsReceived  int
-	FirstEventTime  time.Duration
-	LastEventTime   time.Duration
-	Success         bool
-	Error           string
-	SessionID       uuid.UUID
-	ResponseSize    int64
-	EventTypes      map[string]int
+	TestName       string
+	Message        string
+	Duration       time.Duration
+	EventsReceived int
+	FirstEventTime time.Duration
+	LastEventTime  time.Duration
+	Success        bool
+	Error          string
+	SessionID      uuid.UUID
+	ResponseSize   int64
+	EventTypes     map[string]int
 }
 
 // SSEEvent represents a Server-Sent Event
@@ -147,7 +147,7 @@ func runStartChatBenchmark(config *BenchmarkConfig, verbose bool) BenchmarkStats
 			mu.Unlock()
 
 			if verbose {
-				fmt.Printf("  📝 '%s': %v (%d events) %s\n", 
+				fmt.Printf("  📝 '%s': %v (%d events) %s\n",
 					message, result.Duration, result.EventsReceived, getStatusEmoji(result.Success))
 			}
 		}
@@ -182,7 +182,7 @@ func runContinueChatBenchmark(config *BenchmarkConfig, verbose bool) BenchmarkSt
 			mu.Unlock()
 
 			if verbose {
-				fmt.Printf("  📝 '%s': %v (%d events) %s\n", 
+				fmt.Printf("  📝 '%s': %v (%d events) %s\n",
 					message, result.Duration, result.EventsReceived, getStatusEmoji(result.Success))
 			}
 		}
@@ -214,20 +214,20 @@ func runConcurrentBenchmark(config *BenchmarkConfig, verbose bool) BenchmarkStat
 				wg.Add(1)
 				go func(message string, userIndex int) {
 					defer wg.Done()
-					
+
 					// Create unique config for this user
 					userConfig := *config
 					userConfig.UserID = uuid.New()
 					userConfig.ProfileID = uuid.New()
 					userConfig.AuthToken = generateTestAuthToken(userConfig.UserID)
-					
+
 					result := benchmarkStartChat(&userConfig, message)
 					mu.Lock()
 					results = append(results, result)
 					mu.Unlock()
 
 					if verbose {
-						fmt.Printf("  👤 User%d StartChat '%s': %v %s\n", 
+						fmt.Printf("  👤 User%d StartChat '%s': %v %s\n",
 							userIndex, message, result.Duration, getStatusEmoji(result.Success))
 					}
 				}(msg, j)
@@ -238,14 +238,14 @@ func runConcurrentBenchmark(config *BenchmarkConfig, verbose bool) BenchmarkStat
 				wg.Add(1)
 				go func(message string, userIndex int) {
 					defer wg.Done()
-					
+
 					result := benchmarkContinueChat(config, sessionID, message)
 					mu.Lock()
 					results = append(results, result)
 					mu.Unlock()
 
 					if verbose {
-						fmt.Printf("  👤 User%d ContinueChat '%s': %v %s\n", 
+						fmt.Printf("  👤 User%d ContinueChat '%s': %v %s\n",
 							userIndex, message, result.Duration, getStatusEmoji(result.Success))
 					}
 				}(msg, j)
@@ -490,7 +490,10 @@ func generateTestAuthToken(userID uuid.UUID) string {
 		"iat":     time.Now().Unix(),
 	}
 
-	claimsBytes, _ := json.Marshal(claims)
+	claimsBytes, err := json.Marshal(claims)
+	if err != nil {
+		return ""
+	}
 	return fmt.Sprintf("test.%s.signature", string(claimsBytes))
 }
 
@@ -528,7 +531,7 @@ func calculateStats(results []BenchmarkResult) BenchmarkStats {
 		stats.AverageDuration = time.Duration(totalDurationNs / int64(len(results)))
 		stats.TotalEvents = totalEvents
 		stats.TotalResponseSize = totalResponseSize
-		
+
 		if stats.TotalDuration > 0 {
 			stats.RequestsPerSecond = float64(stats.TotalRequests) / stats.TotalDuration.Seconds()
 		}

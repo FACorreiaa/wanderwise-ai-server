@@ -366,9 +366,13 @@ func (h *HandlerImpl) GetPOIs(w http.ResponseWriter, r *http.Request) {
 	l := h.logger.With(slog.String("HandlerImpl", "SearchPOIs"))
 	l.DebugContext(ctx, "Search POIs HandlerImpl invoked")
 
-	lat, _ := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
-	lon, _ := strconv.ParseFloat(r.URL.Query().Get("lon"), 64)
-	radius, _ := strconv.ParseFloat(r.URL.Query().Get("radius"), 64)
+	lat, err := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
+	lon, err := strconv.ParseFloat(r.URL.Query().Get("lon"), 64)
+	radius, err := strconv.ParseFloat(r.URL.Query().Get("radius"), 64)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid format", slog.Any("error", err))
+		return
+	}
 	category := r.URL.Query().Get("category")
 
 	filter := types.POIFilter{

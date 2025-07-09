@@ -1,4 +1,4 @@
-package llmChat
+package llmchat
 
 import (
 	"context"
@@ -106,7 +106,10 @@ func NewLlmInteractiontService(interestRepo interests.Repository,
 	logger *slog.Logger) *ServiceImpl {
 	ctx := context.Background()
 	apiKey := os.Getenv("GEMINI_API_KEY")
-	aiClient, _ := generativeAI.NewLLMChatClient(ctx, apiKey)
+	aiClient, err := generativeAI.NewLLMChatClient(ctx, apiKey)
+	if err != nil {
+		panic(err)
+	}
 
 	// Initialize embedding service
 	embeddingService, err := generativeAI.NewEmbeddingService(ctx, logger)
@@ -1282,54 +1285,6 @@ If no city is mentioned, use empty string for city.
 	return parsed.City, parsed.Message, nil
 }
 
-// extractTextFromResponse extracts text from the AI response
-func extractTextFromResponse(resp *genai.GenerateContentResponse) string {
-	var txt string
-	for _, candidate := range resp.Candidates {
-		if candidate.Content != nil && len(candidate.Content.Parts) > 0 {
-			txt = candidate.Content.Parts[0].Text
-			break
-		}
-	}
-	return txt
-}
-
-// assignIDs assigns UUIDs and interaction IDs to response items
-func assignIDs(response interface{}, interactionID uuid.UUID) {
-	switch r := response.(type) {
-	case types.AiCityResponse:
-		for i := range r.PointsOfInterest {
-			r.PointsOfInterest[i].ID = uuid.New()
-			r.PointsOfInterest[i].LlmInteractionID = interactionID
-		}
-		for i := range r.AIItineraryResponse.PointsOfInterest {
-			r.AIItineraryResponse.PointsOfInterest[i].ID = uuid.New()
-			r.AIItineraryResponse.PointsOfInterest[i].LlmInteractionID = interactionID
-		}
-	case struct {
-		Hotels []types.HotelDetailedInfo `json:"hotels"`
-	}:
-		for i := range r.Hotels {
-			r.Hotels[i].ID = uuid.New()
-			r.Hotels[i].LlmInteractionID = interactionID
-		}
-	case struct {
-		Restaurants []types.RestaurantDetailedInfo `json:"restaurants"`
-	}:
-		for i := range r.Restaurants {
-			r.Restaurants[i].ID = uuid.New()
-			r.Restaurants[i].LlmInteractionID = interactionID
-		}
-	case struct {
-		Activities []types.POIDetailedInfo `json:"activities"`
-	}:
-		for i := range r.Activities {
-			r.Activities[i].ID = uuid.New()
-			r.Activities[i].LlmInteractionID = interactionID
-		}
-	}
-}
-
 // TODO For robustness, send unprocessed events to a dead letter queue (e.g., a separate channel or database table) for later analysis:
 // if !l.sendEvent(ctx, eventCh, event) {
 //     l.logger.ErrorContext(ctx, "Sending to dead letter queue", slog.Any("event", event))
@@ -1599,12 +1554,6 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 			}
 		}
 
-		var currentPOIIDs []uuid.UUID
-		for _, p := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
-			if p.ID != uuid.Nil {
-				currentPOIIDs = append(currentPOIIDs, p.ID)
-			}
-		}
 		if (intent == types.IntentAddPOI || intent == types.IntentModifyItinerary) && userLocation != nil && userLocation.UserLat != 0 && userLocation.UserLon != 0 {
 			sortedPOIs, err := l.llmInteractionRepo.GetPOIsBySessionSortedByDistance(ctx, sessionID, cityID, *userLocation)
 			if err != nil {
@@ -1814,64 +1763,6 @@ func (l *ServiceImpl) generatePOIDataStream(
 		EventID:   uuid.New().String(),
 	}, 3)
 	return poiData, nil
-}
-
-// streamingCityDataWorker ContinueSessionStreamed
-
-func (l *ServiceImpl) generateCityData(ctx context.Context, cityName string) (string, error) {
-	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "generateCityData", trace.WithAttributes(
-		attribute.String("city.name", cityName),
-	))
-	defer span.End()
-
-	prompt := getCityDescriptionPrompt(cityName)
-	var responseText strings.Builder
-
-	// Try streaming
-	iter, err := l.aiClient.GenerateContentStream(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)})
-	if err == nil {
-		for resp, err := range iter {
-			if err != nil {
-				span.RecordError(err)
-				return "", fmt.Errorf("streaming city data error: %w", err)
-			}
-			for _, cand := range resp.Candidates {
-				if cand.Content != nil {
-					for _, part := range cand.Content.Parts {
-						if part.Text != "" {
-							responseText.WriteString(string(part.Text))
-						}
-					}
-				}
-			}
-		}
-	} else {
-		// Fallback to non-streaming
-		l.logger.WarnContext(ctx, "Streaming city data failed, falling back to non-streaming", slog.Any("error", err))
-		response, err := l.aiClient.GenerateResponse(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)})
-		if err != nil {
-			span.RecordError(err)
-			return "", fmt.Errorf("failed to generate city data: %w", err)
-		}
-		for _, cand := range response.Candidates {
-			if cand.Content != nil {
-				for _, part := range cand.Content.Parts {
-					if part.Text != "" {
-						responseText.WriteString(string(part.Text))
-					}
-				}
-			}
-		}
-	}
-
-	fullText := responseText.String()
-	if fullText == "" {
-		err := fmt.Errorf("empty city data response")
-		span.RecordError(err)
-		return "", err
-	}
-
-	return cleanJSONResponse(fullText), nil
 }
 
 func (l *ServiceImpl) saveCityInteraction(ctx context.Context, interaction types.LlmInteraction) (uuid.UUID, error) {

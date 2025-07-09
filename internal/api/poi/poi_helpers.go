@@ -6,7 +6,34 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
+
+func (l *ServiceImpl) enrichAndFilterLLMResponse(rawPOIs []types.POIDetailedInfo, userLat, userLon, searchRadius float64) []types.POIDetailedInfo {
+	var processedPOIs []types.POIDetailedInfo
+	for _, p := range rawPOIs {
+		distanceKm := calculateDistance(userLat, userLon, p.Latitude, p.Longitude)
+
+		if distanceKm <= searchRadius/1000 {
+			poiID := p.ID
+			if poiID == uuid.Nil {
+				poiID = uuid.New()
+			}
+			detailedPOI := types.POIDetailedInfo{
+				ID:          poiID,
+				Name:        p.Name,
+				Latitude:    p.Latitude,
+				Longitude:   p.Longitude,
+				Category:    p.Category,
+				Description: p.DescriptionPOI,
+				Distance:    distanceKm * 1000,
+			}
+			processedPOIs = append(processedPOIs, detailedPOI)
+		}
+	}
+	return processedPOIs
+}
 
 // calculateDistance calculates the distance between two coordinates using the Haversine formula
 // Returns distance in kilometers

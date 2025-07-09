@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/config"
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/markbates/goth"
@@ -17,6 +15,9 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/config"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 // Ensure implementation satisfies the interface
@@ -150,7 +151,10 @@ func (s *AuthServiceImpl) RefreshSession(ctx context.Context, refreshToken strin
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to get user details after refresh token validation", slog.String("userID", userID), slog.Any("error", err))
 		// Invalidate the suspicious token?
-		_ = s.repo.InvalidateRefreshToken(ctx, refreshToken)
+		err = s.repo.InvalidateRefreshToken(ctx, refreshToken)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid or expired refresh token: %w", err)
+		}
 		return "", "", fmt.Errorf("internal error retrieving user during refresh")
 	}
 

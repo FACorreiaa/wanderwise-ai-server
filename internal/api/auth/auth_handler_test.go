@@ -99,7 +99,10 @@ func TestLoginHandlerImpl(t *testing.T) {
 			"email":    "test@example.com",
 			"password": "password123",
 		}
-		body, _ := json.Marshal(loginRequest)
+		body, err := json.Marshal(loginRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewBuffer(body))
@@ -151,7 +154,10 @@ func TestLoginHandlerImpl(t *testing.T) {
 			"email": "test@example.com",
 			// Missing password
 		}
-		body, _ := json.Marshal(loginRequest)
+		body, err := json.Marshal(loginRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewBuffer(body))

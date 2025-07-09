@@ -92,6 +92,11 @@ type MockPOIRepository struct {
 	mock.Mock
 }
 
+func (m *MockPOIRepository) GetPOIsByLocationAndDistanceWithCategory(ctx context.Context, lat, lon, radiusMeters float64, category string) ([]types.POIDetailedInfo, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (m *MockPOIRepository) SavePoi(ctx context.Context, poi types.POIDetailedInfo, cityID uuid.UUID) (uuid.UUID, error) {
 	args := m.Called(ctx, poi, cityID)
 	return args.Get(0).(uuid.UUID), args.Error(1)

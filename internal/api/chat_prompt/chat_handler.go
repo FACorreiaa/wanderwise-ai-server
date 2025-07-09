@@ -1,4 +1,4 @@
-package llmChat
+package llmchat
 
 import (
 	"encoding/json"
@@ -386,27 +386,6 @@ func (h *HandlerImpl) GetPOIDetails(w http.ResponseWriter, r *http.Request) {
 
 	l.InfoContext(ctx, "Successfully fetched POI details")
 	span.SetStatus(codes.Ok, "Success")
-}
-
-// Stream Handlers
-func (h *HandlerImpl) writeSSEError(w http.ResponseWriter, errorMsg string) {
-	event := types.StreamEvent{
-		Type:      types.EventTypeError,
-		Error:     errorMsg,
-		Timestamp: time.Now(),
-		EventID:   uuid.New().String(),
-	}
-	data, err := json.Marshal(event)
-	if err != nil {
-
-		return
-	}
-	fmt.Fprintf(w, "id: %s\n", event.EventID)
-	fmt.Fprintf(w, "event: %s\n", event.Type)
-	fmt.Fprintf(w, "data: %s\n\n", data)
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
-	}
 }
 
 // StartChatMessageStream handles unified chat requests with streaming

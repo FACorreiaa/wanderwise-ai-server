@@ -270,7 +270,10 @@ func (r *RepositoryImpl) CreateSearchProfile(ctx context.Context, userID uuid.UU
 		query := "UPDATE user_preference_profiles SET is_default = FALSE WHERE user_id = $1 AND id != $2"
 		_, err := tx.Exec(ctx, query, userID, uuid.Nil) // uuid.Nil as placeholder; will be updated after insert
 		if err != nil {
-			_ = tx.Rollback(ctx)
+			err = tx.Rollback(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to rollback transaction: %w", err)
+			}
 			l.ErrorContext(ctx, "Failed to reset existing default profiles", slog.Any("error", err))
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "Failed to reset defaults")
@@ -302,7 +305,10 @@ func (r *RepositoryImpl) CreateSearchProfile(ctx context.Context, userID uuid.UU
 		&p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
-		_ = tx.Rollback(ctx)
+		err = tx.Rollback(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to rollback transaction: %w", err)
+		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // Unique violation
 			l.WarnContext(ctx, "Profile name already exists for this user", slog.Any("error", err))
@@ -320,7 +326,10 @@ func (r *RepositoryImpl) CreateSearchProfile(ctx context.Context, userID uuid.UU
 	if params.AccommodationPreferences != nil {
 		accommodationJSON, err := json.Marshal(params.AccommodationPreferences)
 		if err != nil {
-			_ = tx.Rollback(ctx)
+			err = tx.Rollback(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to rollback transaction: %w", err)
+			}
 			l.ErrorContext(ctx, "Failed to marshal accommodation preferences", slog.Any("error", err))
 			return nil, fmt.Errorf("failed to marshal accommodation preferences: %w", err)
 		}

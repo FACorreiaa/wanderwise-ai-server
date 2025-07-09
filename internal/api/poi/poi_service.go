@@ -35,31 +35,31 @@ type Service interface {
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
 
-	// Traditional search
+	// SearchPOIs Traditional search
 	SearchPOIs(ctx context.Context, filter types.POIFilter) ([]types.POIDetailedInfo, error)
 
-	// Semantic search methods
+	// SearchPOIsSemantic Semantic search methods
 	SearchPOIsSemantic(ctx context.Context, query string, limit int) ([]types.POIDetailedInfo, error)
 	SearchPOIsSemanticByCity(ctx context.Context, query string, cityID uuid.UUID, limit int) ([]types.POIDetailedInfo, error)
 	SearchPOIsHybrid(ctx context.Context, filter types.POIFilter, query string, semanticWeight float64) ([]types.POIDetailedInfo, error)
 	GenerateEmbeddingForPOI(ctx context.Context, poiID uuid.UUID) error
 	GenerateEmbeddingsForAllPOIs(ctx context.Context, batchSize int) error
 
-	// Itinerary management
+	// GetItinerary Itinerary management
 	GetItinerary(ctx context.Context, userID, itineraryID uuid.UUID) (*types.UserSavedItinerary, error)
 	GetItineraries(ctx context.Context, userID uuid.UUID, page, pageSize int) (*types.PaginatedUserItinerariesResponse, error)
 	UpdateItinerary(ctx context.Context, userID, itineraryID uuid.UUID, updates types.UpdateItineraryRequest) (*types.UserSavedItinerary, error)
 
-	// Discover Service
+	// GetGeneralPOIByDistance Discover Service
 	GetGeneralPOIByDistance(ctx context.Context, userID uuid.UUID, lat, lon, distance float64) ([]types.POIDetailedInfo, error) //, categoryFilter string
 
-	// Domain-specific discover services
+	// GetNearbyRestaurants Domain-specific discover services
 	GetNearbyRestaurants(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, cuisineType, priceRange string) ([]types.POIDetailedInfo, error)
 	GetNearbyActivities(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, activityType, duration string) ([]types.POIDetailedInfo, error)
 	GetNearbyHotels(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, starRating, amenities string) ([]types.POIDetailedInfo, error)
 	GetNearbyAttractions(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, attractionType, isOutdoor string) ([]types.POIDetailedInfo, error)
 
-	// LLM POI management
+	// FindOrCreateLLMPOI LLM POI management
 	FindOrCreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error)
 }
 
@@ -178,13 +178,13 @@ func (s *ServiceImpl) SearchPOIs(ctx context.Context, filter types.POIFilter) ([
 	return pois, nil
 }
 
-func (l *ServiceImpl) GetItinerary(ctx context.Context, userID, itineraryID uuid.UUID) (*types.UserSavedItinerary, error) {
+func (s *ServiceImpl) GetItinerary(ctx context.Context, userID, itineraryID uuid.UUID) (*types.UserSavedItinerary, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GetItinerary")
 	defer span.End()
 
-	itinerary, err := l.poiRepository.GetItinerary(ctx, userID, itineraryID)
+	itinerary, err := s.poiRepository.GetItinerary(ctx, userID, itineraryID)
 	if err != nil {
-		l.logger.ErrorContext(ctx, "Repository failed to get itinerary", slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "Repository failed to get itinerary", slog.Any("error", err))
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to get itinerary: %w", err)
 	}
@@ -196,7 +196,7 @@ func (l *ServiceImpl) GetItinerary(ctx context.Context, userID, itineraryID uuid
 	return itinerary, nil
 }
 
-func (l *ServiceImpl) GetItineraries(ctx context.Context, userID uuid.UUID, page, pageSize int) (*types.PaginatedUserItinerariesResponse, error) {
+func (s *ServiceImpl) GetItineraries(ctx context.Context, userID uuid.UUID, page, pageSize int) (*types.PaginatedUserItinerariesResponse, error) {
 	_, span := otel.Tracer("LlmInteractionService").Start(ctx, "GetItineraries", trace.WithAttributes(
 		attribute.String("user.id", userID.String()),
 		attribute.Int("page", page),
@@ -204,7 +204,7 @@ func (l *ServiceImpl) GetItineraries(ctx context.Context, userID uuid.UUID, page
 	))
 	defer span.End()
 
-	l.logger.DebugContext(ctx, "Service: Getting itineraries for user", slog.String("userID", userID.String()))
+	s.logger.DebugContext(ctx, "Service: Getting itineraries for user", slog.String("userID", userID.String()))
 
 	if page <= 0 {
 		page = 1 // Default to page 1
@@ -213,9 +213,9 @@ func (l *ServiceImpl) GetItineraries(ctx context.Context, userID uuid.UUID, page
 		pageSize = 10 // Default page size
 	}
 
-	itineraries, totalRecords, err := l.poiRepository.GetItineraries(ctx, userID, page, pageSize)
+	itineraries, totalRecords, err := s.poiRepository.GetItineraries(ctx, userID, page, pageSize)
 	if err != nil {
-		l.logger.ErrorContext(ctx, "Repository failed to get itineraries", slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "Repository failed to get itineraries", slog.Any("error", err))
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to retrieve itineraries: %w", err)
 	}
@@ -231,26 +231,26 @@ func (l *ServiceImpl) GetItineraries(ctx context.Context, userID uuid.UUID, page
 	}, nil
 }
 
-func (l *ServiceImpl) UpdateItinerary(ctx context.Context, userID, itineraryID uuid.UUID, updates types.UpdateItineraryRequest) (*types.UserSavedItinerary, error) {
+func (s *ServiceImpl) UpdateItinerary(ctx context.Context, userID, itineraryID uuid.UUID, updates types.UpdateItineraryRequest) (*types.UserSavedItinerary, error) {
 	_, span := otel.Tracer("LlmInteractionService").Start(ctx, "UpdateItinerary", trace.WithAttributes(
 		attribute.String("user.id", userID.String()),
 		attribute.String("itinerary.id", itineraryID.String()),
 	))
 	defer span.End()
 
-	l.logger.DebugContext(ctx, "Service: Updating itinerary", slog.String("userID", userID.String()), slog.String("itineraryID", itineraryID.String()), slog.Any("updates", updates))
+	s.logger.DebugContext(ctx, "Service: Updating itinerary", slog.String("userID", userID.String()), slog.String("itineraryID", itineraryID.String()), slog.Any("updates", updates))
 
 	if updates.Title == nil && updates.Description == nil && updates.Tags == nil &&
 		updates.EstimatedDurationDays == nil && updates.EstimatedCostLevel == nil &&
 		updates.IsPublic == nil && updates.MarkdownContent == nil {
 		span.AddEvent("No update fields provided.")
-		l.logger.InfoContext(ctx, "No fields provided for itinerary update, fetching current.", slog.String("itineraryID", itineraryID.String()))
-		return l.poiRepository.GetItinerary(ctx, userID, itineraryID) // Assumes GetItinerary checks ownership
+		s.logger.InfoContext(ctx, "No fields provided for itinerary update, fetching current.", slog.String("itineraryID", itineraryID.String()))
+		return s.poiRepository.GetItinerary(ctx, userID, itineraryID) // Assumes GetItinerary checks ownership
 	}
 
-	updatedItinerary, err := l.poiRepository.UpdateItinerary(ctx, userID, itineraryID, updates)
+	updatedItinerary, err := s.poiRepository.UpdateItinerary(ctx, userID, itineraryID, updates)
 	if err != nil {
-		l.logger.ErrorContext(ctx, "Repository failed to update itinerary", slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "Repository failed to update itinerary", slog.Any("error", err))
 		span.RecordError(err)
 		return nil, err // Propagate error (could be not found, or DB error)
 	}
@@ -588,40 +588,40 @@ func (s *ServiceImpl) GenerateEmbeddingsForAllPOIs(ctx context.Context, batchSiz
 	return nil
 }
 
-func (l *ServiceImpl) GetGeneralPOIByDistance(ctx context.Context, userID uuid.UUID, lat, lon, distance float64) ([]types.POIDetailedInfo, error) {
+func (s *ServiceImpl) GetGeneralPOIByDistance(ctx context.Context, userID uuid.UUID, lat, lon, distance float64) ([]types.POIDetailedInfo, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GetGeneralPOIByDistance")
 	defer span.End()
 
 	cacheKey := generateFilteredPOICacheKey(lat, lon, distance, userID)
 	span.SetAttributes(attribute.String("cache.key", cacheKey))
 
-	if cached, found := l.cache.Get(cacheKey); found {
+	if cached, found := s.cache.Get(cacheKey); found {
 		if pois, ok := cached.([]types.POIDetailedInfo); ok {
-			l.logger.InfoContext(ctx, "Serving POIs from cache", "key", cacheKey)
+			s.logger.InfoContext(ctx, "Serving POIs from cache", "key", cacheKey)
 			return pois, nil
 		}
 	}
 
-	l.logger.InfoContext(ctx, "Cache miss. Querying POIs from database.", "lat", lat, "lon", lon, "distance_m", distance)
-	poisFromDB, err := l.poiRepository.GetPOIsByLocationAndDistance(ctx, lat, lon, distance)
+	s.logger.InfoContext(ctx, "Cache miss. Querying POIs from database.", "lat", lat, "lon", lon, "distance_m", distance)
+	poisFromDB, err := s.poiRepository.GetPOIsByLocationAndDistance(ctx, lat, lon, distance)
 	if err == nil && len(poisFromDB) > 0 {
 		for i := range poisFromDB {
 			poisFromDB[i].Source = "points_of_interest"
 		}
-		l.cache.Set(cacheKey, poisFromDB, cache.DefaultExpiration)
+		s.cache.Set(cacheKey, poisFromDB, cache.DefaultExpiration)
 		return poisFromDB, nil
 	}
 
-	l.logger.InfoContext(ctx, "No POIs found in database, falling back to LLM generation")
+	s.logger.InfoContext(ctx, "No POIs found in database, falling back to LLM generation")
 	span.AddEvent("database_miss_fallback_to_llm")
 
-	genAIResponse, err := l.generatePOIsFromLLM(ctx, userID, lat, lon, distance)
+	genAIResponse, err := s.generatePOIsFromLLM(ctx, userID, lat, lon, distance)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
 
-	enrichedPOIs := l.enrichAndFilterLLMResponse(ctx, genAIResponse.GeneralPOI, lat, lon, distance)
+	enrichedPOIs := s.enrichAndFilterLLMResponse(genAIResponse.GeneralPOI, lat, lon, distance)
 	for i := range enrichedPOIs {
 		enrichedPOIs[i].Source = "llm_suggested_pois"
 	}
@@ -637,28 +637,28 @@ func (l *ServiceImpl) GetGeneralPOIByDistance(ctx context.Context, userID uuid.U
 			Distance:  &distance,
 		}
 
-		llmInteractionID, err := l.poiRepository.SaveLlmInteraction(ctx, interaction)
+		llmInteractionID, err := s.poiRepository.SaveLlmInteraction(ctx, interaction)
 		if err != nil {
-			l.logger.ErrorContext(ctx, "Failed to save LLM interaction", slog.Any("error", err))
+			s.logger.ErrorContext(ctx, "Failed to save LLM interaction", slog.Any("error", err))
 			return nil, err
 		}
 
 		// Synchronous save to ensure POIs are available immediately
-		if err := l.poiRepository.SaveLlmPoisToDatabase(ctx, userID, enrichedPOIs, genAIResponse, llmInteractionID); err != nil {
-			l.logger.WarnContext(ctx, "Failed to save LLM POIs to database", slog.Any("error", err))
+		if err := s.poiRepository.SaveLlmPoisToDatabase(ctx, userID, enrichedPOIs, genAIResponse, llmInteractionID); err != nil {
+			s.logger.WarnContext(ctx, "Failed to save LLM POIs to database", slog.Any("error", err))
 		}
 	}
 
-	l.cache.Set(cacheKey, enrichedPOIs, cache.DefaultExpiration)
+	s.cache.Set(cacheKey, enrichedPOIs, cache.DefaultExpiration)
 	span.SetStatus(codes.Ok, "POIs generated via LLM and cached")
 	return enrichedPOIs, nil
 }
 
-func (l *ServiceImpl) generatePOIsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64) (*types.GenAIResponse, error) {
+func (s *ServiceImpl) generatePOIsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64) (*types.GenAIResponse, error) {
 	resultCh := make(chan types.GenAIResponse, 1)
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go l.getGeneralPOIByDistance(&wg, ctx, userID, lat, lon, distance, resultCh, &genai.GenerateContentConfig{
+	go s.getGeneralPOIByDistance(&wg, ctx, userID, lat, lon, distance, resultCh, &genai.GenerateContentConfig{
 		Temperature:     genai.Ptr[float32](0.7),
 		MaxOutputTokens: 16384,
 	})
@@ -672,32 +672,7 @@ func (l *ServiceImpl) generatePOIsFromLLM(ctx context.Context, userID uuid.UUID,
 	return &result, nil
 }
 
-func (l *ServiceImpl) enrichAndFilterLLMResponse(ctx context.Context, rawPOIs []types.POIDetailedInfo, userLat, userLon, searchRadius float64) []types.POIDetailedInfo {
-	var processedPOIs []types.POIDetailedInfo
-	for _, p := range rawPOIs {
-		distanceKm := calculateDistance(userLat, userLon, p.Latitude, p.Longitude)
-
-		if distanceKm <= searchRadius/1000 {
-			poiID := p.ID
-			if poiID == uuid.Nil {
-				poiID = uuid.New()
-			}
-			detailedPOI := types.POIDetailedInfo{
-				ID:          poiID,
-				Name:        p.Name,
-				Latitude:    p.Latitude,
-				Longitude:   p.Longitude,
-				Category:    p.Category,
-				Description: p.DescriptionPOI,
-				Distance:    distanceKm * 1000,
-			}
-			processedPOIs = append(processedPOIs, detailedPOI)
-		}
-	}
-	return processedPOIs
-}
-
-func (l *ServiceImpl) getGeneralPOIByDistance(wg *sync.WaitGroup,
+func (s *ServiceImpl) getGeneralPOIByDistance(wg *sync.WaitGroup,
 	ctx context.Context,
 	userID uuid.UUID,
 	lat, lon, distance float64,
@@ -715,7 +690,7 @@ func (l *ServiceImpl) getGeneralPOIByDistance(wg *sync.WaitGroup,
 	prompt := getGeneralPOIByDistance(lat, lon, distance)
 	span.SetAttributes(attribute.Int("prompt.length", len(prompt)))
 
-	if l.aiClient == nil {
+	if s.aiClient == nil {
 		err := fmt.Errorf("AI client is not available - check API key configuration")
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "AI client unavailable")
@@ -724,7 +699,7 @@ func (l *ServiceImpl) getGeneralPOIByDistance(wg *sync.WaitGroup,
 	}
 
 	startTime := time.Now()
-	response, err := l.aiClient.GenerateResponse(ctx, prompt, config)
+	response, err := s.aiClient.GenerateResponse(ctx, prompt, config)
 	latencyMs := int(time.Since(startTime).Milliseconds())
 	span.SetAttributes(attribute.Int("response.latency_ms", latencyMs))
 
@@ -768,7 +743,7 @@ func (l *ServiceImpl) getGeneralPOIByDistance(wg *sync.WaitGroup,
 	span.SetStatus(codes.Ok, "General POIs generated successfully")
 	resultCh <- types.GenAIResponse{
 		GeneralPOI: poiData.PointsOfInterest,
-		ModelName:  l.aiClient.ModelName,
+		ModelName:  s.aiClient.ModelName,
 		Prompt:     prompt,
 		Response:   cleanTxt,
 	}
@@ -830,7 +805,7 @@ func (s *ServiceImpl) GetNearbyRestaurants(ctx context.Context, userID uuid.UUID
 
 	// Build cache key with domain-specific filters
 	cacheKey := fmt.Sprintf("restaurants_%f_%f_%f_%s_%s_%s", lat, lon, distance, userID.String(), cuisineType, priceRange)
-	
+
 	if cached, found := s.cache.Get(cacheKey); found {
 		if pois, ok := cached.([]types.POIDetailedInfo); ok {
 			s.logger.InfoContext(ctx, "Serving restaurants from cache", "key", cacheKey)
@@ -839,24 +814,24 @@ func (s *ServiceImpl) GetNearbyRestaurants(ctx context.Context, userID uuid.UUID
 	}
 
 	s.logger.InfoContext(ctx, "Querying restaurants from database", "lat", lat, "lon", lon, "distance", distance)
-	
+
 	// Get restaurants from database with filters
 	restaurants, err := s.poiRepository.GetPOIsByLocationAndDistanceWithCategory(ctx, lat, lon, distance, "restaurant")
 	if err == nil && len(restaurants) > 0 {
 		// Apply domain-specific filters
 		filteredRestaurants := s.filterRestaurants(restaurants, cuisineType, priceRange)
-		
+
 		// Mark as database source
 		for i := range filteredRestaurants {
 			filteredRestaurants[i].Source = "points_of_interest"
 		}
-		
+
 		s.cache.Set(cacheKey, filteredRestaurants, cache.DefaultExpiration)
 		return filteredRestaurants, nil
 	}
 
 	s.logger.InfoContext(ctx, "No restaurants found in database, falling back to LLM generation")
-	
+
 	// Generate restaurants using LLM with domain-specific prompt
 	genAIResponse, err := s.generateRestaurantsFromLLM(ctx, userID, lat, lon, distance, cuisineType, priceRange)
 	if err != nil {
@@ -864,7 +839,7 @@ func (s *ServiceImpl) GetNearbyRestaurants(ctx context.Context, userID uuid.UUID
 		return nil, err
 	}
 
-	enrichedRestaurants := s.enrichAndFilterLLMResponse(ctx, genAIResponse.GeneralPOI, lat, lon, distance)
+	enrichedRestaurants := s.enrichAndFilterLLMResponse(genAIResponse.GeneralPOI, lat, lon, distance)
 	for i := range enrichedRestaurants {
 		enrichedRestaurants[i].Source = "llm_suggested_pois"
 	}
@@ -886,7 +861,7 @@ func (s *ServiceImpl) GetNearbyActivities(ctx context.Context, userID uuid.UUID,
 
 	// Build cache key with domain-specific filters
 	cacheKey := fmt.Sprintf("activities_%f_%f_%f_%s_%s_%s", lat, lon, distance, userID.String(), activityType, duration)
-	
+
 	if cached, found := s.cache.Get(cacheKey); found {
 		if pois, ok := cached.([]types.POIDetailedInfo); ok {
 			s.logger.InfoContext(ctx, "Serving activities from cache", "key", cacheKey)
@@ -895,24 +870,24 @@ func (s *ServiceImpl) GetNearbyActivities(ctx context.Context, userID uuid.UUID,
 	}
 
 	s.logger.InfoContext(ctx, "Querying activities from database", "lat", lat, "lon", lon, "distance", distance)
-	
+
 	// Get activities from database with filters
 	activities, err := s.poiRepository.GetPOIsByLocationAndDistanceWithCategory(ctx, lat, lon, distance, "activity")
 	if err == nil && len(activities) > 0 {
 		// Apply domain-specific filters
 		filteredActivities := s.filterActivities(activities, activityType, duration)
-		
+
 		// Mark as database source
 		for i := range filteredActivities {
 			filteredActivities[i].Source = "points_of_interest"
 		}
-		
+
 		s.cache.Set(cacheKey, filteredActivities, cache.DefaultExpiration)
 		return filteredActivities, nil
 	}
 
 	s.logger.InfoContext(ctx, "No activities found in database, falling back to LLM generation")
-	
+
 	// Generate activities using LLM with domain-specific prompt
 	genAIResponse, err := s.generateActivitiesFromLLM(ctx, userID, lat, lon, distance, activityType, duration)
 	if err != nil {
@@ -920,7 +895,7 @@ func (s *ServiceImpl) GetNearbyActivities(ctx context.Context, userID uuid.UUID,
 		return nil, err
 	}
 
-	enrichedActivities := s.enrichAndFilterLLMResponse(ctx, genAIResponse.GeneralPOI, lat, lon, distance)
+	enrichedActivities := s.enrichAndFilterLLMResponse(genAIResponse.GeneralPOI, lat, lon, distance)
 	for i := range enrichedActivities {
 		enrichedActivities[i].Source = "llm_suggested_pois"
 	}
@@ -942,7 +917,7 @@ func (s *ServiceImpl) GetNearbyHotels(ctx context.Context, userID uuid.UUID, lat
 
 	// Build cache key with domain-specific filters
 	cacheKey := fmt.Sprintf("hotels_%f_%f_%f_%s_%s_%s", lat, lon, distance, userID.String(), starRating, amenities)
-	
+
 	if cached, found := s.cache.Get(cacheKey); found {
 		if pois, ok := cached.([]types.POIDetailedInfo); ok {
 			s.logger.InfoContext(ctx, "Serving hotels from cache", "key", cacheKey)
@@ -951,24 +926,24 @@ func (s *ServiceImpl) GetNearbyHotels(ctx context.Context, userID uuid.UUID, lat
 	}
 
 	s.logger.InfoContext(ctx, "Querying hotels from database", "lat", lat, "lon", lon, "distance", distance)
-	
+
 	// Get hotels from database with filters
 	hotels, err := s.poiRepository.GetPOIsByLocationAndDistanceWithCategory(ctx, lat, lon, distance, "hotel")
 	if err == nil && len(hotels) > 0 {
 		// Apply domain-specific filters
 		filteredHotels := s.filterHotels(hotels, starRating, amenities)
-		
+
 		// Mark as database source
 		for i := range filteredHotels {
 			filteredHotels[i].Source = "points_of_interest"
 		}
-		
+
 		s.cache.Set(cacheKey, filteredHotels, cache.DefaultExpiration)
 		return filteredHotels, nil
 	}
 
 	s.logger.InfoContext(ctx, "No hotels found in database, falling back to LLM generation")
-	
+
 	// Generate hotels using LLM with domain-specific prompt
 	genAIResponse, err := s.generateHotelsFromLLM(ctx, userID, lat, lon, distance, starRating, amenities)
 	if err != nil {
@@ -976,7 +951,7 @@ func (s *ServiceImpl) GetNearbyHotels(ctx context.Context, userID uuid.UUID, lat
 		return nil, err
 	}
 
-	enrichedHotels := s.enrichAndFilterLLMResponse(ctx, genAIResponse.GeneralPOI, lat, lon, distance)
+	enrichedHotels := s.enrichAndFilterLLMResponse(genAIResponse.GeneralPOI, lat, lon, distance)
 	for i := range enrichedHotels {
 		enrichedHotels[i].Source = "llm_suggested_pois"
 	}
@@ -998,7 +973,7 @@ func (s *ServiceImpl) GetNearbyAttractions(ctx context.Context, userID uuid.UUID
 
 	// Build cache key with domain-specific filters
 	cacheKey := fmt.Sprintf("attractions_%f_%f_%f_%s_%s_%s", lat, lon, distance, userID.String(), attractionType, isOutdoor)
-	
+
 	if cached, found := s.cache.Get(cacheKey); found {
 		if pois, ok := cached.([]types.POIDetailedInfo); ok {
 			s.logger.InfoContext(ctx, "Serving attractions from cache", "key", cacheKey)
@@ -1007,24 +982,24 @@ func (s *ServiceImpl) GetNearbyAttractions(ctx context.Context, userID uuid.UUID
 	}
 
 	s.logger.InfoContext(ctx, "Querying attractions from database", "lat", lat, "lon", lon, "distance", distance)
-	
+
 	// Get attractions from database with filters
 	attractions, err := s.poiRepository.GetPOIsByLocationAndDistanceWithCategory(ctx, lat, lon, distance, "attraction")
 	if err == nil && len(attractions) > 0 {
 		// Apply domain-specific filters
 		filteredAttractions := s.filterAttractions(attractions, attractionType, isOutdoor)
-		
+
 		// Mark as database source
 		for i := range filteredAttractions {
 			filteredAttractions[i].Source = "points_of_interest"
 		}
-		
+
 		s.cache.Set(cacheKey, filteredAttractions, cache.DefaultExpiration)
 		return filteredAttractions, nil
 	}
 
 	s.logger.InfoContext(ctx, "No attractions found in database, falling back to LLM generation")
-	
+
 	// Generate attractions using LLM with domain-specific prompt
 	genAIResponse, err := s.generateAttractionsFromLLM(ctx, userID, lat, lon, distance, attractionType, isOutdoor)
 	if err != nil {
@@ -1032,7 +1007,7 @@ func (s *ServiceImpl) GetNearbyAttractions(ctx context.Context, userID uuid.UUID
 		return nil, err
 	}
 
-	enrichedAttractions := s.enrichAndFilterLLMResponse(ctx, genAIResponse.GeneralPOI, lat, lon, distance)
+	enrichedAttractions := s.enrichAndFilterLLMResponse(genAIResponse.GeneralPOI, lat, lon, distance)
 	for i := range enrichedAttractions {
 		enrichedAttractions[i].Source = "llm_suggested_pois"
 	}
@@ -1046,7 +1021,7 @@ func (s *ServiceImpl) filterRestaurants(restaurants []types.POIDetailedInfo, cui
 	if cuisineType == "" && priceRange == "" {
 		return restaurants
 	}
-	
+
 	filtered := make([]types.POIDetailedInfo, 0)
 	for _, restaurant := range restaurants {
 		// Filter by cuisine type
@@ -1066,7 +1041,7 @@ func (s *ServiceImpl) filterActivities(activities []types.POIDetailedInfo, activ
 	if activityType == "" && duration == "" {
 		return activities
 	}
-	
+
 	filtered := make([]types.POIDetailedInfo, 0)
 	for _, activity := range activities {
 		// Filter by activity type
@@ -1086,7 +1061,7 @@ func (s *ServiceImpl) filterHotels(hotels []types.POIDetailedInfo, starRating, a
 	if starRating == "" && amenities == "" {
 		return hotels
 	}
-	
+
 	filtered := make([]types.POIDetailedInfo, 0)
 	for _, hotel := range hotels {
 		// Filter by star rating
@@ -1108,7 +1083,7 @@ func (s *ServiceImpl) filterAttractions(attractions []types.POIDetailedInfo, att
 	if attractionType == "" && isOutdoor == "" {
 		return attractions
 	}
-	
+
 	filtered := make([]types.POIDetailedInfo, 0)
 	for _, attraction := range attractions {
 		// Filter by attraction type
@@ -1133,27 +1108,404 @@ func (s *ServiceImpl) filterAttractions(attractions []types.POIDetailedInfo, att
 	return filtered
 }
 
-// Placeholder LLM generation functions - these would need to be implemented with domain-specific prompts
+// TODO
+// generateRestaurantsFromLLM
 func (s *ServiceImpl) generateRestaurantsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, cuisineType, priceRange string) (*types.GenAIResponse, error) {
-	// For now, use the general LLM generation with modified prompt
-	// This would be enhanced with restaurant-specific prompts
-	return s.generatePOIsFromLLM(ctx, userID, lat, lon, distance)
+	resultCh := make(chan types.GenAIResponse, 1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go s.getGeneralRestaurantByDistance(&wg, ctx, userID, lat, lon, distance, resultCh, &genai.GenerateContentConfig{
+		Temperature:     genai.Ptr[float32](0.7),
+		MaxOutputTokens: 16384,
+	})
+	wg.Wait()
+	close(resultCh)
+
+	result := <-resultCh
+	if result.Err != nil {
+		return nil, result.Err
+	}
+	return &result, nil
+}
+
+func (s *ServiceImpl) getGeneralRestaurantByDistance(wg *sync.WaitGroup,
+	ctx context.Context,
+	userID uuid.UUID,
+	lat, lon, distance float64,
+	resultCh chan<- types.GenAIResponse,
+	config *genai.GenerateContentConfig) {
+	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GenerateGeneralPOIWorker", trace.WithAttributes(
+		attribute.Float64("latitude", lat),
+		attribute.Float64("longitude", lon),
+		attribute.Float64("distance.km", distance),
+		attribute.String("user.id", userID.String())))
+
+	defer span.End()
+	defer wg.Done()
+
+	userLocation := types.UserLocation{
+		UserLat:        lat,
+		UserLon:        lon,
+		SearchRadiusKm: distance,
+	}
+	prompt := getRestaurantsNearbyPrompt(userLocation)
+	span.SetAttributes(attribute.Int("prompt.length", len(prompt)))
+
+	if s.aiClient == nil {
+		err := fmt.Errorf("AI client is not available - check API key configuration")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "AI client unavailable")
+		resultCh <- types.GenAIResponse{Err: err}
+		return
+	}
+
+	startTime := time.Now()
+	response, err := s.aiClient.GenerateResponse(ctx, prompt, config)
+	latencyMs := int(time.Since(startTime).Milliseconds())
+	span.SetAttributes(attribute.Int("response.latency_ms", latencyMs))
+
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to generate general POIs")
+		resultCh <- types.GenAIResponse{Err: fmt.Errorf("failed to generate general POIs: %w", err)}
+		return
+	}
+
+	var txt string
+	for _, candidate := range response.Candidates {
+		if candidate.Content != nil && len(candidate.Content.Parts) > 0 {
+			txt = candidate.Content.Parts[0].Text
+			break
+		}
+	}
+	if txt == "" {
+		err := fmt.Errorf("no valid general POI content from AI")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Empty response from AI")
+		resultCh <- types.GenAIResponse{Err: err}
+		return
+	}
+	span.SetAttributes(attribute.Int("response.length", len(txt)))
+
+	cleanTxt := cleanJSONResponse(txt)
+	var poiData struct {
+		PointsOfInterest []types.POIDetailedInfo `json:"points_of_interest"`
+	}
+	if err := json.Unmarshal([]byte(cleanTxt), &poiData); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to parse general POI JSON")
+		resultCh <- types.GenAIResponse{Err: fmt.Errorf("failed to parse general POI JSON: %w", err)}
+		return
+	}
+
+	fmt.Println(cleanTxt)
+
+	span.SetAttributes(attribute.Int("pois.count", len(poiData.PointsOfInterest)))
+	span.SetStatus(codes.Ok, "General POIs generated successfully")
+	resultCh <- types.GenAIResponse{
+		GeneralPOI: poiData.PointsOfInterest,
+		ModelName:  s.aiClient.ModelName,
+		Prompt:     prompt,
+		Response:   cleanTxt,
+	}
 }
 
 func (s *ServiceImpl) generateActivitiesFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, activityType, duration string) (*types.GenAIResponse, error) {
-	// For now, use the general LLM generation with modified prompt
-	// This would be enhanced with activity-specific prompts
-	return s.generatePOIsFromLLM(ctx, userID, lat, lon, distance)
+	resultCh := make(chan types.GenAIResponse, 1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go s.getGeneralActivitiesByDistance(&wg, ctx, userID, lat, lon, distance, resultCh, &genai.GenerateContentConfig{
+		Temperature:     genai.Ptr[float32](0.7),
+		MaxOutputTokens: 16384,
+	})
+	wg.Wait()
+	close(resultCh)
+
+	result := <-resultCh
+	if result.Err != nil {
+		return nil, result.Err
+	}
+	return &result, nil
+}
+
+func (s *ServiceImpl) getGeneralActivitiesByDistance(wg *sync.WaitGroup,
+	ctx context.Context,
+	userID uuid.UUID,
+	lat, lon, distance float64,
+	resultCh chan<- types.GenAIResponse,
+	config *genai.GenerateContentConfig) {
+	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GenerateGeneralPOIWorker", trace.WithAttributes(
+		attribute.Float64("latitude", lat),
+		attribute.Float64("longitude", lon),
+		attribute.Float64("distance.km", distance),
+		attribute.String("user.id", userID.String())))
+
+	defer span.End()
+	defer wg.Done()
+
+	userLocation := types.UserLocation{
+		UserLat:        lat,
+		UserLon:        lon,
+		SearchRadiusKm: distance,
+	}
+	prompt := getActivitiesNearbyPrompt(userLocation)
+	span.SetAttributes(attribute.Int("prompt.length", len(prompt)))
+
+	if s.aiClient == nil {
+		err := fmt.Errorf("AI client is not available - check API key configuration")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "AI client unavailable")
+		resultCh <- types.GenAIResponse{Err: err}
+		return
+	}
+
+	startTime := time.Now()
+	response, err := s.aiClient.GenerateResponse(ctx, prompt, config)
+	latencyMs := int(time.Since(startTime).Milliseconds())
+	span.SetAttributes(attribute.Int("response.latency_ms", latencyMs))
+
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to generate general POIs")
+		resultCh <- types.GenAIResponse{Err: fmt.Errorf("failed to generate general POIs: %w", err)}
+		return
+	}
+
+	var txt string
+	for _, candidate := range response.Candidates {
+		if candidate.Content != nil && len(candidate.Content.Parts) > 0 {
+			txt = candidate.Content.Parts[0].Text
+			break
+		}
+	}
+	if txt == "" {
+		err := fmt.Errorf("no valid general POI content from AI")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Empty response from AI")
+		resultCh <- types.GenAIResponse{Err: err}
+		return
+	}
+	span.SetAttributes(attribute.Int("response.length", len(txt)))
+
+	cleanTxt := cleanJSONResponse(txt)
+	var poiData struct {
+		PointsOfInterest []types.POIDetailedInfo `json:"points_of_interest"`
+	}
+	if err := json.Unmarshal([]byte(cleanTxt), &poiData); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to parse general POI JSON")
+		resultCh <- types.GenAIResponse{Err: fmt.Errorf("failed to parse general POI JSON: %w", err)}
+		return
+	}
+
+	fmt.Println(cleanTxt)
+
+	span.SetAttributes(attribute.Int("pois.count", len(poiData.PointsOfInterest)))
+	span.SetStatus(codes.Ok, "General POIs generated successfully")
+	resultCh <- types.GenAIResponse{
+		GeneralPOI: poiData.PointsOfInterest,
+		ModelName:  s.aiClient.ModelName,
+		Prompt:     prompt,
+		Response:   cleanTxt,
+	}
 }
 
 func (s *ServiceImpl) generateHotelsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, starRating, amenities string) (*types.GenAIResponse, error) {
-	// For now, use the general LLM generation with modified prompt
-	// This would be enhanced with hotel-specific prompts
-	return s.generatePOIsFromLLM(ctx, userID, lat, lon, distance)
+	resultCh := make(chan types.GenAIResponse, 1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go s.getGeneralHotelsByDistance(&wg, ctx, userID, lat, lon, distance, resultCh, &genai.GenerateContentConfig{
+		Temperature:     genai.Ptr[float32](0.7),
+		MaxOutputTokens: 16384,
+	})
+	wg.Wait()
+	close(resultCh)
+
+	result := <-resultCh
+	if result.Err != nil {
+		return nil, result.Err
+	}
+	return &result, nil
+}
+
+func (s *ServiceImpl) getGeneralHotelsByDistance(wg *sync.WaitGroup,
+	ctx context.Context,
+	userID uuid.UUID,
+	lat, lon, distance float64,
+	resultCh chan<- types.GenAIResponse,
+	config *genai.GenerateContentConfig) {
+	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GenerateGeneralPOIWorker", trace.WithAttributes(
+		attribute.Float64("latitude", lat),
+		attribute.Float64("longitude", lon),
+		attribute.Float64("distance.km", distance),
+		attribute.String("user.id", userID.String())))
+
+	defer span.End()
+	defer wg.Done()
+
+	userLocation := types.UserLocation{
+		UserLat:        lat,
+		UserLon:        lon,
+		SearchRadiusKm: distance,
+	}
+	prompt := getHotelsNeabyPrompt(userLocation)
+	span.SetAttributes(attribute.Int("prompt.length", len(prompt)))
+
+	if s.aiClient == nil {
+		err := fmt.Errorf("AI client is not available - check API key configuration")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "AI client unavailable")
+		resultCh <- types.GenAIResponse{Err: err}
+		return
+	}
+
+	startTime := time.Now()
+	response, err := s.aiClient.GenerateResponse(ctx, prompt, config)
+	latencyMs := int(time.Since(startTime).Milliseconds())
+	span.SetAttributes(attribute.Int("response.latency_ms", latencyMs))
+
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to generate general POIs")
+		resultCh <- types.GenAIResponse{Err: fmt.Errorf("failed to generate general POIs: %w", err)}
+		return
+	}
+
+	var txt string
+	for _, candidate := range response.Candidates {
+		if candidate.Content != nil && len(candidate.Content.Parts) > 0 {
+			txt = candidate.Content.Parts[0].Text
+			break
+		}
+	}
+	if txt == "" {
+		err := fmt.Errorf("no valid general POI content from AI")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Empty response from AI")
+		resultCh <- types.GenAIResponse{Err: err}
+		return
+	}
+	span.SetAttributes(attribute.Int("response.length", len(txt)))
+
+	cleanTxt := cleanJSONResponse(txt)
+	var poiData struct {
+		PointsOfInterest []types.POIDetailedInfo `json:"points_of_interest"`
+	}
+	if err := json.Unmarshal([]byte(cleanTxt), &poiData); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to parse general POI JSON")
+		resultCh <- types.GenAIResponse{Err: fmt.Errorf("failed to parse general POI JSON: %w", err)}
+		return
+	}
+
+	fmt.Println(cleanTxt)
+
+	span.SetAttributes(attribute.Int("pois.count", len(poiData.PointsOfInterest)))
+	span.SetStatus(codes.Ok, "General POIs generated successfully")
+	resultCh <- types.GenAIResponse{
+		GeneralPOI: poiData.PointsOfInterest,
+		ModelName:  s.aiClient.ModelName,
+		Prompt:     prompt,
+		Response:   cleanTxt,
+	}
 }
 
 func (s *ServiceImpl) generateAttractionsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, attractionType, isOutdoor string) (*types.GenAIResponse, error) {
-	// For now, use the general LLM generation with modified prompt
-	// This would be enhanced with attraction-specific prompts
-	return s.generatePOIsFromLLM(ctx, userID, lat, lon, distance)
+	resultCh := make(chan types.GenAIResponse, 1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go s.getGeneralAttractionsByDistance(&wg, ctx, userID, lat, lon, distance, resultCh, &genai.GenerateContentConfig{
+		Temperature:     genai.Ptr[float32](0.7),
+		MaxOutputTokens: 16384,
+	})
+	wg.Wait()
+	close(resultCh)
+
+	result := <-resultCh
+	if result.Err != nil {
+		return nil, result.Err
+	}
+	return &result, nil
+}
+
+func (s *ServiceImpl) getGeneralAttractionsByDistance(wg *sync.WaitGroup,
+	ctx context.Context,
+	userID uuid.UUID,
+	lat, lon, distance float64,
+	resultCh chan<- types.GenAIResponse,
+	config *genai.GenerateContentConfig) {
+	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GenerateGeneralPOIWorker", trace.WithAttributes(
+		attribute.Float64("latitude", lat),
+		attribute.Float64("longitude", lon),
+		attribute.Float64("distance.km", distance),
+		attribute.String("user.id", userID.String())))
+
+	defer span.End()
+	defer wg.Done()
+
+	userLocation := types.UserLocation{
+		UserLat:        lat,
+		UserLon:        lon,
+		SearchRadiusKm: distance,
+	}
+	prompt := getAttractionsNeabyPrompt(userLocation)
+	span.SetAttributes(attribute.Int("prompt.length", len(prompt)))
+
+	if s.aiClient == nil {
+		err := fmt.Errorf("AI client is not available - check API key configuration")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "AI client unavailable")
+		resultCh <- types.GenAIResponse{Err: err}
+		return
+	}
+
+	startTime := time.Now()
+	response, err := s.aiClient.GenerateResponse(ctx, prompt, config)
+	latencyMs := int(time.Since(startTime).Milliseconds())
+	span.SetAttributes(attribute.Int("response.latency_ms", latencyMs))
+
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to generate general POIs")
+		resultCh <- types.GenAIResponse{Err: fmt.Errorf("failed to generate general POIs: %w", err)}
+		return
+	}
+
+	var txt string
+	for _, candidate := range response.Candidates {
+		if candidate.Content != nil && len(candidate.Content.Parts) > 0 {
+			txt = candidate.Content.Parts[0].Text
+			break
+		}
+	}
+	if txt == "" {
+		err := fmt.Errorf("no valid general POI content from AI")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Empty response from AI")
+		resultCh <- types.GenAIResponse{Err: err}
+		return
+	}
+	span.SetAttributes(attribute.Int("response.length", len(txt)))
+
+	cleanTxt := cleanJSONResponse(txt)
+	var poiData struct {
+		PointsOfInterest []types.POIDetailedInfo `json:"points_of_interest"`
+	}
+	if err := json.Unmarshal([]byte(cleanTxt), &poiData); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to parse general POI JSON")
+		resultCh <- types.GenAIResponse{Err: fmt.Errorf("failed to parse general POI JSON: %w", err)}
+		return
+	}
+
+	fmt.Println(cleanTxt)
+
+	span.SetAttributes(attribute.Int("pois.count", len(poiData.PointsOfInterest)))
+	span.SetStatus(codes.Ok, "General POIs generated successfully")
+	resultCh <- types.GenAIResponse{
+		GeneralPOI: poiData.PointsOfInterest,
+		ModelName:  s.aiClient.ModelName,
+		Prompt:     prompt,
+		Response:   cleanTxt,
+	}
 }

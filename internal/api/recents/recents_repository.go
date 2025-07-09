@@ -302,24 +302,6 @@ func (r *RepositoryImpl) getCityInteractions(ctx context.Context, userID uuid.UU
 	return interactions, nil
 }
 
-// getCityPOICount counts POIs for a city from user interactions
-func (r *RepositoryImpl) getCityPOICount(ctx context.Context, userID uuid.UUID, cityName string) (int, error) {
-	query := `
-		SELECT COUNT(DISTINCT pd.id)
-		FROM poi_details pd
-		JOIN llm_interactions li ON pd.llm_interaction_id = li.id
-		WHERE li.user_id = $1 AND li.city_name = $2
-	`
-
-	var count int
-	err := r.pgpool.QueryRow(ctx, query, userID, cityName).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("failed to count POIs: %w", err)
-	}
-
-	return count, nil
-}
-
 // GetCityPOIsByInteraction gets all POIs for a city from user's interactions
 func (r *RepositoryImpl) GetCityPOIsByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.POIDetailedInfo, error) {
 	ctx, span := otel.Tracer("RecentsRepository").Start(ctx, "GetCityPOIsByInteraction", trace.WithAttributes(

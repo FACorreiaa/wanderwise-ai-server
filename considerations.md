@@ -21,3 +21,5 @@ just querying the location with postgis ?
 On the client, Create a nav bar item for Bookmarks that must have the itineraries saved on user_saved_itineraries and follow the same structure as the favourites with the same type of layout but with data each bookmarked item (itinerary, resturant, hotel etc)
 I already have the method to add to bookmark, AddChatToBookmark(ctx context.Context, itinerary *types.UserSavedItinerary) (uuid.UUID, error), create repository and handler to list all them and 
 display them under the new bookmark with the paginator working too. 
+
+Analyse the bookmark file. The page doesnt show and there are clearly import problem. Finish and complete that component properly.

@@ -1,4 +1,4 @@
-package llmChat
+package llmchat
 
 import (
 	"context"
@@ -7,20 +7,13 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/google/uuid"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 func generatePOICacheKey(city string, lat, lon, distance float64, userID uuid.UUID) string {
 	return fmt.Sprintf("poi:%s:%f:%f:%f:%s", city, lat, lon, distance, userID.String())
-}
-
-func generateHotelCacheKey(city string, lat, lon float64, userID uuid.UUID) string {
-	return fmt.Sprintf("hotel:%s:%.6f:%.6f:%s", city, lat, lon, userID.String())
-}
-
-func generateRestaurantCacheKey(city string, lat, lon float64, userID uuid.UUID) string {
-	return fmt.Sprintf("restaurant:%s:%.6f:%.6f:%s", city, lat, lon, userID.String())
 }
 
 func cleanJSONResponse(response string) string {
@@ -39,8 +32,6 @@ func cleanJSONResponse(response string) string {
 
 	response = strings.TrimSpace(response)
 
-	// Extract JSON from response that might contain explanatory text
-	// Look for the first { and find the matching closing brace
 	firstBrace := strings.Index(response, "{")
 	if firstBrace == -1 {
 		return response // No JSON found, return as is

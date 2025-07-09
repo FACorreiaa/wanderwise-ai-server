@@ -1,9 +1,10 @@
-package llmChat
+package llmchat
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -866,16 +867,25 @@ func (r *RepositoryImpl) GetSession(ctx context.Context, sessionID uuid.UUID) (*
 	err := row.Scan(&session.ID, &session.UserID, &session.ProfileID, &session.CityName,
 		&itineraryJSON, &historyJSON, &contextJSON, &session.CreatedAt, &session.UpdatedAt, &session.ExpiresAt, &session.Status)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("session %s not found", sessionID)
 		}
 		r.logger.ErrorContext(ctx, "Failed to get session", slog.Any("error", err))
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
 
-	json.Unmarshal(itineraryJSON, &session.CurrentItinerary)
-	json.Unmarshal(historyJSON, &session.ConversationHistory)
-	json.Unmarshal(contextJSON, &session.SessionContext)
+	err = json.Unmarshal(itineraryJSON, &session.CurrentItinerary)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(historyJSON, &session.ConversationHistory)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(contextJSON, &session.SessionContext)
+	if err != nil {
+		return nil, err
+	}
 	return &session, nil
 }
 

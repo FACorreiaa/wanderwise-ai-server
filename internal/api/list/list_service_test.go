@@ -1,4 +1,4 @@
-package itineraryList
+package itinerarylist
 
 import (
 	"context"
@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 // MockListRepository is a mock implementation of Repository
@@ -121,7 +122,7 @@ func TestServiceImpl_CreateTopLevelList(t *testing.T) {
 		mockRepo.On("CreateList", mock.Anything, mock.AnythingOfType("types.List")).Return(nil).Once()
 
 		result, err := service.CreateTopLevelList(ctx, userID, "Test List", "Test Description", &cityID, false, true)
-		
+
 		require.NoError(t, err)
 		assert.Equal(t, userID, result.UserID)
 		assert.Equal(t, "Test List", result.Name)
@@ -136,7 +137,7 @@ func TestServiceImpl_CreateTopLevelList(t *testing.T) {
 		mockRepo.On("CreateList", mock.Anything, mock.AnythingOfType("types.List")).Return(nil).Once()
 
 		result, err := service.CreateTopLevelList(ctx, userID, "Test List", "Test Description", nil, true, false)
-		
+
 		require.NoError(t, err)
 		assert.Equal(t, userID, result.UserID)
 		assert.True(t, result.IsItinerary)
@@ -149,7 +150,7 @@ func TestServiceImpl_CreateTopLevelList(t *testing.T) {
 		mockRepo.On("CreateList", mock.Anything, mock.AnythingOfType("types.List")).Return(repoErr).Once()
 
 		_, err := service.CreateTopLevelList(ctx, userID, "Test List", "Test Description", nil, false, false)
-		
+
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to create list")
 		mockRepo.AssertExpectations(t)
@@ -177,7 +178,7 @@ func TestServiceImpl_CreateItineraryForList(t *testing.T) {
 		mockRepo.On("CreateList", mock.Anything, mock.AnythingOfType("types.List")).Return(nil).Once()
 
 		result, err := service.CreateItineraryForList(ctx, userID, parentListID, "Test Itinerary", "Test Description", false)
-		
+
 		require.NoError(t, err)
 		assert.Equal(t, userID, result.UserID)
 		assert.Equal(t, "Test Itinerary", result.Name)
@@ -192,7 +193,7 @@ func TestServiceImpl_CreateItineraryForList(t *testing.T) {
 		mockRepo.On("GetList", mock.Anything, parentListID).Return(nil, repoErr).Once()
 
 		_, err := service.CreateItineraryForList(ctx, userID, parentListID, "Test Itinerary", "Test Description", false)
-		
+
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "parent list not found")
 		mockRepo.AssertExpectations(t)
@@ -207,11 +208,11 @@ func TestServiceImpl_CreateItineraryForList(t *testing.T) {
 			IsItinerary: false,
 			IsPublic:    true,
 		}
-		
+
 		mockRepo.On("GetList", mock.Anything, parentListID).Return(otherUserList, nil).Once()
 
 		_, err := service.CreateItineraryForList(ctx, userID, parentListID, "Test Itinerary", "Test Description", false)
-		
+
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "user does not own parent list")
 		mockRepo.AssertExpectations(t)
@@ -250,12 +251,12 @@ func TestServiceImpl_GetListDetails(t *testing.T) {
 	}
 
 	t.Run("success - owner access", func(t *testing.T) {
-				
+
 		mockRepo.On("GetList", mock.Anything, listID).Return(list, nil).Once()
 		mockRepo.On("GetListItems", mock.Anything, listID).Return(items, nil).Once()
 
 		result, err := service.GetListDetails(ctx, listID, userID)
-		
+
 		require.NoError(t, err)
 		assert.Equal(t, list, result.List)
 		assert.Equal(t, items, result.Items)
@@ -271,12 +272,12 @@ func TestServiceImpl_GetListDetails(t *testing.T) {
 			IsItinerary: true,
 			IsPublic:    true, // Public list
 		}
-		
+
 		mockRepo.On("GetList", mock.Anything, listID).Return(publicList, nil).Once()
 		mockRepo.On("GetListItems", ctx, listID).Return(items, nil).Once()
 
 		result, err := service.GetListDetails(ctx, listID, userID)
-		
+
 		require.NoError(t, err)
 		assert.Equal(t, publicList, result.List)
 		mockRepo.AssertExpectations(t)
@@ -290,11 +291,11 @@ func TestServiceImpl_GetListDetails(t *testing.T) {
 			IsItinerary: true,
 			IsPublic:    false, // Private list
 		}
-		
+
 		mockRepo.On("GetList", mock.Anything, listID).Return(privateList, nil).Once()
 
 		_, err := service.GetListDetails(ctx, listID, userID)
-		
+
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "access denied to list")
 		mockRepo.AssertExpectations(t)
@@ -305,7 +306,7 @@ func TestServiceImpl_GetListDetails(t *testing.T) {
 		mockRepo.On("GetList", mock.Anything, listID).Return(nil, repoErr).Once()
 
 		_, err := service.GetListDetails(ctx, listID, userID)
-		
+
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "list not found")
 		mockRepo.AssertExpectations(t)
@@ -330,7 +331,7 @@ func TestServiceImpl_UpdateListDetails(t *testing.T) {
 		newName := "New Name"
 		newDescription := "New Description"
 		isPublic := true
-		
+
 		params := types.UpdateListRequest{
 			Name:        &newName,
 			Description: &newDescription,
@@ -339,13 +340,13 @@ func TestServiceImpl_UpdateListDetails(t *testing.T) {
 
 		mockRepo.On("GetList", mock.Anything, listID).Return(list, nil).Once()
 		mockRepo.On("UpdateList", mock.Anything, mock.MatchedBy(func(updatedList *types.List) bool {
-			return updatedList.Name == newName && 
-				   updatedList.Description == newDescription && 
-				   updatedList.IsPublic == isPublic
+			return updatedList.Name == newName &&
+				updatedList.Description == newDescription &&
+				updatedList.IsPublic == isPublic
 		})).Return(nil).Once()
 
 		result, err := service.UpdateListDetails(ctx, listID, userID, params)
-		
+
 		require.NoError(t, err)
 		assert.Equal(t, newName, result.Name)
 		assert.Equal(t, newDescription, result.Description)
@@ -359,11 +360,11 @@ func TestServiceImpl_UpdateListDetails(t *testing.T) {
 			UserID: uuid.New(), // Different user
 			Name:   "Test List",
 		}
-		
+
 		mockRepo.On("GetList", mock.Anything, listID).Return(otherUserList, nil).Once()
 
 		_, err := service.UpdateListDetails(ctx, listID, userID, types.UpdateListRequest{})
-		
+
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "user does not own list")
 		mockRepo.AssertExpectations(t)
@@ -387,7 +388,7 @@ func TestServiceImpl_AddPOIListItem(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		morningTime := time.Date(2024, 1, 1, 9, 0, 0, 0, time.UTC)
 		params := types.AddListItemRequest{
-			Position:         1,
+			Position:        1,
 			Notes:           "Test POI",
 			DayNumber:       &[]int{1}[0],
 			TimeSlot:        &morningTime,
@@ -400,7 +401,7 @@ func TestServiceImpl_AddPOIListItem(t *testing.T) {
 		})).Return(nil).Once()
 
 		result, err := service.AddPOIListItem(ctx, userID, listID, poiID, params)
-		
+
 		require.NoError(t, err)
 		assert.Equal(t, listID, result.ListID)
 		assert.Equal(t, poiID, result.ItemID)
@@ -415,11 +416,11 @@ func TestServiceImpl_AddPOIListItem(t *testing.T) {
 			Name:        "Regular List",
 			IsItinerary: false,
 		}
-		
+
 		mockRepo.On("GetList", mock.Anything, listID).Return(nonItineraryList, nil).Once()
 
 		_, err := service.AddPOIListItem(ctx, userID, listID, poiID, types.AddListItemRequest{})
-		
+
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "list is not an itinerary")
 		mockRepo.AssertExpectations(t)
@@ -450,7 +451,7 @@ func TestServiceImpl_GetUserLists(t *testing.T) {
 		mockRepo.On("GetUserLists", mock.Anything, userID, false).Return(expectedLists, nil).Once()
 
 		result, err := service.GetUserLists(ctx, userID, false)
-		
+
 		require.NoError(t, err)
 		assert.Equal(t, expectedLists, result)
 		assert.Len(t, result, 2)
@@ -462,7 +463,7 @@ func TestServiceImpl_GetUserLists(t *testing.T) {
 		mockRepo.On("GetUserLists", mock.Anything, userID, true).Return(nil, repoErr).Once()
 
 		_, err := service.GetUserLists(ctx, userID, true)
-		
+
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to get user lists")
 		mockRepo.AssertExpectations(t)
@@ -486,7 +487,7 @@ func TestServiceImpl_DeleteUserList(t *testing.T) {
 		mockRepo.On("DeleteList", mock.Anything, listID).Return(nil).Once()
 
 		err := service.DeleteUserList(ctx, listID, userID)
-		
+
 		require.NoError(t, err)
 		mockRepo.AssertExpectations(t)
 	})
@@ -497,11 +498,11 @@ func TestServiceImpl_DeleteUserList(t *testing.T) {
 			UserID: uuid.New(), // Different user
 			Name:   "Test List",
 		}
-		
+
 		mockRepo.On("GetList", ctx, listID).Return(otherUserList, nil).Once()
 
 		err := service.DeleteUserList(ctx, listID, userID)
-		
+
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "user does not own list")
 		mockRepo.AssertExpectations(t)
@@ -512,7 +513,7 @@ func TestServiceImpl_DeleteUserList(t *testing.T) {
 		mockRepo.On("GetList", ctx, listID).Return(nil, repoErr).Once()
 
 		err := service.DeleteUserList(ctx, listID, userID)
-		
+
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "list not found")
 		mockRepo.AssertExpectations(t)

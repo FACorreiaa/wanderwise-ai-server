@@ -1,4 +1,4 @@
-package llmChat
+package llmchat
 
 import (
 	"context"

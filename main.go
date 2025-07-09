@@ -16,9 +16,10 @@ import (
 	"github.com/markbates/goth"
 	"github.com/markbates/goth/providers/google"
 
-	_ "github.com/FACorreiaa/go-poi-au-suggestions/docs" // Import for swagger docs
 	"github.com/go-chi/httprate"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
+
+	_ "github.com/FACorreiaa/go-poi-au-suggestions/docs" // Import for swagger docs
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/app/observability/metrics"
 	"github.com/FACorreiaa/go-poi-au-suggestions/app/observability/tracer"
@@ -75,21 +76,21 @@ func setupPprof(logger *slog.Logger) {
 		if pprofPort == "" {
 			pprofPort = "6060"
 		}
-		
+
 		logger.Info("🔬 Starting pprof server", slog.String("port", pprofPort))
-		logger.Info("📊 pprof endpoints available:", 
+		logger.Info("📊 pprof endpoints available:",
 			slog.String("index", fmt.Sprintf("http://localhost:%s/debug/pprof/", pprofPort)),
 			slog.String("heap", fmt.Sprintf("http://localhost:%s/debug/pprof/heap", pprofPort)),
 			slog.String("goroutine", fmt.Sprintf("http://localhost:%s/debug/pprof/goroutine", pprofPort)),
 			slog.String("profile", fmt.Sprintf("http://localhost:%s/debug/pprof/profile", pprofPort)),
 			slog.String("trace", fmt.Sprintf("http://localhost:%s/debug/pprof/trace", pprofPort)))
-		
+
 		go func() {
 			pprofServer := &http.Server{
 				Addr:    fmt.Sprintf(":%s", pprofPort),
 				Handler: http.DefaultServeMux, // pprof registers itself on DefaultServeMux
 			}
-			
+
 			if err := pprofServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error("pprof server failed", slog.Any("error", err))
 			}
@@ -200,7 +201,7 @@ func main() {
 	r.Use(chiMiddleware.Compress(5, "application/json"))
 	r.Use(httprate.LimitByIP(100, time.Minute))
 
-	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+	r.Get("/ping", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, err = w.Write([]byte("pong"))
 		if err != nil {

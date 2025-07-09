@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -17,8 +18,9 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/google/uuid"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -2524,8 +2526,8 @@ func (r *RepositoryImpl) SaveLlmPoisToDatabase(ctx context.Context, userID uuid.
 	return nil
 }
 
-// calculateDistancePostGIS computes the distance between two points using PostGIS (in meters)
-func (l *RepositoryImpl) CalculateDistancePostGIS(ctx context.Context, userLat, userLon, poiLat, poiLon float64) (float64, error) {
+// CalculateDistancePostGIS calculateDistancePostGIS computes the distance between two points using PostGIS (in meters)
+func (r *RepositoryImpl) CalculateDistancePostGIS(ctx context.Context, userLat, userLon, poiLat, poiLon float64) (float64, error) {
 	query := `
         SELECT ST_Distance(
             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
@@ -2533,7 +2535,7 @@ func (l *RepositoryImpl) CalculateDistancePostGIS(ctx context.Context, userLat, 
         ) AS distance;
     `
 	var distance float64
-	err := l.pgpool.QueryRow(ctx, query, userLon, userLat, poiLon, poiLat).Scan(&distance)
+	err := r.pgpool.QueryRow(ctx, query, userLon, userLat, poiLon, poiLat).Scan(&distance)
 	if err != nil {
 		return 0, fmt.Errorf("failed to calculate distance with PostGIS: %w", err)
 	}
@@ -2541,7 +2543,7 @@ func (l *RepositoryImpl) CalculateDistancePostGIS(ctx context.Context, userLat, 
 }
 
 // FindLLMPOIByNameAndCity finds an existing LLM POI by name and city
-func (l *RepositoryImpl) FindLLMPOIByNameAndCity(ctx context.Context, name, city string) (uuid.UUID, error) {
+func (r *RepositoryImpl) FindLLMPOIByNameAndCity(ctx context.Context, name, city string) (uuid.UUID, error) {
 	ctx, span := otel.Tracer("POIRepository").Start(ctx, "FindLLMPOIByNameAndCity")
 	defer span.End()
 
@@ -2553,9 +2555,9 @@ func (l *RepositoryImpl) FindLLMPOIByNameAndCity(ctx context.Context, name, city
 	`
 
 	var id uuid.UUID
-	err := l.pgpool.QueryRow(ctx, query, name, city).Scan(&id)
+	err := r.pgpool.QueryRow(ctx, query, name, city).Scan(&id)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return uuid.Nil, fmt.Errorf("LLM POI not found")
 		}
 		return uuid.Nil, fmt.Errorf("failed to find LLM POI: %w", err)
@@ -2566,7 +2568,7 @@ func (l *RepositoryImpl) FindLLMPOIByNameAndCity(ctx context.Context, name, city
 }
 
 // FindLLMPOIByName finds an existing LLM POI by name across all cities
-func (l *RepositoryImpl) FindLLMPOIByName(ctx context.Context, name string) (uuid.UUID, error) {
+func (r *RepositoryImpl) FindLLMPOIByName(ctx context.Context, name string) (uuid.UUID, error) {
 	ctx, span := otel.Tracer("POIRepository").Start(ctx, "FindLLMPOIByName")
 	defer span.End()
 
@@ -2578,9 +2580,9 @@ func (l *RepositoryImpl) FindLLMPOIByName(ctx context.Context, name string) (uui
 	`
 
 	var id uuid.UUID
-	err := l.pgpool.QueryRow(ctx, query, name).Scan(&id)
+	err := r.pgpool.QueryRow(ctx, query, name).Scan(&id)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return uuid.Nil, fmt.Errorf("LLM POI not found")
 		}
 		return uuid.Nil, fmt.Errorf("failed to find LLM POI: %w", err)
@@ -2591,7 +2593,7 @@ func (l *RepositoryImpl) FindLLMPOIByName(ctx context.Context, name string) (uui
 }
 
 // CreateLLMPOI creates a new LLM POI in the database
-func (l *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error) {
+func (r *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error) {
 	ctx, span := otel.Tracer("POIRepository").Start(ctx, "CreateLLMPOI")
 	defer span.End()
 
@@ -2620,7 +2622,7 @@ func (l *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDet
 	}
 
 	now := time.Now()
-	_, err := l.pgpool.Exec(ctx, query,
+	_, err := r.pgpool.Exec(ctx, query,
 		newID,
 		llmInteractionID,
 		poiData.City,

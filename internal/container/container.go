@@ -104,7 +104,11 @@ func NewContainer(cfg *config.Config, logger *slog.Logger) (*Container, error) {
 		logger)
 	llmInteractionHandlerImpl := llmChat.NewLLMHandlerImpl(llmInteractionService, logger)
 
-	embeddingService, _ := generativeAI.NewEmbeddingService(context.Background(), logger)
+	embeddingService, err := generativeAI.NewEmbeddingService(context.Background(), logger)
+	if err != nil {
+		logger.Error("Failed to initialize embedding service", slog.Any("error", err))
+		return nil, err
+	}
 	poiRepository := poi.NewRepository(pool, logger)
 	poiService := poi.NewServiceImpl(poiRepository, embeddingService, cityRepo, logger)
 	poiHandler := poi.NewHandlerImpl(poiService, logger)
