@@ -1,6 +1,7 @@
 package poi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -45,6 +46,12 @@ type Handler interface {
 
 	// GetNearbyRecommendations(w http.ResponseWriter, r *http.Request)
 	GetNearbyRecommendations(w http.ResponseWriter, r *http.Request)
+
+	// Domain-specific discover endpoints
+	GetNearbyRestaurants(w http.ResponseWriter, r *http.Request)
+	GetNearbyActivities(w http.ResponseWriter, r *http.Request)
+	GetNearbyHotels(w http.ResponseWriter, r *http.Request)
+	GetNearbyAttractions(w http.ResponseWriter, r *http.Request)
 }
 
 type HandlerImpl struct {
@@ -141,11 +148,11 @@ func (h *HandlerImpl) AddPoiToFavourites(w http.ResponseWriter, r *http.Request)
 	}
 
 	l.InfoContext(ctx, "Itinerary saved successfully")
-	
+
 	// Return response with the actual POI ID that was stored
 	response := map[string]interface{}{
-		"id": savedItinerary,
-		"poi_id": actualPoiID.String(),
+		"id":      savedItinerary,
+		"poi_id":  actualPoiID.String(),
 		"message": "POI added to favourites successfully",
 	}
 	api.WriteJSONResponse(w, r, http.StatusCreated, response)
@@ -211,7 +218,7 @@ func (h *HandlerImpl) RemovePoiFromFavourites(w http.ResponseWriter, r *http.Req
 		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid POI ID format")
 		return
 	}
-	
+
 	// For LLM POIs, we might need to resolve the ID since the frontend might send the original POI ID
 	// but we need the actual database ID that was created/found during the add operation
 	if req.IsLlmPoi && req.POIData != nil {
@@ -231,7 +238,7 @@ func (h *HandlerImpl) RemovePoiFromFavourites(w http.ResponseWriter, r *http.Req
 	err = h.poiService.RemovePoiFromFavourites(ctx, userID, actualPoiID, req.IsLlmPoi)
 	if err != nil {
 		l.WarnContext(ctx, "Failed to remove POI by ID, trying name-based removal", slog.Any("error", err))
-		
+
 		// If direct ID removal fails and we have POI data, try removing by name
 		if req.IsLlmPoi && req.POIData != nil && req.POIData.Name != "" {
 			l.InfoContext(ctx, "Attempting name-based removal", slog.String("poiName", req.POIData.Name))
@@ -263,14 +270,14 @@ func (h *HandlerImpl) RemovePoiFromFavourites(w http.ResponseWriter, r *http.Req
 // @Failure      500 {object} types.Response "Internal Server Error"
 // @Security     BearerAuth
 // @Router       /poi/favourites [get]
-func (HandlerImpl *HandlerImpl) GetFavouritePOIsByUserID(w http.ResponseWriter, r *http.Request) {
+func (h *HandlerImpl) GetFavouritePOIsByUserID(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("LlmInteractionHandlerImpl").Start(r.Context(), "GetFavouritePOIsByUserID", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
 		semconv.HTTPRouteKey.String("/llm_interaction/favourite_pois"),
 	))
 	defer span.End()
 
-	l := HandlerImpl.logger.With(slog.String("HandlerImpl", "GetFavouritePOIsByUserID"))
+	l := h.logger.With(slog.String("HandlerImpl", "GetFavouritePOIsByUserID"))
 	l.DebugContext(ctx, "Fetching favourite POIs by user ID")
 
 	userIDStr, ok := auth.GetUserIDFromContext(ctx)
@@ -289,15 +296,63 @@ func (HandlerImpl *HandlerImpl) GetFavouritePOIsByUserID(w http.ResponseWriter, 
 	span.SetAttributes(semconv.EnduserIDKey.String(userID.String()))
 	l = l.With(slog.String("userID", userID.String()))
 
-	favouritePOIs, err := HandlerImpl.poiService.GetFavouritePOIsByUserID(ctx, userID)
+	// Parse pagination parameters
+	pageStr := r.URL.Query().Get("page")
+	limitStr := r.URL.Query().Get("limit")
+
+	// Default values
+	page := 1
+	limit := 10 // Default to 12 items per page
+
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 { // Max 100 items per page
+			limit = l
+		}
+	}
+
+	offset := (page - 1) * limit
+
+	l.DebugContext(ctx, "Pagination parameters",
+		slog.Int("page", page),
+		slog.Int("limit", limit),
+		slog.Int("offset", offset))
+
+	favouritePOIs, total, err := h.poiService.GetFavouritePOIsByUserIDPaginated(ctx, userID, limit, offset)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to fetch favourite POIs by user ID", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to fetch favourite POIs: %s", err.Error()))
 		return
 	}
 
-	l.InfoContext(ctx, "Successfully fetched favourite POIs by user ID")
-	api.WriteJSONResponse(w, r, http.StatusOK, favouritePOIs)
+	// Calculate pagination metadata
+	totalPages := (total + limit - 1) / limit // Ceiling division
+	hasNext := page < totalPages
+	hasPrev := page > 1
+
+	response := map[string]interface{}{
+		"data": favouritePOIs,
+		"pagination": map[string]interface{}{
+			"current_page": page,
+			"per_page":     limit,
+			"total":        total,
+			"total_pages":  totalPages,
+			"has_next":     hasNext,
+			"has_prev":     hasPrev,
+		},
+	}
+
+	l.InfoContext(ctx, "Successfully fetched favourite POIs by user ID",
+		slog.Int("total", total),
+		slog.Int("returned", len(favouritePOIs)),
+		slog.Int("page", page),
+		slog.Int("total_pages", totalPages))
+	api.WriteJSONResponse(w, r, http.StatusOK, response)
 }
 
 // GetPOIsByCityID godoc
@@ -359,9 +414,21 @@ func (h *HandlerImpl) GetPOIs(w http.ResponseWriter, r *http.Request) {
 	l := h.logger.With(slog.String("HandlerImpl", "SearchPOIs"))
 	l.DebugContext(ctx, "Search POIs HandlerImpl invoked")
 
-	lat, _ := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
-	lon, _ := strconv.ParseFloat(r.URL.Query().Get("lon"), 64)
-	radius, _ := strconv.ParseFloat(r.URL.Query().Get("radius"), 64)
+	lat, err := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid lat format", slog.Any("error", err))
+		return
+	}
+	lon, err := strconv.ParseFloat(r.URL.Query().Get("lon"), 64)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid lon format", slog.Any("error", err))
+		return
+	}
+	radius, err := strconv.ParseFloat(r.URL.Query().Get("radius"), 64)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid format", slog.Any("error", err))
+		return
+	}
 	category := r.URL.Query().Get("category")
 
 	filter := types.POIFilter{
@@ -493,8 +560,14 @@ func (h *HandlerImpl) GetItineraries(w http.ResponseWriter, r *http.Request) {
 	span.SetAttributes(attribute.String("user.id", userID.String()))
 
 	// Get pagination parameters from query
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	pageSize, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil {
+		page = 1 // Default to page 1 if invalid
+	}
+	pageSize, err := strconv.Atoi(r.URL.Query().Get("page_size"))
+	if err != nil {
+		pageSize = 10 // Default page size if invalid
+	}
 
 	if page <= 0 {
 		page = 1 // Default to page 1
@@ -982,15 +1055,15 @@ func (h *HandlerImpl) GenerateEmbeddingsForPOIs(w http.ResponseWriter, r *http.R
 	})
 }
 
-// TODO GetPOIsByDistance test this
-func (HandlerImpl *HandlerImpl) GetNearbyRecommendations(w http.ResponseWriter, r *http.Request) {
+// GetNearbyRecommendations get nearby recommendations
+func (h *HandlerImpl) GetNearbyRecommendations(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetPOIsByDistance", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
 		semconv.HTTPRouteKey.String("/llm_interaction/pois_by_distance"),
 	))
 	defer span.End()
 
-	l := HandlerImpl.logger.With(slog.String("HandlerImpl", "GetPOIsByDistance"))
+	l := h.logger.With(slog.String("HandlerImpl", "GetPOIsByDistance"))
 	l.DebugContext(ctx, "Fetching POIs by distance")
 
 	// Get query parameters
@@ -1036,9 +1109,12 @@ func (HandlerImpl *HandlerImpl) GetNearbyRecommendations(w http.ResponseWriter, 
 		return
 	}
 
-	var pois []types.POIDetailedInfo
-
-	pois, err = HandlerImpl.poiService.GetGeneralPOIByDistance(ctx, userID, lat, lon, distance)
+	pois, err := h.poiService.GetGeneralPOIByDistance(ctx, userID, lat, lon, distance)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get POIs", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get POIs")
+		return
+	}
 
 	// Prepare response
 	response := struct {
@@ -1056,4 +1132,238 @@ func (HandlerImpl *HandlerImpl) GetNearbyRecommendations(w http.ResponseWriter, 
 
 	l.InfoContext(ctx, "Successfully fetched POIs")
 	span.SetStatus(codes.Ok, "Success")
+}
+
+// GetNearbyRestaurants get nearby restaurants
+func (h *HandlerImpl) GetNearbyRestaurants(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetNearbyRestaurants", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/pois/nearby/restaurants"),
+	))
+	defer span.End()
+
+	l := h.logger.With(slog.String("HandlerImpl", "GetNearbyRestaurants"))
+	l.DebugContext(ctx, "Fetching nearby restaurants")
+
+	// Parse common location parameters
+	lat, lon, distance, userID, err := h.parseLocationParams(ctx, r)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to parse location parameters", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Get additional restaurant-specific parameters
+	cuisineType := r.URL.Query().Get("cuisine_type")
+	priceRange := r.URL.Query().Get("price_range")
+
+	// Get restaurants from service
+	pois, err := h.poiService.GetNearbyRestaurants(ctx, userID, lat, lon, distance, cuisineType, priceRange)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get nearby restaurants", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get nearby restaurants")
+		return
+	}
+
+	// Prepare response
+	response := struct {
+		Restaurants []types.POIDetailedInfo `json:"restaurants"`
+	}{Restaurants: pois}
+
+	// Encode response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		l.ErrorContext(ctx, "Failed to encode response", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to encode response")
+		return
+	}
+
+	l.InfoContext(ctx, "Successfully fetched nearby restaurants")
+	span.SetStatus(codes.Ok, "Success")
+}
+
+// GetNearbyActivities get nearby activities
+func (h *HandlerImpl) GetNearbyActivities(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetNearbyActivities", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/pois/nearby/activities"),
+	))
+	defer span.End()
+
+	l := h.logger.With(slog.String("HandlerImpl", "GetNearbyActivities"))
+	l.DebugContext(ctx, "Fetching nearby activities")
+
+	// Parse common location parameters
+	lat, lon, distance, userID, err := h.parseLocationParams(ctx, r)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to parse location parameters", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Get additional activity-specific parameters
+	activityType := r.URL.Query().Get("activity_type")
+	duration := r.URL.Query().Get("duration")
+
+	// Get activities from service
+	pois, err := h.poiService.GetNearbyActivities(ctx, userID, lat, lon, distance, activityType, duration)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get nearby activities", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get nearby activities")
+		return
+	}
+
+	// Prepare response
+	response := struct {
+		Activities []types.POIDetailedInfo `json:"activities"`
+	}{Activities: pois}
+
+	// Encode response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		l.ErrorContext(ctx, "Failed to encode response", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to encode response")
+		return
+	}
+
+	l.InfoContext(ctx, "Successfully fetched nearby activities")
+	span.SetStatus(codes.Ok, "Success")
+}
+
+// GetNearbyHotels get nearby hotels
+func (h *HandlerImpl) GetNearbyHotels(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetNearbyHotels", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/pois/nearby/hotels"),
+	))
+	defer span.End()
+
+	l := h.logger.With(slog.String("HandlerImpl", "GetNearbyHotels"))
+	l.DebugContext(ctx, "Fetching nearby hotels")
+
+	// Parse common location parameters
+	lat, lon, distance, userID, err := h.parseLocationParams(ctx, r)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to parse location parameters", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Get additional hotel-specific parameters
+	starRating := r.URL.Query().Get("star_rating")
+	amenities := r.URL.Query().Get("amenities")
+
+	// Get hotels from service
+	pois, err := h.poiService.GetNearbyHotels(ctx, userID, lat, lon, distance, starRating, amenities)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get nearby hotels", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get nearby hotels")
+		return
+	}
+
+	// Prepare response
+	response := struct {
+		Hotels []types.POIDetailedInfo `json:"hotels"`
+	}{Hotels: pois}
+
+	// Encode response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		l.ErrorContext(ctx, "Failed to encode response", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to encode response")
+		return
+	}
+
+	l.InfoContext(ctx, "Successfully fetched nearby hotels")
+	span.SetStatus(codes.Ok, "Success")
+}
+
+// GetNearbyAttractions get nearby attractions/points of interest
+func (h *HandlerImpl) GetNearbyAttractions(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetNearbyAttractions", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/pois/nearby/attractions"),
+	))
+	defer span.End()
+
+	l := h.logger.With(slog.String("HandlerImpl", "GetNearbyAttractions"))
+	l.DebugContext(ctx, "Fetching nearby attractions")
+
+	// Parse common location parameters
+	lat, lon, distance, userID, err := h.parseLocationParams(ctx, r)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to parse location parameters", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Get additional attraction-specific parameters
+	attractionType := r.URL.Query().Get("attraction_type")
+	isOutdoor := r.URL.Query().Get("is_outdoor")
+
+	// Get attractions from service
+	pois, err := h.poiService.GetNearbyAttractions(ctx, userID, lat, lon, distance, attractionType, isOutdoor)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get nearby attractions", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get nearby attractions")
+		return
+	}
+
+	// Prepare response
+	response := struct {
+		Attractions []types.POIDetailedInfo `json:"attractions"`
+	}{Attractions: pois}
+
+	// Encode response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		l.ErrorContext(ctx, "Failed to encode response", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to encode response")
+		return
+	}
+
+	l.InfoContext(ctx, "Successfully fetched nearby attractions")
+	span.SetStatus(codes.Ok, "Success")
+}
+
+// Helper function to parse common location parameters
+func (h *HandlerImpl) parseLocationParams(ctx context.Context, r *http.Request) (float64, float64, float64, uuid.UUID, error) {
+	// Get query parameters
+	latStr := r.URL.Query().Get("lat")
+	lonStr := r.URL.Query().Get("lon")
+	distanceStr := r.URL.Query().Get("distance")
+
+	// Parse latitude
+	lat, err := strconv.ParseFloat(latStr, 64)
+	if err != nil {
+		return 0, 0, 0, uuid.Nil, fmt.Errorf("invalid latitude")
+	}
+
+	// Parse longitude
+	lon, err := strconv.ParseFloat(lonStr, 64)
+	if err != nil {
+		return 0, 0, 0, uuid.Nil, fmt.Errorf("invalid longitude")
+	}
+
+	// Parse distance
+	distance, err := strconv.ParseFloat(distanceStr, 64)
+	if err != nil || distance <= 0 {
+		return 0, 0, 0, uuid.Nil, fmt.Errorf("invalid distance")
+	}
+
+	// Get user ID from context
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		return 0, 0, 0, uuid.Nil, fmt.Errorf("authentication required")
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return 0, 0, 0, uuid.Nil, fmt.Errorf("invalid user ID format")
+	}
+
+	return lat, lon, distance, userID, nil
 }

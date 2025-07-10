@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/config"
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/markbates/goth"
@@ -17,6 +15,9 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/config"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 // Ensure implementation satisfies the interface
@@ -95,7 +96,7 @@ func (s *AuthServiceImpl) Login(ctx context.Context, email, password string) (st
 	return accessToken, refreshToken, nil
 }
 
-func (s *AuthServiceImpl) Register(ctx context.Context, username, email, password, role string) error {
+func (s *AuthServiceImpl) Register(ctx context.Context, username, email, password, _ string) error {
 	l := s.logger.With(slog.String("method", "Register"), slog.String("email", email))
 	l.DebugContext(ctx, "Attempting registration")
 
@@ -150,7 +151,10 @@ func (s *AuthServiceImpl) RefreshSession(ctx context.Context, refreshToken strin
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to get user details after refresh token validation", slog.String("userID", userID), slog.Any("error", err))
 		// Invalidate the suspicious token?
-		_ = s.repo.InvalidateRefreshToken(ctx, refreshToken)
+		err = s.repo.InvalidateRefreshToken(ctx, refreshToken)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid or expired refresh token: %w", err)
+		}
 		return "", "", fmt.Errorf("internal error retrieving user during refresh")
 	}
 
@@ -262,7 +266,7 @@ func (s *AuthServiceImpl) GetUserByID(ctx context.Context, userID string) (*type
 }
 
 // --- Internal Helper: generateTokens ---
-func (s *AuthServiceImpl) GenerateTokens(ctx context.Context, user *types.UserAuth, sub *types.Subscription) (accessToken string, refreshToken string, err error) {
+func (s *AuthServiceImpl) GenerateTokens(ctx context.Context, user *types.UserAuth, _ *types.Subscription) (accessToken string, refreshToken string, err error) {
 	l := s.logger.With(slog.String("method", "generateTokens"), slog.String("userID", user.ID))
 
 	// --- Access Token ---
@@ -350,10 +354,10 @@ func (s *AuthServiceImpl) ValidateRefreshToken(ctx context.Context, refreshToken
 // Implement a dummy for now if needed for compilation
 type dummySubsRepo struct{}
 
-func (d *dummySubsRepo) GetCurrentSubscriptionByUserID(ctx context.Context, userID string) (*types.Subscription, error) {
+func (d *dummySubsRepo) GetCurrentSubscriptionByUserID(_ context.Context, _ string) (*types.Subscription, error) {
 	return &types.Subscription{Plan: "free", Status: "active"}, nil // Always return free/active
 }
-func (d *dummySubsRepo) CreateDefaultSubscription(ctx context.Context, userID string) error {
+func (d *dummySubsRepo) CreateDefaultSubscription(_ context.Context, _ string) error {
 	return nil // Do nothing
 }
 func NewDummySubsRepo() types.SubscriptionRepository { return &dummySubsRepo{} }

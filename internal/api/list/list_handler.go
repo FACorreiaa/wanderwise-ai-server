@@ -1,4 +1,4 @@
-package itineraryList
+package itinerarylist
 
 import (
 	"log/slog"

@@ -1,4 +1,4 @@
-package llmChat
+package llmchat
 
 import (
 	"context"
@@ -7,20 +7,13 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 	"github.com/google/uuid"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 func generatePOICacheKey(city string, lat, lon, distance float64, userID uuid.UUID) string {
 	return fmt.Sprintf("poi:%s:%f:%f:%f:%s", city, lat, lon, distance, userID.String())
-}
-
-func generateHotelCacheKey(city string, lat, lon float64, userID uuid.UUID) string {
-	return fmt.Sprintf("hotel:%s:%.6f:%.6f:%s", city, lat, lon, userID.String())
-}
-
-func generateRestaurantCacheKey(city string, lat, lon float64, userID uuid.UUID) string {
-	return fmt.Sprintf("restaurant:%s:%.6f:%.6f:%s", city, lat, lon, userID.String())
 }
 
 func cleanJSONResponse(response string) string {
@@ -33,14 +26,10 @@ func cleanJSONResponse(response string) string {
 		response = strings.TrimPrefix(response, "```")
 	}
 
-	if strings.HasSuffix(response, "```") {
-		response = strings.TrimSuffix(response, "```")
-	}
+	response = strings.TrimSuffix(response, "```")
 
 	response = strings.TrimSpace(response)
 
-	// Extract JSON from response that might contain explanatory text
-	// Look for the first { and find the matching closing brace
 	firstBrace := strings.Index(response, "{")
 	if firstBrace == -1 {
 		return response // No JSON found, return as is
@@ -101,7 +90,15 @@ func extractPOIName(message string) string {
 	// Capitalize each word for proper formatting
 	// cases.Title
 	// use this https://pkg.go.dev/golang.org/x/text/cases later and handle language as well
-	return strings.Title(strings.Join(filtered, " "))
+	// TODO: Replace with golang.org/x/text/cases.Title for proper Unicode support
+	// For now, use a simple manual title case implementation
+	words = strings.Split(strings.Join(filtered, " "), " ")
+	for i, word := range words {
+		if len(word) > 0 {
+			words[i] = strings.ToUpper(word[:1]) + strings.ToLower(word[1:])
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 // helpers
@@ -236,7 +233,7 @@ func (l *ServiceImpl) handleItineraryFromResponse(
 	}
 }
 
-func (l *ServiceImpl) handleHotelsFromResponse(ctx context.Context, content string, cityID, userID, llmInteractionID uuid.UUID) {
+func (l *ServiceImpl) handleHotelsFromResponse(ctx context.Context, content string, cityID, _, llmInteractionID uuid.UUID) {
 	var hotelData struct {
 		Hotels []types.HotelDetailedInfo `json:"hotels"`
 	}
@@ -257,7 +254,7 @@ func (l *ServiceImpl) handleHotelsFromResponse(ctx context.Context, content stri
 		slog.Int("hotel_count", len(hotelData.Hotels)))
 }
 
-func (l *ServiceImpl) handleRestaurantsFromResponse(ctx context.Context, content string, cityID, userID, llmInteractionID uuid.UUID) {
+func (l *ServiceImpl) handleRestaurantsFromResponse(ctx context.Context, content string, cityID, _, llmInteractionID uuid.UUID) {
 	var restaurantData struct {
 		Restaurants []types.RestaurantDetailedInfo `json:"restaurants"`
 	}

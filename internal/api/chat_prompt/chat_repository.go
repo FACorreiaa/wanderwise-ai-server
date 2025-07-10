@@ -1,9 +1,10 @@
-package llmChat
+package llmchat
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -29,6 +30,7 @@ type Repository interface {
 	SaveLlmSuggestedPOIsBatch(ctx context.Context, pois []types.POIDetailedInfo, userID, searchProfileID, llmInteractionID, cityID uuid.UUID) error
 	GetLlmSuggestedPOIsByInteractionSortedByDistance(ctx context.Context, llmInteractionID uuid.UUID, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error)
 	AddChatToBookmark(ctx context.Context, itinerary *types.UserSavedItinerary) (uuid.UUID, error)
+	GetBookmarkedItineraries(ctx context.Context, userID uuid.UUID, page, limit int) (*types.PaginatedUserItinerariesResponse, error)
 	RemoveChatFromBookmark(ctx context.Context, userID, itineraryID uuid.UUID) error
 	GetInteractionByID(ctx context.Context, interactionID uuid.UUID) (*types.LlmInteraction, error)
 	GetLatestInteractionBySessionID(ctx context.Context, sessionID uuid.UUID) (*types.LlmInteraction, error)
@@ -36,7 +38,7 @@ type Repository interface {
 	// Session methods
 	CreateSession(ctx context.Context, session types.ChatSession) error
 	GetSession(ctx context.Context, sessionID uuid.UUID) (*types.ChatSession, error)
-	GetUserChatSessions(ctx context.Context, userID uuid.UUID) ([]types.ChatSession, error)
+	GetUserChatSessions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.ChatSessionsResponse, error)
 	UpdateSession(ctx context.Context, session types.ChatSession) error
 	AddMessageToSession(ctx context.Context, sessionID uuid.UUID, message types.ConversationMessage) error
 
@@ -84,7 +86,7 @@ func (r *RepositoryImpl) SaveInteraction(ctx context.Context, interaction types.
 	}
 	defer func() {
 		if p := recover(); p != nil {
-			_ = tx.Rollback(ctx)
+			err = tx.Rollback(ctx)
 			panic(p)
 		}
 		if err != nil {
@@ -347,7 +349,7 @@ func (r *RepositoryImpl) GetLlmSuggestedPOIsByInteractionSortedByDistance(
 	if cityID != uuid.Nil {
 		query += fmt.Sprintf("AND city_id = $%d ", argCounter)
 		args = append(args, cityID)
-		argCounter++
+		_ = argCounter + 1 // argCounter incremented but not used after this point
 	}
 
 	query += "ORDER BY distance ASC"
@@ -725,6 +727,98 @@ func (r *RepositoryImpl) RemoveChatFromBookmark(ctx context.Context, userID, iti
 	return nil
 }
 
+func (r *RepositoryImpl) GetBookmarkedItineraries(ctx context.Context, userID uuid.UUID, page, limit int) (*types.PaginatedUserItinerariesResponse, error) {
+	ctx, span := otel.Tracer("LlmInteractionRepo").Start(ctx, "GetBookmarkedItineraries", trace.WithAttributes(
+		semconv.DBSystemPostgreSQL,
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.sql.table", "user_saved_itineraries"),
+		attribute.String("user.id", userID.String()),
+		attribute.Int("page", page),
+		attribute.Int("limit", limit),
+	))
+	defer span.End()
+
+	// Calculate offset
+	offset := (page - 1) * limit
+
+	// Get total count
+	var totalCount int
+	countQuery := `SELECT COUNT(*) FROM user_saved_itineraries WHERE user_id = $1`
+	err := r.pgpool.QueryRow(ctx, countQuery, userID).Scan(&totalCount)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to count bookmarked itineraries")
+		return nil, fmt.Errorf("failed to count bookmarked itineraries: %w", err)
+	}
+
+	// Get paginated results
+	query := `
+		SELECT 
+			id, user_id, source_llm_interaction_id, session_id, primary_city_id, 
+			title, description, markdown_content, tags, estimated_duration_days, 
+			estimated_cost_level, is_public, created_at, updated_at
+		FROM user_saved_itineraries 
+		WHERE user_id = $1 
+		ORDER BY created_at DESC 
+		LIMIT $2 OFFSET $3
+	`
+
+	rows, err := r.pgpool.Query(ctx, query, userID, limit, offset)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to query bookmarked itineraries")
+		return nil, fmt.Errorf("failed to query bookmarked itineraries: %w", err)
+	}
+	defer rows.Close()
+
+	var itineraries []types.UserSavedItinerary
+	for rows.Next() {
+		var itinerary types.UserSavedItinerary
+		var tags []string
+
+		err := rows.Scan(
+			&itinerary.ID,
+			&itinerary.UserID,
+			&itinerary.SourceLlmInteractionID,
+			&itinerary.SessionID,
+			&itinerary.PrimaryCityID,
+			&itinerary.Title,
+			&itinerary.Description,
+			&itinerary.MarkdownContent,
+			&tags,
+			&itinerary.EstimatedDurationDays,
+			&itinerary.EstimatedCostLevel,
+			&itinerary.IsPublic,
+			&itinerary.CreatedAt,
+			&itinerary.UpdatedAt,
+		)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "Failed to scan itinerary row")
+			return nil, fmt.Errorf("failed to scan itinerary row: %w", err)
+		}
+
+		itinerary.Tags = tags
+		itineraries = append(itineraries, itinerary)
+	}
+
+	if err := rows.Err(); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Row iteration error")
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	response := &types.PaginatedUserItinerariesResponse{
+		Itineraries:  itineraries,
+		TotalRecords: totalCount,
+		Page:         page,
+		PageSize:     limit,
+	}
+
+	span.SetStatus(codes.Ok, "Bookmarked itineraries retrieved successfully")
+	return response, nil
+}
+
 // sessions
 func (r *RepositoryImpl) CreateSession(ctx context.Context, session types.ChatSession) error {
 	tx, err := r.pgpool.Begin(ctx)
@@ -740,9 +834,21 @@ func (r *RepositoryImpl) CreateSession(ctx context.Context, session types.ChatSe
             created_at, updated_at, expires_at, status
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     `
-	itineraryJSON, _ := json.Marshal(session.CurrentItinerary)
-	historyJSON, _ := json.Marshal(session.ConversationHistory)
-	contextJSON, _ := json.Marshal(session.SessionContext)
+	itineraryJSON, err := json.Marshal(session.CurrentItinerary)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal itinerary", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal itinerary: %w", err)
+	}
+	historyJSON, err := json.Marshal(session.ConversationHistory)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal history", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal history: %w", err)
+	}
+	contextJSON, err := json.Marshal(session.SessionContext)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal context", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal context: %w", err)
+	}
 
 	_, err = tx.Exec(ctx, query, session.ID, session.UserID, session.ProfileID, session.CityName,
 		itineraryJSON, historyJSON, contextJSON, session.CreatedAt, session.UpdatedAt, session.ExpiresAt, session.Status)
@@ -773,33 +879,53 @@ func (r *RepositoryImpl) GetSession(ctx context.Context, sessionID uuid.UUID) (*
 	err := row.Scan(&session.ID, &session.UserID, &session.ProfileID, &session.CityName,
 		&itineraryJSON, &historyJSON, &contextJSON, &session.CreatedAt, &session.UpdatedAt, &session.ExpiresAt, &session.Status)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("session %s not found", sessionID)
 		}
 		r.logger.ErrorContext(ctx, "Failed to get session", slog.Any("error", err))
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
 
-	json.Unmarshal(itineraryJSON, &session.CurrentItinerary)
-	json.Unmarshal(historyJSON, &session.ConversationHistory)
-	json.Unmarshal(contextJSON, &session.SessionContext)
+	err = json.Unmarshal(itineraryJSON, &session.CurrentItinerary)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(historyJSON, &session.ConversationHistory)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(contextJSON, &session.SessionContext)
+	if err != nil {
+		return nil, err
+	}
 	return &session, nil
 }
 
-// GetUserChatSessions retrieves chat history from LLM interactions grouped by session/city, ordered by most recent first
-func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UUID) ([]types.ChatSession, error) {
+// GetUserChatSessions retrieves paginated chat history from LLM interactions grouped by session/city, ordered by most recent first
+func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.ChatSessionsResponse, error) {
 	ctx, span := otel.Tracer("LlmInteractionRepo").Start(ctx, "GetUserChatSessions", trace.WithAttributes(
 		semconv.DBSystemKey.String(semconv.DBSystemPostgreSQL.Value.AsString()),
 		attribute.String("db.operation", "SELECT"),
 		attribute.String("db.sql.table", "llm_interactions"),
 		attribute.String("user.id", userID.String()),
+		attribute.Int("page", page),
+		attribute.Int("limit", limit),
 	))
 	defer span.End()
 
+	r.logger.InfoContext(ctx, "Getting paginated user chat sessions",
+		slog.String("user_id", userID.String()),
+		slog.Int("page", page),
+		slog.Int("limit", limit))
+
+	// Calculate offset
+	offset := (page - 1) * limit
+
+	// Main query with pagination
 	query := `
         WITH grouped_interactions AS (
             SELECT 
-                COALESCE(session_id, city_name || '_' || DATE(created_at)) as session_key,
+                COALESCE(session_id::text, city_name || '_' || DATE(created_at)) as session_key,
                 user_id,
                 city_name,
                 MIN(created_at) as first_interaction,
@@ -847,10 +973,35 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
             interactions
         FROM grouped_interactions
         ORDER BY last_interaction DESC
-        LIMIT 50
+        LIMIT $2 OFFSET $3
     `
 
-	rows, err := r.pgpool.Query(ctx, query, userID)
+	// Count query for total records
+	countQuery := `
+        WITH grouped_interactions AS (
+            SELECT 
+                COALESCE(session_id::text, city_name || '_' || DATE(created_at)) as session_key,
+                user_id,
+                city_name
+            FROM llm_interactions 
+            WHERE user_id = $1 AND prompt IS NOT NULL
+            GROUP BY session_key, user_id, city_name
+        )
+        SELECT COUNT(*) FROM grouped_interactions
+    `
+
+	// Execute count query first
+	var total int
+	err := r.pgpool.QueryRow(ctx, countQuery, userID).Scan(&total)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to get total count")
+		r.logger.ErrorContext(ctx, "Failed to get total chat sessions count", slog.Any("error", err))
+		return nil, fmt.Errorf("failed to get total count: %w", err)
+	}
+
+	// Execute main query
+	rows, err := r.pgpool.Query(ctx, query, userID, limit, offset)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Failed to query LLM interactions")
@@ -998,8 +1149,34 @@ func (r *RepositoryImpl) GetUserChatSessions(ctx context.Context, userID uuid.UU
 		return nil, fmt.Errorf("error iterating through LLM interaction rows: %w", err)
 	}
 
-	span.SetAttributes(attribute.Int("sessions.count", len(sessions)))
-	return sessions, nil
+	// Calculate hasMore
+	hasMore := (page * limit) < total
+
+	response := &types.ChatSessionsResponse{
+		Sessions: sessions,
+		Total:    total,
+		Page:     page,
+		Limit:    limit,
+		HasMore:  hasMore,
+	}
+
+	r.logger.InfoContext(ctx, "Successfully retrieved paginated chat sessions",
+		slog.String("user_id", userID.String()),
+		slog.Int("sessions_count", len(sessions)),
+		slog.Int("total", total),
+		slog.Int("page", page),
+		slog.Int("limit", limit),
+		slog.Bool("has_more", hasMore))
+
+	span.SetAttributes(
+		attribute.Int("sessions.count", len(sessions)),
+		attribute.Int("sessions.total", total),
+		attribute.Int("response.page", page),
+		attribute.Int("response.limit", limit),
+		attribute.Bool("response.has_more", hasMore),
+	)
+	span.SetStatus(codes.Ok, "Chat sessions retrieved successfully")
+	return response, nil
 }
 
 // Helper function to parse time from interface{}
@@ -1253,11 +1430,23 @@ func (r *RepositoryImpl) UpdateSession(ctx context.Context, session types.ChatSe
                                  updated_at = $5, expires_at = $6, status = $7
         WHERE id = $1
     `
-	itineraryJSON, _ := json.Marshal(session.CurrentItinerary)
-	historyJSON, _ := json.Marshal(session.ConversationHistory)
-	contextJSON, _ := json.Marshal(session.SessionContext)
+	itineraryJSON, err := json.Marshal(session.CurrentItinerary)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal itinerary", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal itinerary: %w", err)
+	}
+	historyJSON, err := json.Marshal(session.ConversationHistory)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal history", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal history: %w", err)
+	}
+	contextJSON, err := json.Marshal(session.SessionContext)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal context", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal context: %w", err)
+	}
 
-	_, err := r.pgpool.Exec(ctx, query, session.ID, itineraryJSON, historyJSON, contextJSON,
+	_, err = r.pgpool.Exec(ctx, query, session.ID, itineraryJSON, historyJSON, contextJSON,
 		session.UpdatedAt, session.ExpiresAt, session.Status)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "Failed to update session", slog.Any("error", err))
@@ -1361,7 +1550,7 @@ func (r *RepositoryImpl) SaveSinglePOI(ctx context.Context, poi types.POIDetaile
 	return returnedID, nil
 }
 
-func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, sessionID, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error) {
+func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, _, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error) {
 
 	query := `
         SELECT id, name, latitude, longitude, category, description_poi, 
@@ -1525,7 +1714,7 @@ func parsePOIsFromResponse(responseText string, logger *slog.Logger) ([]types.PO
 	return []types.POIDetailedInfo{}, nil
 }
 
-func (r *RepositoryImpl) GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetailedInfo types.POIDetailedInfo, cityID uuid.UUID, sourceInteractionID uuid.UUID) (uuid.UUID, error) {
+func (r *RepositoryImpl) GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetailedInfo types.POIDetailedInfo, cityID uuid.UUID, _ uuid.UUID) (uuid.UUID, error) {
 	var poiDBID uuid.UUID
 	findPoiQuery := `SELECT id FROM points_of_interest WHERE name = $1 AND city_id = $2 LIMIT 1`
 	err := tx.QueryRow(ctx, findPoiQuery, POIDetailedInfo.Name, cityID).Scan(&poiDBID)
@@ -1837,9 +2026,10 @@ func calculateComplexityScore(pois, hotels, restaurants, messageCount int, hasIt
 // countMessagesByRole counts messages by user and assistant roles
 func countMessagesByRole(messages []types.ConversationMessage) (userCount, assistantCount int) {
 	for _, msg := range messages {
-		if msg.Role == "user" {
+		switch msg.Role {
+		case "user":
 			userCount++
-		} else if msg.Role == "assistant" {
+		case "assistant":
 			assistantCount++
 		}
 	}

@@ -13,8 +13,8 @@ import (
 type AppMetrics struct {
 	RegisterRequestsTotal   metric.Int64Counter
 	RegisterDurationSeconds metric.Float64Histogram
-	DbQueryDurationSeconds  metric.Float64Histogram
-	DbQueryErrorsTotal      metric.Int64Counter
+	DBQueryDurationSeconds  metric.Float64Histogram
+	DBQueryErrorsTotal      metric.Int64Counter
 	// Add more metrics here (e.g., LoginRequestsTotal, ActiveSessionsGauge)
 }
 
@@ -50,7 +50,7 @@ func InitAppMetrics() {
 			log.Fatalf("Metrics: Failed to create register_duration_seconds: %v", err)
 		}
 
-		m.DbQueryDurationSeconds, err = meter.Float64Histogram(
+		m.DBQueryDurationSeconds, err = meter.Float64Histogram(
 			"db_query_duration_seconds",
 			metric.WithDescription("Duration of database queries in seconds"),
 			metric.WithUnit("s"),
@@ -59,7 +59,7 @@ func InitAppMetrics() {
 			log.Fatalf("Metrics: Failed to create db_query_duration_seconds: %v", err)
 		}
 
-		m.DbQueryErrorsTotal, err = meter.Int64Counter(
+		m.DBQueryErrorsTotal, err = meter.Int64Counter(
 			"db_query_errors_total",
 			metric.WithDescription("Total number of database query errors"),
 			metric.WithUnit("{error}"),

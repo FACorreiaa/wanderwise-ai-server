@@ -47,40 +47,6 @@ func NewCityRepository(pgxpool *pgxpool.Pool, logger *slog.Logger) *RepositoryIm
 }
 
 func (r *RepositoryImpl) SaveCity(ctx context.Context, city types.CityDetail) (uuid.UUID, error) {
-	tx, err := r.pgpool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	// Construct center_location geometry
-	// var centerLocationArg interface{}
-	// if city.CenterLatitude != 0 && city.CenterLongitude != 0 {
-	// 	if city.CenterLatitude < -90 || city.CenterLatitude > 90 || city.CenterLongitude < -180 || city.CenterLongitude > 180 {
-	// 		r.logger.WarnContext(ctx, "Invalid coordinates for city center, saving as NULL",
-	// 			slog.String("city", city.Name),
-	// 			slog.Float64("lat", city.CenterLatitude),
-	// 			slog.Float64("lon", city.CenterLongitude))
-	// 		centerLocationArg = nil
-	// 	} else {
-	// 		centerLocationArg = fmt.Sprintf("ST_SetSRID(ST_MakePoint(%f, %f), 4326)", city.CenterLongitude, city.CenterLatitude)
-	// 	}
-	// } else {
-	// 	centerLocationArg = nil // Save as NULL if no coordinates provided
-	// }
-
-	// BoundingBox: For now, we'll insert NULL for bounding_box as AI doesn't provide it easily.
-	// You would populate this later if you have a geocoding service or other data source.
-	// query := `
-	//     INSERT INTO cities (
-	//         name, country, state_province, ai_summary, center_location, bounding_box
-	//     ) VALUES ($1, $2, $3, $4, ST_GeomFromText($5, 4326), ST_GeomFromText($6, 4326)) RETURNING id
-	// `
-	// Note: ST_GeomFromText is for WKT strings. For ST_MakePoint, you don't need ST_GeomFromText wrapper if it's directly in SQL.
-	// However, pgx typically requires you to pass geometry types in a specific way or as WKT.
-	// A common way with pgx for dynamic geometry is to build the SQL string part.
-	// Let's adjust to pass coordinates and build the point in SQL.
-
 	query := `
         INSERT INTO cities (
             name, country, state_province, ai_summary, center_location 
@@ -103,7 +69,7 @@ func (r *RepositoryImpl) SaveCity(ctx context.Context, city types.CityDetail) (u
 	var id uuid.UUID
 
 	// For ST_MakePoint, longitude is first, then latitude
-	err = tx.QueryRow(ctx, query,
+	err := r.pgpool.QueryRow(ctx, query,
 		city.Name,
 		city.Country,
 		NewNullString(city.StateProvince),
@@ -117,9 +83,6 @@ func (r *RepositoryImpl) SaveCity(ctx context.Context, city types.CityDetail) (u
 		return uuid.Nil, fmt.Errorf("failed to insert city: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return uuid.Nil, fmt.Errorf("failed to commit transaction: %w", err)
-	}
 	return id, nil
 }
 
@@ -134,7 +97,7 @@ func NewNullString(s string) sql.NullString {
 	}
 }
 
-// Helper function to convert 0.0 float to sql.NullFloat64 for database insertion
+// NewNullFloat64 Helper function to convert 0.0 float to sql.NullFloat64 for database insertion
 func NewNullFloat64(f float64) sql.NullFloat64 {
 	if f == 0.0 { // Or whatever your condition for "not set" is, e.g. NaN
 		return sql.NullFloat64{}
@@ -145,7 +108,7 @@ func NewNullFloat64(f float64) sql.NullFloat64 {
 	}
 }
 
-// You'll also need to update FindCityByNameAndCountry to retrieve these new fields.
+// FindCityByNameAndCountry You'll also need to update FindCityByNameAndCountry to retrieve these new fields.
 func (r *RepositoryImpl) FindCityByNameAndCountry(ctx context.Context, cityName, countryName string) (*types.CityDetail, error) {
 	query := `
         SELECT 
@@ -189,81 +152,48 @@ func (r *RepositoryImpl) FindCityByNameAndCountry(ctx context.Context, cityName,
 	return &cityDetail, nil
 }
 
-// LevenshteinDistance calculates the Levenshtein distance between two strings.
-func LevenshteinDistance(a, b string) int {
-	// Create a 2D slice to store the distances
-	d := make([][]int, len(a)+1)
-	for i := range d {
-		d[i] = make([]int, len(b)+1)
-	}
-
-	// Initialize the first row and column
-	for i := 0; i <= len(a); i++ {
-		d[i][0] = i
-	}
-	for j := 0; j <= len(b); j++ {
-		d[0][j] = j
-	}
-
-	// Fill the rest of the matrix
-	for i := 1; i <= len(a); i++ {
-		for j := 1; j <= len(b); j++ {
-			cost := 0
-			if a[i-1] != b[j-1] {
-				cost = 1
-			}
-			d[i][j] = min(
-				d[i-1][j]+1,      // Deletion
-				d[i][j-1]+1,      // Insertion
-				d[i-1][j-1]+cost, // Substitution
-			)
-		}
-	}
-
-	// Return the final distance
-	return d[len(a)][len(b)]
-}
-
-func min(a, b, c int) int {
-	if a < b {
-		if a < c {
-			return a
-		}
-	} else {
-		if b < c {
-			return b
-		}
-	}
-	return c
-}
-
-// FindCityByFuzzyName finds the city with the most similar name using Levenshtein distance.
+// FindCityByFuzzyName finds the city with the most similar name using trigram similarity.
 func (r *RepositoryImpl) FindCityByFuzzyName(ctx context.Context, cityName string) (*types.CityDetail, error) {
-	// Get all cities from the database
-	cities, err := r.GetAllCities(ctx)
+	query := `
+		SELECT 
+			id, name, country, 
+			COALESCE(state_province, '') as state_province, -- Handle NULL state_province
+			ai_summary,
+			ST_Y(center_location) as center_latitude,    -- Extract Y coordinate (latitude)
+			ST_X(center_location) as center_longitude   -- Extract X coordinate (longitude)
+		FROM cities
+		WHERE similarity(name, $1) > 0.3 -- you can adjust the threshold
+		ORDER BY similarity(name, $1) DESC
+		LIMIT 1
+	`
+
+	var cityDetail types.CityDetail
+	var lat, lon sql.NullFloat64 // To handle potentially NULL location
+
+	err := r.pgpool.QueryRow(ctx, query, cityName).Scan(
+		&cityDetail.ID,
+		&cityDetail.Name,
+		&cityDetail.Country,
+		&cityDetail.StateProvince,
+		&cityDetail.AiSummary,
+		&lat,
+		&lon,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get all cities: %w", err)
-	}
-
-	// Find the city with the minimum Levenshtein distance
-	var bestMatch *types.CityDetail
-	minDistance := -1
-
-	for i, city := range cities {
-		distance := LevenshteinDistance(strings.ToLower(cityName), strings.ToLower(city.Name))
-		if minDistance == -1 || distance < minDistance {
-			minDistance = distance
-			bestMatch = &cities[i]
+		if err == pgx.ErrNoRows {
+			return nil, nil
 		}
+		return nil, fmt.Errorf("failed to find city by fuzzy name '%s': %w", cityName, err)
 	}
 
-	// You can set a threshold for the maximum allowed distance
-	// For example, if the distance is too large, you might not want to return a match
-	// if minDistance > 3 {
-	// 	return nil, nil
-	// }
+	if lat.Valid {
+		cityDetail.CenterLatitude = lat.Float64
+	}
+	if lon.Valid {
+		cityDetail.CenterLongitude = lon.Float64
+	}
 
-	return bestMatch, nil
+	return &cityDetail, nil
 }
 
 // GetCityIDByName retrieves a city ID by its name
@@ -609,7 +539,7 @@ func (r *RepositoryImpl) GetAllCities(ctx context.Context) ([]types.CityDetail, 
 }
 
 // determineCityID finds the city ID and name closest to the given latitude and longitude
-func (l *RepositoryImpl) GetCity(ctx context.Context, lat, lon float64) (uuid.UUID, string, error) {
+func (r *RepositoryImpl) GetCity(ctx context.Context, lat, lon float64) (uuid.UUID, string, error) {
 	// Start OpenTelemetry tracing
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "determineCityID", trace.WithAttributes(
 		attribute.Float64("lat", lat),
@@ -618,7 +548,7 @@ func (l *RepositoryImpl) GetCity(ctx context.Context, lat, lon float64) (uuid.UU
 	defer span.End()
 
 	// Log the request
-	l.logger.DebugContext(ctx, "Determining city ID for coordinates",
+	r.logger.DebugContext(ctx, "Determining city ID for coordinates",
 		slog.Float64("lat", lat),
 		slog.Float64("lon", lon))
 
@@ -635,21 +565,21 @@ func (l *RepositoryImpl) GetCity(ctx context.Context, lat, lon float64) (uuid.UU
 
 	var cityID uuid.UUID
 	var cityName string
-	err := l.pgpool.QueryRow(ctx, query, point).Scan(&cityID, &cityName)
+	err := r.pgpool.QueryRow(ctx, query, point).Scan(&cityID, &cityName)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			l.logger.WarnContext(ctx, "No city found for the given coordinates")
+			r.logger.WarnContext(ctx, "No city found for the given coordinates")
 			span.SetStatus(codes.Error, "No city found")
 			return uuid.Nil, "", fmt.Errorf("no city found for coordinates (%f, %f)", lat, lon)
 		}
-		l.logger.ErrorContext(ctx, "Failed to determine city ID", slog.Any("error", err))
+		r.logger.ErrorContext(ctx, "Failed to determine city ID", slog.Any("error", err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Database query failed")
 		return uuid.Nil, "", fmt.Errorf("failed to determine city ID: %w", err)
 	}
 
 	// Log success and set tracing attributes
-	l.logger.InfoContext(ctx, "City determined",
+	r.logger.InfoContext(ctx, "City determined",
 		slog.String("city_id", cityID.String()),
 		slog.String("city_name", cityName))
 	span.SetAttributes(

@@ -259,3 +259,12 @@ type SessionEngagementMetrics struct {
 	PeakActivityTime    *time.Time    `json:"peak_activity_time,omitempty"`
 	EngagementLevel     string        `json:"engagement_level"` // "low", "medium", "high"
 }
+
+// ChatSessionsResponse represents paginated chat sessions response
+type ChatSessionsResponse struct {
+	Sessions []ChatSession `json:"sessions"`
+	Total    int           `json:"total"`
+	Page     int           `json:"page"`
+	Limit    int           `json:"limit"`
+	HasMore  bool          `json:"has_more"`
+}

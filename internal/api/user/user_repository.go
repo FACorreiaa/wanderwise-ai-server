@@ -428,17 +428,22 @@ func (r *PostgresUserRepo) DeactivateUser(ctx context.Context, userID uuid.UUID)
 		span.SetStatus(codes.Error, "DB transaction failed")
 		return fmt.Errorf("database error beginning transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if not committed
 
 	// First, check if the user exists and is active
 	var isActive bool
 	err = tx.QueryRow(ctx, "SELECT is_active FROM users WHERE id = $1", userID).Scan(&isActive)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+			}
 			l.WarnContext(ctx, "Attempted to deactivate non-existent user")
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "User not found")
 			return fmt.Errorf("user not found: %w", types.ErrNotFound)
+		}
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
 		}
 		l.ErrorContext(ctx, "Failed to check user active status", slog.Any("error", err))
 		span.RecordError(err)
@@ -447,6 +452,9 @@ func (r *PostgresUserRepo) DeactivateUser(ctx context.Context, userID uuid.UUID)
 	}
 
 	if !isActive {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+		}
 		l.InfoContext(ctx, "User is already inactive")
 		span.SetStatus(codes.Ok, "User already inactive")
 		return nil
@@ -455,6 +463,9 @@ func (r *PostgresUserRepo) DeactivateUser(ctx context.Context, userID uuid.UUID)
 	// Deactivate the user
 	_, err = tx.Exec(ctx, "UPDATE users SET is_active = FALSE, updated_at = $1 WHERE id = $2", time.Now(), userID)
 	if err != nil {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+		}
 		l.ErrorContext(ctx, "Failed to deactivate user", slog.Any("error", err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "DB UPDATE failed")
@@ -464,6 +475,9 @@ func (r *PostgresUserRepo) DeactivateUser(ctx context.Context, userID uuid.UUID)
 	// Invalidate all refresh tokens
 	_, err = tx.Exec(ctx, "UPDATE refresh_tokens SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL", time.Now(), userID)
 	if err != nil {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+		}
 		l.ErrorContext(ctx, "Failed to invalidate refresh tokens", slog.Any("error", err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "DB UPDATE failed")
@@ -473,6 +487,9 @@ func (r *PostgresUserRepo) DeactivateUser(ctx context.Context, userID uuid.UUID)
 	// Invalidate all sessions
 	_, err = tx.Exec(ctx, "UPDATE sessions SET invalidated_at = $1 WHERE user_id = $2 AND invalidated_at IS NULL", time.Now(), userID)
 	if err != nil {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+		}
 		l.ErrorContext(ctx, "Failed to invalidate sessions", slog.Any("error", err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "DB UPDATE failed")

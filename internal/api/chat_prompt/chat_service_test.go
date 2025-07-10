@@ -1,4 +1,4 @@
-package llmChat
+package llmchat
 
 import (
 	"context"
@@ -92,6 +92,14 @@ func (m *MockPOIRepository) GetFavouritePOIsByUserID(ctx context.Context, userID
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]types.POIDetailedInfo), args.Error(1)
+}
+
+func (m *MockPOIRepository) GetFavouritePOIsByUserIDPaginated(ctx context.Context, userID uuid.UUID, limit, offset int) ([]types.POIDetailedInfo, int, error) {
+	args := m.Called(ctx, userID, limit, offset)
+	if args.Get(0) == nil {
+		return nil, 0, args.Error(2)
+	}
+	return args.Get(0).([]types.POIDetailedInfo), args.Get(1).(int), args.Error(2)
 }
 
 func (m *MockPOIRepository) GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error) {
@@ -557,11 +565,7 @@ func (m *MockTagsRepo) GetTagsForProfile(ctx context.Context, profileID uuid.UUI
 
 // Helper to setup service with mocks for each test
 
-
-
-
 // Example for GetItinerary (simpler, as it's mostly a direct repo call)
-
 
 // Add similar unit tests for:
 // - GetItineraries
@@ -574,5 +578,3 @@ func (m *MockTagsRepo) GetTagsForProfile(ctx context.Context, profileID uuid.UUI
 
 // --- Integration Tests for llmInteraction (Example for GetPOIDetailedInfosResponse) ---
 // These would require a running database instance and potentially a configured AI client.
-
-

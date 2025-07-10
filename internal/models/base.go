@@ -6,17 +6,17 @@ import (
 	"github.com/google/uuid"
 )
 
-// Base contains common fields used across multiple models
+// Base contains common fields used across multiple models.
 type Base struct {
 	ID        uuid.UUID `json:"id" db:"id"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
-// SubscriptionPlanType represents the type of subscription plan
+// SubscriptionPlanType represents the type of subscription plan.
 type SubscriptionPlanType string
 
-// Subscription plan types
+// Subscription plan types.
 const (
 	SubscriptionPlanFree           SubscriptionPlanType = "free"
 	SubscriptionPlanPremiumMonthly SubscriptionPlanType = "premium_monthly"

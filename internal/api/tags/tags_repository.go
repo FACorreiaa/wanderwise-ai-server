@@ -39,10 +39,10 @@ type Repository interface {
 	// Update updates on tag
 	Update(ctx context.Context, userID, tagsID uuid.UUID, params types.UpdatePersonalTagParams) error
 
-	// GetTagByName retrieves a tag by name
+	// GetTagByName retrieves a tag by name.
 	GetTagByName(ctx context.Context, name string) (*types.Tags, error)
 
-	// LinkPersonalTagToProfile links a tag to a profile
+	// LinkPersonalTagToProfile links a tag to a profile.
 	LinkPersonalTagToProfile(ctx context.Context, userID, profileID uuid.UUID, tagID uuid.UUID) error
 
 	// GetTagsForProfile retrieves all tags associated with a profile
@@ -216,7 +216,11 @@ func (r *RepositoryImpl) Create(ctx context.Context, userID uuid.UUID, params ty
 		span.SetStatus(codes.Error, "Begin transaction failed")
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if commit is not successful
+	defer func() {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			r.logger.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+		}
+	}() // Rollback if commit is not successful
 
 	l := r.logger.With(
 		slog.String("method", "CreatePersonalTag"),
@@ -282,7 +286,11 @@ func (r *RepositoryImpl) Update(ctx context.Context, userID, tagsID uuid.UUID, p
 		span.SetStatus(codes.Error, "Begin transaction failed")
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			r.logger.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+		}
+	}()
 
 	l := r.logger.With(
 		slog.String("method", "UpdatePersonalTag"),
@@ -344,7 +352,11 @@ func (r *RepositoryImpl) Delete(ctx context.Context, userID uuid.UUID, tagID uui
 		span.SetStatus(codes.Error, "Begin transaction failed")
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			r.logger.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+		}
+	}()
 
 	l := r.logger.With(slog.String("method", "DeletePersonalTag"), slog.String("userID", userID.String()), slog.String("tagID", tagID.String()))
 	l.DebugContext(ctx, "Deleting user personal tag")
@@ -381,7 +393,7 @@ func (r *RepositoryImpl) Delete(ctx context.Context, userID uuid.UUID, tagID uui
 	return nil
 }
 
-// GetTagByName retrieves a tag by name
+// GetTagByName retrieves a tag by name.
 func (r *RepositoryImpl) GetTagByName(ctx context.Context, name string) (*types.Tags, error) {
 	ctx, span := otel.Tracer("UserRepo").Start(ctx, "GetTagByName", trace.WithAttributes(
 		semconv.DBSystemPostgreSQL,
@@ -424,7 +436,7 @@ func (r *RepositoryImpl) GetTagByName(ctx context.Context, name string) (*types.
 	return &tag, nil
 }
 
-// LinkPersonalTagToProfile links a tag to a profile
+// LinkPersonalTagToProfile links a tag to a profile.
 func (r *RepositoryImpl) LinkPersonalTagToProfile(ctx context.Context, userID, profileID, tagID uuid.UUID) error {
 	ctx, span := otel.Tracer("UserRepo").Start(ctx, "AddTagToProfile", trace.WithAttributes(
 		semconv.DBSystemPostgreSQL,

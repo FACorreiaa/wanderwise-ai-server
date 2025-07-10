@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	generativeAI "github.com/FACorreiaa/go-genai-sdk/lib"
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types" // Ensure this path is correct
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types" // Ensure this path is correct
 )
 
 type MockCityRepository struct {
@@ -92,6 +93,10 @@ type MockPOIRepository struct {
 	mock.Mock
 }
 
+func (m *MockPOIRepository) GetPOIsByLocationAndDistanceWithCategory(ctx context.Context, lat, lon, radiusMeters float64, category string) ([]types.POIDetailedInfo, error) {
+	panic("implement me")
+}
+
 func (m *MockPOIRepository) SavePoi(ctx context.Context, poi types.POIDetailedInfo, cityID uuid.UUID) (uuid.UUID, error) {
 	args := m.Called(ctx, poi, cityID)
 	return args.Get(0).(uuid.UUID), args.Error(1)
@@ -165,6 +170,14 @@ func (m *MockPOIRepository) GetFavouritePOIsByUserID(ctx context.Context, userID
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]types.POIDetailedInfo), args.Error(1)
+}
+
+func (m *MockPOIRepository) GetFavouritePOIsByUserIDPaginated(ctx context.Context, userID uuid.UUID, limit, offset int) ([]types.POIDetailedInfo, int, error) {
+	args := m.Called(ctx, userID, limit, offset)
+	if args.Get(0) == nil {
+		return nil, 0, args.Error(2)
+	}
+	return args.Get(0).([]types.POIDetailedInfo), args.Get(1).(int), args.Error(2)
 }
 
 func (m *MockPOIRepository) GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error) {

@@ -108,7 +108,8 @@ func TestLogin(t *testing.T) {
 		ctx := context.Background()
 		email := "test@example.com"
 		password := "password123"
-		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		assert.NoError(t, err)
 
 		user := &types.UserAuth{
 			ID:       "user123",
@@ -156,7 +157,8 @@ func TestLogin(t *testing.T) {
 		ctx := context.Background()
 		email := "test@example.com"
 		password := "wrongpassword"
-		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("correctpassword"), bcrypt.DefaultCost)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte("correctpassword"), bcrypt.DefaultCost)
+		assert.NoError(t, err)
 
 		user := &types.UserAuth{
 			ID:       "user123",

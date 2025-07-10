@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/auth"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 var _ Handler = (*HandlerImpl)(nil)
@@ -42,6 +43,11 @@ func NewHandler(service Service, logger *slog.Logger) *HandlerImpl {
 // @Produce json
 // @Param page query int false "Page number (default: 1)"
 // @Param limit query int false "Limit number of cities per page (default: 10, max: 50)"
+// @Param sort_by query string false "Sort field (last_activity, city_name, interaction_count, poi_count) (default: last_activity)"
+// @Param sort_order query string false "Sort order (asc, desc) (default: desc)"
+// @Param search query string false "Search term to filter by city name"
+// @Param min_interactions query int false "Minimum number of interactions to filter by"
+// @Param max_interactions query int false "Maximum number of interactions to filter by"
 // @Success 200 {object} types.RecentInteractionsResponse
 // @Failure 400 {object} map[string]string
 // @Failure 401 {object} map[string]string
@@ -89,6 +95,37 @@ func (h *HandlerImpl) GetUserRecentInteractions(w http.ResponseWriter, r *http.R
 		}
 	}
 
+	// Parse sort_by parameter
+	sortBy := r.URL.Query().Get("sort_by")
+	if sortBy == "" {
+		sortBy = "last_activity" // default
+	}
+
+	// Parse sort_order parameter
+	sortOrder := r.URL.Query().Get("sort_order")
+	if sortOrder == "" {
+		sortOrder = "desc" // default
+	}
+
+	// Parse search parameter
+	search := r.URL.Query().Get("search")
+
+	// Parse min_interactions parameter
+	minInteractions := -1 // Use -1 to indicate "no filter"
+	if minStr := r.URL.Query().Get("min_interactions"); minStr != "" {
+		if parsedMin, err := strconv.Atoi(minStr); err == nil && parsedMin >= 0 {
+			minInteractions = parsedMin
+		}
+	}
+
+	// Parse max_interactions parameter
+	maxInteractions := -1 // Use -1 to indicate "no filter"
+	if maxStr := r.URL.Query().Get("max_interactions"); maxStr != "" {
+		if parsedMax, err := strconv.Atoi(maxStr); err == nil && parsedMax >= 0 {
+			maxInteractions = parsedMax
+		}
+	}
+
 	// Validate page
 	if page <= 0 {
 		page = 1
@@ -102,19 +139,61 @@ func (h *HandlerImpl) GetUserRecentInteractions(w http.ResponseWriter, r *http.R
 		limit = 50
 	}
 
+	// Validate sort_by
+	validSortFields := map[string]bool{
+		"last_activity":     true,
+		"city_name":        true,
+		"interaction_count": true,
+		"poi_count":        true,
+	}
+	if !validSortFields[sortBy] {
+		sortBy = "last_activity"
+	}
+
+	// Validate sort_order
+	if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "desc"
+	}
+
+	// Validate interactions range
+	if maxInteractions >= 0 && minInteractions >= 0 && minInteractions > maxInteractions {
+		// If min > max, disable both filters
+		minInteractions = -1
+		maxInteractions = -1
+	}
+
 	l.InfoContext(ctx, "Processing get recent interactions request", 
 		slog.String("user_id", userID.String()),
 		slog.Int("page", page),
-		slog.Int("limit", limit))
+		slog.Int("limit", limit),
+		slog.String("sort_by", sortBy),
+		slog.String("sort_order", sortOrder),
+		slog.String("search", search),
+		slog.Int("min_interactions", minInteractions),
+		slog.Int("max_interactions", maxInteractions))
 
 	span.SetAttributes(
 		attribute.String("user_id", userID.String()),
 		attribute.Int("page", page),
 		attribute.Int("limit", limit),
+		attribute.String("sort_by", sortBy),
+		attribute.String("sort_order", sortOrder),
+		attribute.String("search", search),
+		attribute.Int("min_interactions", minInteractions),
+		attribute.Int("max_interactions", maxInteractions),
 	)
 
+	// Create filter options
+	filterOptions := &types.RecentInteractionsFilter{
+		SortBy:          sortBy,
+		SortOrder:       sortOrder,
+		Search:          search,
+		MinInteractions: minInteractions,
+		MaxInteractions: maxInteractions,
+	}
+
 	// Call service to get recent interactions
-	response, err := h.service.GetUserRecentInteractions(ctx, userID, page, limit)
+	response, err := h.service.GetUserRecentInteractions(ctx, userID, page, limit, filterOptions)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to get recent interactions", slog.Any("error", err))
 		span.RecordError(err)

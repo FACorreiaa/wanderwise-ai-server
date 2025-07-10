@@ -1,4 +1,4 @@
-package llmChat
+package llmchat
 
 import (
 	"context"
@@ -53,6 +53,7 @@ var _ LlmInteractiontService = (*ServiceImpl)(nil)
 // LlmInteractiontService defines the business logic contract for user operations.
 type LlmInteractiontService interface {
 	SaveItenerary(ctx context.Context, userID uuid.UUID, req types.BookmarkRequest) (uuid.UUID, error)
+	GetBookmarkedItineraries(ctx context.Context, userID uuid.UUID, page, limit int) (*types.PaginatedUserItinerariesResponse, error)
 	RemoveItenerary(ctx context.Context, userID, itineraryID uuid.UUID) error
 	GetPOIDetailedInfosResponse(ctx context.Context, userID uuid.UUID, city string, lat, lon float64) (*types.POIDetailedInfo, error)
 
@@ -68,7 +69,7 @@ type LlmInteractiontService interface {
 	ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityName, message string, userLocation *types.UserLocation, eventCh chan<- types.StreamEvent) error
 
 	// Chat session management
-	GetUserChatSessions(ctx context.Context, userID uuid.UUID) ([]types.ChatSession, error)
+	GetUserChatSessions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.ChatSessionsResponse, error)
 }
 
 type IntentClassifier interface {
@@ -105,7 +106,10 @@ func NewLlmInteractiontService(interestRepo interests.Repository,
 	logger *slog.Logger) *ServiceImpl {
 	ctx := context.Background()
 	apiKey := os.Getenv("GEMINI_API_KEY")
-	aiClient, _ := generativeAI.NewLLMChatClient(ctx, apiKey)
+	aiClient, err := generativeAI.NewLLMChatClient(ctx, apiKey)
+	if err != nil {
+		panic(err)
+	}
 
 	// Initialize embedding service
 	embeddingService, err := generativeAI.NewEmbeddingService(ctx, logger)
@@ -606,6 +610,40 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 	return savedID, nil
 }
 
+func (l *ServiceImpl) GetBookmarkedItineraries(ctx context.Context, userID uuid.UUID, page, limit int) (*types.PaginatedUserItinerariesResponse, error) {
+	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GetBookmarkedItineraries", trace.WithAttributes(
+		attribute.String("user.id", userID.String()),
+		attribute.Int("page", page),
+		attribute.Int("limit", limit),
+	))
+	defer span.End()
+
+	l.logger.InfoContext(ctx, "Retrieving bookmarked itineraries",
+		slog.String("userID", userID.String()),
+		slog.Int("page", page),
+		slog.Int("limit", limit))
+
+	response, err := l.llmInteractionRepo.GetBookmarkedItineraries(ctx, userID, page, limit)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to retrieve bookmarked itineraries")
+		return nil, fmt.Errorf("failed to retrieve bookmarked itineraries: %w", err)
+	}
+
+	l.logger.InfoContext(ctx, "Successfully retrieved bookmarked itineraries",
+		slog.String("userID", userID.String()),
+		slog.Int("totalRecords", response.TotalRecords),
+		slog.Int("page", response.Page),
+		slog.Int("pageSize", response.PageSize))
+
+	span.SetAttributes(
+		attribute.Int("total_records", response.TotalRecords),
+		attribute.Int("returned_count", len(response.Itineraries)),
+	)
+	span.SetStatus(codes.Ok, "Bookmarked itineraries retrieved successfully")
+	return response, nil
+}
+
 func (l *ServiceImpl) RemoveItenerary(ctx context.Context, userID, itineraryID uuid.UUID) error {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "RemoveItenerary", trace.WithAttributes(
 		attribute.String("user.id", userID.String()),
@@ -628,17 +666,21 @@ func (l *ServiceImpl) RemoveItenerary(ctx context.Context, userID, itineraryID u
 	return nil
 }
 
-// GetUserChatSessions retrieves all chat sessions for a user
-func (l *ServiceImpl) GetUserChatSessions(ctx context.Context, userID uuid.UUID) ([]types.ChatSession, error) {
+// GetUserChatSessions retrieves paginated chat sessions for a user
+func (l *ServiceImpl) GetUserChatSessions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.ChatSessionsResponse, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GetUserChatSessions", trace.WithAttributes(
 		attribute.String("user.id", userID.String()),
+		attribute.Int("page", page),
+		attribute.Int("limit", limit),
 	))
 	defer span.End()
 
-	l.logger.InfoContext(ctx, "Retrieving chat sessions for user",
-		slog.String("userID", userID.String()))
+	l.logger.InfoContext(ctx, "Retrieving paginated chat sessions for user",
+		slog.String("userID", userID.String()),
+		slog.Int("page", page),
+		slog.Int("limit", limit))
 
-	sessions, err := l.llmInteractionRepo.GetUserChatSessions(ctx, userID)
+	response, err := l.llmInteractionRepo.GetUserChatSessions(ctx, userID, page, limit)
 	if err != nil {
 		l.logger.ErrorContext(ctx, "Failed to get user chat sessions", slog.Any("error", err))
 		span.RecordError(err)
@@ -646,12 +688,20 @@ func (l *ServiceImpl) GetUserChatSessions(ctx context.Context, userID uuid.UUID)
 		return nil, fmt.Errorf("failed to get user chat sessions: %w", err)
 	}
 
-	l.logger.InfoContext(ctx, "Successfully retrieved chat sessions",
+	l.logger.InfoContext(ctx, "Successfully retrieved paginated chat sessions",
 		slog.String("userID", userID.String()),
-		slog.Int("sessionCount", len(sessions)))
-	span.SetAttributes(attribute.Int("sessions.count", len(sessions)))
+		slog.Int("sessionCount", len(response.Sessions)),
+		slog.Int("total", response.Total),
+		slog.Int("page", response.Page),
+		slog.Int("limit", response.Limit))
+	span.SetAttributes(
+		attribute.Int("sessions.count", len(response.Sessions)),
+		attribute.Int("sessions.total", response.Total),
+		attribute.Int("response.page", response.Page),
+		attribute.Int("response.limit", response.Limit),
+	)
 	span.SetStatus(codes.Ok, "Chat sessions retrieved successfully")
-	return sessions, nil
+	return response, nil
 }
 
 // getPOIDetailedInfos returns a formatted string with POI details.
@@ -959,60 +1009,60 @@ func (l *ServiceImpl) generatePOIData(ctx context.Context, poiName, cityName str
 }
 
 // enhancePOIRecommendationsWithSemantics uses embeddings to find similar POIs and enrich recommendations
-func (l *ServiceImpl) enhancePOIRecommendationsWithSemantics(ctx context.Context, userMessage string, cityID uuid.UUID, userPreferences []string, limit int) ([]types.POIDetailedInfo, error) {
-	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "enhancePOIRecommendationsWithSemantics", trace.WithAttributes(
-		attribute.String("user.message", userMessage),
-		attribute.String("city.id", cityID.String()),
-		attribute.Int("limit", limit),
-	))
-	defer span.End()
-
-	l.logger.DebugContext(ctx, "Enhancing POI recommendations with semantic search",
-		slog.String("message", userMessage),
-		slog.String("city_id", cityID.String()))
-
-	if l.embeddingService == nil {
-		l.logger.WarnContext(ctx, "Embedding service not available, falling back to traditional search")
-		span.AddEvent("Embedding service not available")
-		return []types.POIDetailedInfo{}, nil
-	}
-
-	// Generate embedding for user message combined with preferences
-	searchQuery := userMessage
-	if len(userPreferences) > 0 {
-		searchQuery += " " + strings.Join(userPreferences, " ")
-	}
-
-	queryEmbedding, err := l.embeddingService.GenerateQueryEmbedding(ctx, searchQuery)
-	if err != nil {
-		l.logger.ErrorContext(ctx, "Failed to generate query embedding",
-			slog.Any("error", err),
-			slog.String("query", searchQuery))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Failed to generate query embedding")
-		return []types.POIDetailedInfo{}, fmt.Errorf("failed to generate query embedding: %w", err)
-	}
-
-	// Search for similar POIs in the city
-	similarPOIs, err := l.poiRepo.FindSimilarPOIsByCity(ctx, queryEmbedding, cityID, limit)
-	if err != nil {
-		l.logger.ErrorContext(ctx, "Failed to find similar POIs", slog.Any("error", err))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Failed to find similar POIs")
-		return []types.POIDetailedInfo{}, fmt.Errorf("failed to find similar POIs: %w", err)
-	}
-
-	l.logger.InfoContext(ctx, "Found semantically similar POIs",
-		slog.Int("count", len(similarPOIs)),
-		slog.String("city_id", cityID.String()))
-	span.SetAttributes(
-		attribute.Int("similar_pois.count", len(similarPOIs)),
-		attribute.String("search.query", searchQuery),
-	)
-	span.SetStatus(codes.Ok, "Semantic POI recommendations enhanced")
-
-	return similarPOIs, nil
-}
+//func (l *ServiceImpl) enhancePOIRecommendationsWithSemantics(ctx context.Context, userMessage string, cityID uuid.UUID, userPreferences []string, limit int) ([]types.POIDetailedInfo, error) {
+//	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "enhancePOIRecommendationsWithSemantics", trace.WithAttributes(
+//		attribute.String("user.message", userMessage),
+//		attribute.String("city.id", cityID.String()),
+//		attribute.Int("limit", limit),
+//	))
+//	defer span.End()
+//
+//	l.logger.DebugContext(ctx, "Enhancing POI recommendations with semantic search",
+//		slog.String("message", userMessage),
+//		slog.String("city_id", cityID.String()))
+//
+//	if l.embeddingService == nil {
+//		l.logger.WarnContext(ctx, "Embedding service not available, falling back to traditional search")
+//		span.AddEvent("Embedding service not available")
+//		return []types.POIDetailedInfo{}, nil
+//	}
+//
+//	// Generate embedding for user message combined with preferences
+//	searchQuery := userMessage
+//	if len(userPreferences) > 0 {
+//		searchQuery += " " + strings.Join(userPreferences, " ")
+//	}
+//
+//	queryEmbedding, err := l.embeddingService.GenerateQueryEmbedding(ctx, searchQuery)
+//	if err != nil {
+//		l.logger.ErrorContext(ctx, "Failed to generate query embedding",
+//			slog.Any("error", err),
+//			slog.String("query", searchQuery))
+//		span.RecordError(err)
+//		span.SetStatus(codes.Error, "Failed to generate query embedding")
+//		return []types.POIDetailedInfo{}, fmt.Errorf("failed to generate query embedding: %w", err)
+//	}
+//
+//	// Search for similar POIs in the city
+//	similarPOIs, err := l.poiRepo.FindSimilarPOIsByCity(ctx, queryEmbedding, cityID, limit)
+//	if err != nil {
+//		l.logger.ErrorContext(ctx, "Failed to find similar POIs", slog.Any("error", err))
+//		span.RecordError(err)
+//		span.SetStatus(codes.Error, "Failed to find similar POIs")
+//		return []types.POIDetailedInfo{}, fmt.Errorf("failed to find similar POIs: %w", err)
+//	}
+//
+//	l.logger.InfoContext(ctx, "Found semantically similar POIs",
+//		slog.Int("count", len(similarPOIs)),
+//		slog.String("city_id", cityID.String()))
+//	span.SetAttributes(
+//		attribute.Int("similar_pois.count", len(similarPOIs)),
+//		attribute.String("search.query", searchQuery),
+//	)
+//	span.SetStatus(codes.Ok, "Semantic POI recommendations enhanced")
+//
+//	return similarPOIs, nil
+//}
 
 // generateSemanticPOIRecommendations generates POI recommendations using semantic search
 func (l *ServiceImpl) generateSemanticPOIRecommendations(ctx context.Context, userMessage string, cityID uuid.UUID, userID uuid.UUID, userLocation *types.UserLocation, semanticWeight float64) ([]types.POIDetailedInfo, error) {
@@ -1235,54 +1285,6 @@ If no city is mentioned, use empty string for city.
 	return parsed.City, parsed.Message, nil
 }
 
-// extractTextFromResponse extracts text from the AI response
-func extractTextFromResponse(resp *genai.GenerateContentResponse) string {
-	var txt string
-	for _, candidate := range resp.Candidates {
-		if candidate.Content != nil && len(candidate.Content.Parts) > 0 {
-			txt = candidate.Content.Parts[0].Text
-			break
-		}
-	}
-	return txt
-}
-
-// assignIDs assigns UUIDs and interaction IDs to response items
-func assignIDs(response interface{}, interactionID uuid.UUID) {
-	switch r := response.(type) {
-	case types.AiCityResponse:
-		for i := range r.PointsOfInterest {
-			r.PointsOfInterest[i].ID = uuid.New()
-			r.PointsOfInterest[i].LlmInteractionID = interactionID
-		}
-		for i := range r.AIItineraryResponse.PointsOfInterest {
-			r.AIItineraryResponse.PointsOfInterest[i].ID = uuid.New()
-			r.AIItineraryResponse.PointsOfInterest[i].LlmInteractionID = interactionID
-		}
-	case struct {
-		Hotels []types.HotelDetailedInfo `json:"hotels"`
-	}:
-		for i := range r.Hotels {
-			r.Hotels[i].ID = uuid.New()
-			r.Hotels[i].LlmInteractionID = interactionID
-		}
-	case struct {
-		Restaurants []types.RestaurantDetailedInfo `json:"restaurants"`
-	}:
-		for i := range r.Restaurants {
-			r.Restaurants[i].ID = uuid.New()
-			r.Restaurants[i].LlmInteractionID = interactionID
-		}
-	case struct {
-		Activities []types.POIDetailedInfo `json:"activities"`
-	}:
-		for i := range r.Activities {
-			r.Activities[i].ID = uuid.New()
-			r.Activities[i].LlmInteractionID = interactionID
-		}
-	}
-}
-
 // TODO For robustness, send unprocessed events to a dead letter queue (e.g., a separate channel or database table) for later analysis:
 // if !l.sendEvent(ctx, eventCh, event) {
 //     l.logger.ErrorContext(ctx, "Sending to dead letter queue", slog.Any("event", event))
@@ -1314,7 +1316,7 @@ func (l *ServiceImpl) sendEvent(ctx context.Context, ch chan<- types.StreamEvent
 			case <-time.After(2 * time.Second): // Use a reasonable timeout
 				l.logger.WarnContext(ctx, "Dropped stream event due to slow consumer or blocked channel (timeout)", slog.String("eventType", event.Type))
 				l.deadLetterCh <- event // Send to dead letter queue
-				return false
+				// Continue to retry after backoff
 			}
 		}
 		time.Sleep(100 * time.Millisecond) // Backoff
@@ -1457,7 +1459,7 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 
 	// --- 5. Handle Intent and Generate Response ---
 	var finalResponseMessage string
-	var assistantMessageType types.MessageType = types.TypeResponse
+	assistantMessageType := types.TypeResponse
 	itineraryModifiedByThisTurn := false
 
 	switch intent { // Align with ContinueSession's string-based intents
@@ -1552,12 +1554,6 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 			}
 		}
 
-		var currentPOIIDs []uuid.UUID
-		for _, p := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
-			if p.ID != uuid.Nil {
-				currentPOIIDs = append(currentPOIIDs, p.ID)
-			}
-		}
 		if (intent == types.IntentAddPOI || intent == types.IntentModifyItinerary) && userLocation != nil && userLocation.UserLat != 0 && userLocation.UserLon != 0 {
 			sortedPOIs, err := l.llmInteractionRepo.GetPOIsBySessionSortedByDistance(ctx, sessionID, cityID, *userLocation)
 			if err != nil {
@@ -1767,64 +1763,6 @@ func (l *ServiceImpl) generatePOIDataStream(
 		EventID:   uuid.New().String(),
 	}, 3)
 	return poiData, nil
-}
-
-// streamingCityDataWorker ContinueSessionStreamed
-
-func (l *ServiceImpl) generateCityData(ctx context.Context, cityName string) (string, error) {
-	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "generateCityData", trace.WithAttributes(
-		attribute.String("city.name", cityName),
-	))
-	defer span.End()
-
-	prompt := getCityDescriptionPrompt(cityName)
-	var responseText strings.Builder
-
-	// Try streaming
-	iter, err := l.aiClient.GenerateContentStream(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)})
-	if err == nil {
-		for resp, err := range iter {
-			if err != nil {
-				span.RecordError(err)
-				return "", fmt.Errorf("streaming city data error: %w", err)
-			}
-			for _, cand := range resp.Candidates {
-				if cand.Content != nil {
-					for _, part := range cand.Content.Parts {
-						if part.Text != "" {
-							responseText.WriteString(string(part.Text))
-						}
-					}
-				}
-			}
-		}
-	} else {
-		// Fallback to non-streaming
-		l.logger.WarnContext(ctx, "Streaming city data failed, falling back to non-streaming", slog.Any("error", err))
-		response, err := l.aiClient.GenerateResponse(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)})
-		if err != nil {
-			span.RecordError(err)
-			return "", fmt.Errorf("failed to generate city data: %w", err)
-		}
-		for _, cand := range response.Candidates {
-			if cand.Content != nil {
-				for _, part := range cand.Content.Parts {
-					if part.Text != "" {
-						responseText.WriteString(string(part.Text))
-					}
-				}
-			}
-		}
-	}
-
-	fullText := responseText.String()
-	if fullText == "" {
-		err := fmt.Errorf("empty city data response")
-		span.RecordError(err)
-		return "", err
-	}
-
-	return cleanJSONResponse(fullText), nil
 }
 
 func (l *ServiceImpl) saveCityInteraction(ctx context.Context, interaction types.LlmInteraction) (uuid.UUID, error) {
@@ -2066,7 +2004,12 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		"domain":      string(domain),
 		"preferences": basePreferences,
 	}
-	cacheKeyBytes, _ := json.Marshal(cacheKeyData)
+	cacheKeyBytes, err := json.Marshal(cacheKeyData)
+	if err != nil {
+		l.logger.ErrorContext(ctx, "Failed to marshal cache key data", slog.Any("error", err))
+		// Use a fallback cache key
+		cacheKeyBytes = []byte(fmt.Sprintf("fallback_%s_%s", cleanedMessage, cityName))
+	}
 	hash := md5.Sum(cacheKeyBytes)
 	cacheKey := hex.EncodeToString(hash[:])
 
@@ -2354,7 +2297,12 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 		"message": cleanedMessage,
 		"domain":  string(domain),
 	}
-	cacheKeyBytes, _ := json.Marshal(cacheKeyData)
+	cacheKeyBytes, err := json.Marshal(cacheKeyData)
+	if err != nil {
+		l.logger.ErrorContext(ctx, "Failed to marshal cache key data", slog.Any("error", err))
+		// Use a fallback cache key
+		cacheKeyBytes = []byte(fmt.Sprintf("fallback_%s_%s", cleanedMessage, cityName))
+	}
 	hash := md5.Sum(cacheKeyBytes)
 	cacheKey := hex.EncodeToString(hash[:])
 
@@ -2602,7 +2550,7 @@ func (l *ServiceImpl) ensureItineraryExists(session *types.ChatSession) {
 }
 
 // parseCityDataFromResponse extracts and parses city data from streamed response content
-func (l *ServiceImpl) parseCityDataFromResponse(ctx context.Context, responseContent string) (*types.GeneralCityData, error) {
+func (l *ServiceImpl) parseCityDataFromResponse(_ context.Context, responseContent string) (*types.GeneralCityData, error) {
 	// Clean the response by extracting JSON content between ```json and ```
 	cleanedResponse := responseContent
 

@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net/http"
-	_ "net/http/pprof"
+	_ "net/http/pprof" // Required for pprof endpoint registration
 	"os"
 )
 
@@ -19,7 +19,10 @@ func SetupPprof() {
 		fmt.Println("   • http://localhost:6060/debug/pprof/trace")
 
 		go func() {
-			http.ListenAndServe(":6060", nil)
+			err := http.ListenAndServe(":6060", nil)
+			if err != nil {
+				return
+			}
 		}()
 	}
 }

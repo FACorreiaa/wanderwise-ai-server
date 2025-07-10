@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,7 +20,7 @@ import (
 var _ Repository = (*RepositoryImpl)(nil)
 
 type Repository interface {
-	GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.RecentInteractionsResponse, error)
+	GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, page, limit int, filterOptions *types.RecentInteractionsFilter) (*types.RecentInteractionsResponse, error)
 	GetCityPOIsByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.POIDetailedInfo, error)
 	GetCityHotelsByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.HotelDetailedInfo, error)
 	GetCityRestaurantsByInteraction(ctx context.Context, userID uuid.UUID, cityName string) ([]types.RestaurantDetailedInfo, error)
@@ -40,42 +41,115 @@ func NewRepository(pgpool *pgxpool.Pool, logger *slog.Logger) *RepositoryImpl {
 }
 
 // GetUserRecentInteractions fetches recent interactions grouped by city
-func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, page, limit int) (*types.RecentInteractionsResponse, error) {
+func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID uuid.UUID, page, limit int, filterOptions *types.RecentInteractionsFilter) (*types.RecentInteractionsResponse, error) {
 	ctx, span := otel.Tracer("RecentsRepository").Start(ctx, "GetUserRecentInteractions", trace.WithAttributes(
 		attribute.String("user_id", userID.String()),
 		attribute.Int("page", page),
 		attribute.Int("limit", limit),
+		attribute.String("sort_by", filterOptions.SortBy),
+		attribute.String("sort_order", filterOptions.SortOrder),
+		attribute.String("search", filterOptions.Search),
 	))
 	defer span.End()
 
 	l := r.logger.With(slog.String("method", "GetUserRecentInteractions"))
 
-	query := `
-        SELECT DISTINCT
+	// Build WHERE clause with filters
+	whereConditions := []string{"user_id = $1", "city_name != ''", "city_name IS NOT NULL"}
+	args := []interface{}{userID}
+	argIndex := 2
+
+	// Add search filter
+	if filterOptions.Search != "" {
+		whereConditions = append(whereConditions, fmt.Sprintf("LOWER(city_name) LIKE LOWER($%d)", argIndex))
+		args = append(args, "%"+filterOptions.Search+"%")
+		argIndex++
+	}
+
+	// Build HAVING clause for interaction count filters
+	havingConditions := []string{}
+	if filterOptions.MinInteractions >= 0 {
+		havingConditions = append(havingConditions, fmt.Sprintf("COUNT(*) >= %d", filterOptions.MinInteractions))
+	}
+	if filterOptions.MaxInteractions >= 0 {
+		havingConditions = append(havingConditions, fmt.Sprintf("COUNT(*) <= %d", filterOptions.MaxInteractions))
+	}
+
+	// Build ORDER BY clause
+	var orderBy string
+	switch filterOptions.SortBy {
+	case "city_name":
+		orderBy = "city_name"
+	case "interaction_count":
+		orderBy = "interaction_count"
+	case "poi_count":
+		orderBy = "poi_count"
+	default:
+		orderBy = "last_activity"
+	}
+
+	if filterOptions.SortOrder == "asc" {
+		orderBy += " ASC"
+	} else {
+		orderBy += " DESC"
+	}
+
+	// Build the main query - we need a subquery to properly aggregate by city
+	subquery := fmt.Sprintf(`
+        SELECT 
             l.city_name,
             MAX(l.created_at) as last_activity,
             COUNT(*) as interaction_count,
-            l.session_id,
+            (
+                SELECT session_id 
+                FROM llm_interactions llmi 
+                WHERE llmi.user_id = l.user_id 
+                  AND llmi.city_name = l.city_name 
+                ORDER BY llmi.created_at DESC 
+                LIMIT 1
+            ) as session_id,
             CASE 
                 WHEN l.city_name IS NOT NULL AND l.city_name != '' 
                 THEN 'Trip to ' || l.city_name
                 ELSE 'Travel Planning'
-            END as title
+            END as title,
+            COALESCE((
+                SELECT COUNT(DISTINCT pd.id)
+                FROM poi_details pd
+                JOIN llm_interactions li ON pd.llm_interaction_id = li.id
+                WHERE li.user_id = l.user_id AND li.city_name = l.city_name
+            ), 0) as poi_count
         FROM llm_interactions l 
-        WHERE user_id = $1 
-            AND city_name != '' 
-            AND city_name IS NOT NULL
-        GROUP BY l.city_name, l.session_id 
-        ORDER BY last_activity DESC 
-        LIMIT $2 OFFSET $3
-    `
-	offset := (page - 1) * limit
+        WHERE %s
+        GROUP BY l.city_name, l.user_id
+        %s
+    `, strings.Join(whereConditions, " AND "),
+		func() string {
+			if len(havingConditions) > 0 {
+				return "HAVING " + strings.Join(havingConditions, " AND ")
+			}
+			return ""
+		}())
 
+	query := fmt.Sprintf(`
+        SELECT 
+            city_name,
+            last_activity,
+            interaction_count,
+            session_id,
+            title,
+            poi_count
+        FROM (%s) as city_data
+        ORDER BY %s 
+        LIMIT $%d OFFSET $%d
+    `, subquery, orderBy, argIndex, argIndex+1)
+
+	args = append(args, limit, (page-1)*limit)
 	l.InfoContext(ctx, "Executing query",
 		slog.String("query", query),
-		slog.Any("params", []interface{}{userID, limit, offset}))
+		slog.Any("params", args))
 
-	rows, err := r.pgpool.Query(ctx, query, userID, limit, offset)
+	rows, err := r.pgpool.Query(ctx, query, args...)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to query recent interactions", slog.Any("error", err))
 		span.RecordError(err)
@@ -91,8 +165,9 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 		var interactionCount int
 		var sessionID uuid.UUID
 		var title string
+		var poiCount int
 
-		err := rows.Scan(&cityName, &lastActivity, &interactionCount, &sessionID, &title)
+		err := rows.Scan(&cityName, &lastActivity, &interactionCount, &sessionID, &title, &poiCount)
 		if err != nil {
 			l.ErrorContext(ctx, "Failed to scan city row", slog.Any("error", err))
 			continue
@@ -106,13 +181,7 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 			continue
 		}
 
-		poiCount, err := r.getCityPOICount(ctx, userID, cityName)
-		if err != nil {
-			l.WarnContext(ctx, "Failed to get POI count for city",
-				slog.String("city", cityName),
-				slog.Any("error", err))
-			poiCount = 0
-		}
+		// POI count is now included in the main query
 
 		cities = append(cities, types.CityInteractions{
 			CityName:     cityName,
@@ -131,15 +200,31 @@ func (r *RepositoryImpl) GetUserRecentInteractions(ctx context.Context, userID u
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
-	var total int
-	countQuery := `
-        SELECT COUNT(DISTINCT (l.city_name, l.session_id)) 
+	// Build count query with same filters - count cities, not sessions
+	countSubquery := fmt.Sprintf(`
+        SELECT 
+            l.city_name,
+            COUNT(*) as interaction_count
         FROM llm_interactions l
-        WHERE user_id = $1 
-            AND city_name != '' 
-            AND city_name IS NOT NULL
-    `
-	err = r.pgpool.QueryRow(ctx, countQuery, userID).Scan(&total)
+        WHERE %s
+        GROUP BY l.city_name, l.user_id
+        %s
+    `, strings.Join(whereConditions, " AND "),
+		func() string {
+			if len(havingConditions) > 0 {
+				return "HAVING " + strings.Join(havingConditions, " AND ")
+			}
+			return ""
+		}())
+
+	// For count, we need to count the results from the grouped query
+	countWrapperQuery := fmt.Sprintf("SELECT COUNT(*) FROM (%s) as grouped_results", countSubquery)
+
+	// Use the same args except for limit and offset
+	countArgs := args[:len(args)-2]
+
+	var total int
+	err = r.pgpool.QueryRow(ctx, countWrapperQuery, countArgs...).Scan(&total)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to query total recent interactions count", slog.Any("error", err))
 		// Handle the error - you could return an error or default to 0
@@ -215,24 +300,6 @@ func (r *RepositoryImpl) getCityInteractions(ctx context.Context, userID uuid.UU
 	}
 
 	return interactions, nil
-}
-
-// getCityPOICount counts POIs for a city from user interactions
-func (r *RepositoryImpl) getCityPOICount(ctx context.Context, userID uuid.UUID, cityName string) (int, error) {
-	query := `
-		SELECT COUNT(DISTINCT pd.id)
-		FROM poi_details pd
-		JOIN llm_interactions li ON pd.llm_interaction_id = li.id
-		WHERE li.user_id = $1 AND li.city_name = $2
-	`
-
-	var count int
-	err := r.pgpool.QueryRow(ctx, query, userID, cityName).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("failed to count POIs: %w", err)
-	}
-
-	return count, nil
 }
 
 // GetCityPOIsByInteraction gets all POIs for a city from user's interactions

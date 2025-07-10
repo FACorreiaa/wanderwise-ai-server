@@ -1,10 +1,11 @@
-package llmChat
+package llmchat
 
 import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ var _ Handler = (*HandlerImpl)(nil)
 
 type Handler interface {
 	SaveItenerary(w http.ResponseWriter, r *http.Request)
+	GetBookmarkedItineraries(w http.ResponseWriter, r *http.Request)
 	RemoveItenerary(w http.ResponseWriter, r *http.Request)
 	GetPOIDetails(w http.ResponseWriter, r *http.Request)
 
@@ -105,6 +107,67 @@ func (h *HandlerImpl) SaveItenerary(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSONResponse(w, r, http.StatusCreated, savedItinerary)
 }
 
+func (h *HandlerImpl) GetBookmarkedItineraries(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetBookmarkedItineraries", trace.WithAttributes(
+		semconv.HTTPRequestMethodKey.String(r.Method),
+		semconv.HTTPRouteKey.String("/llm_interaction/bookmarks"),
+	))
+	defer span.End()
+
+	l := h.logger.With(slog.String("HandlerImpl", "GetBookmarkedItineraries"))
+	l.DebugContext(ctx, "Getting bookmarked itineraries")
+
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		l.ErrorContext(ctx, "User ID not found in context")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid user ID format", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+
+	// Parse pagination parameters
+	page := 1
+	limit := 10
+
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	response, err := h.llmInteractionService.GetBookmarkedItineraries(ctx, userID, page, limit)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to retrieve bookmarked itineraries")
+		l.ErrorContext(ctx, "Failed to retrieve bookmarked itineraries", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to retrieve bookmarked itineraries")
+		return
+	}
+
+	span.SetAttributes(
+		attribute.Int("total_records", response.TotalRecords),
+		attribute.Int("page", response.Page),
+		attribute.Int("page_size", response.PageSize),
+		attribute.Int("returned_count", len(response.Itineraries)),
+	)
+	span.SetStatus(codes.Ok, "Bookmarked itineraries retrieved successfully")
+
+	api.WriteJSONResponse(w, r, http.StatusOK, response)
+
+}
+
 func (h *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetUserChatSessions", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -132,16 +195,63 @@ func (h *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *http.Request
 	span.SetAttributes(semconv.EnduserIDKey.String(userID.String()))
 	l = l.With(slog.String("userID", userID.String()))
 
-	// Get chat sessions from service
-	sessions, err := h.llmInteractionService.GetUserChatSessions(ctx, userID)
+	// Parse pagination parameters
+	page := 1 // default
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if parsedPage, err := strconv.Atoi(pageStr); err == nil {
+			page = parsedPage
+		}
+	}
+
+	limit := 10 // default
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil {
+			limit = parsedLimit
+		}
+	}
+
+	// Validate page
+	if page <= 0 {
+		page = 1
+	}
+
+	// Validate limit
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	l.InfoContext(ctx, "Processing get user chat sessions request",
+		slog.String("user_id", userID.String()),
+		slog.Int("page", page),
+		slog.Int("limit", limit))
+
+	span.SetAttributes(
+		attribute.String("user_id", userID.String()),
+		attribute.Int("page", page),
+		attribute.Int("limit", limit),
+	)
+
+	// Get chat sessions from service with pagination
+	response, err := h.llmInteractionService.GetUserChatSessions(ctx, userID, page, limit)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to get user chat sessions", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to get chat sessions: %s", err.Error()))
 		return
 	}
 
-	l.InfoContext(ctx, "Successfully retrieved user chat sessions", slog.Int("sessionCount", len(sessions)))
-	api.WriteJSONResponse(w, r, http.StatusOK, sessions)
+	l.InfoContext(ctx, "Successfully retrieved user chat sessions",
+		slog.Int("sessionCount", len(response.Sessions)),
+		slog.Int("total", response.Total))
+
+	span.SetAttributes(
+		attribute.Int("response.sessions_count", len(response.Sessions)),
+		attribute.Int("response.total", response.Total),
+	)
+
+	api.WriteJSONResponse(w, r, http.StatusOK, response)
 }
 
 func (h *HandlerImpl) RemoveItenerary(w http.ResponseWriter, r *http.Request) {
@@ -276,27 +386,6 @@ func (h *HandlerImpl) GetPOIDetails(w http.ResponseWriter, r *http.Request) {
 
 	l.InfoContext(ctx, "Successfully fetched POI details")
 	span.SetStatus(codes.Ok, "Success")
-}
-
-// Stream Handlers
-func (h *HandlerImpl) writeSSEError(w http.ResponseWriter, errorMsg string) {
-	event := types.StreamEvent{
-		Type:      types.EventTypeError,
-		Error:     errorMsg,
-		Timestamp: time.Now(),
-		EventID:   uuid.New().String(),
-	}
-	data, err := json.Marshal(event)
-	if err != nil {
-
-		return
-	}
-	fmt.Fprintf(w, "id: %s\n", event.EventID)
-	fmt.Fprintf(w, "event: %s\n", event.Type)
-	fmt.Fprintf(w, "data: %s\n\n", data)
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
-	}
 }
 
 // StartChatMessageStream handles unified chat requests with streaming
