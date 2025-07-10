@@ -296,15 +296,63 @@ func (HandlerImpl *HandlerImpl) GetFavouritePOIsByUserID(w http.ResponseWriter, 
 	span.SetAttributes(semconv.EnduserIDKey.String(userID.String()))
 	l = l.With(slog.String("userID", userID.String()))
 
-	favouritePOIs, err := HandlerImpl.poiService.GetFavouritePOIsByUserID(ctx, userID)
+	// Parse pagination parameters
+	pageStr := r.URL.Query().Get("page")
+	limitStr := r.URL.Query().Get("limit")
+
+	// Default values
+	page := 1
+	limit := 10 // Default to 12 items per page
+
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 { // Max 100 items per page
+			limit = l
+		}
+	}
+
+	offset := (page - 1) * limit
+
+	l.DebugContext(ctx, "Pagination parameters",
+		slog.Int("page", page),
+		slog.Int("limit", limit),
+		slog.Int("offset", offset))
+
+	favouritePOIs, total, err := HandlerImpl.poiService.GetFavouritePOIsByUserIDPaginated(ctx, userID, limit, offset)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to fetch favourite POIs by user ID", slog.Any("error", err))
 		api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to fetch favourite POIs: %s", err.Error()))
 		return
 	}
 
-	l.InfoContext(ctx, "Successfully fetched favourite POIs by user ID")
-	api.WriteJSONResponse(w, r, http.StatusOK, favouritePOIs)
+	// Calculate pagination metadata
+	totalPages := (total + limit - 1) / limit // Ceiling division
+	hasNext := page < totalPages
+	hasPrev := page > 1
+
+	response := map[string]interface{}{
+		"data": favouritePOIs,
+		"pagination": map[string]interface{}{
+			"current_page": page,
+			"per_page":     limit,
+			"total":        total,
+			"total_pages":  totalPages,
+			"has_next":     hasNext,
+			"has_prev":     hasPrev,
+		},
+	}
+
+	l.InfoContext(ctx, "Successfully fetched favourite POIs by user ID",
+		slog.Int("total", total),
+		slog.Int("returned", len(favouritePOIs)),
+		slog.Int("page", page),
+		slog.Int("total_pages", totalPages))
+	api.WriteJSONResponse(w, r, http.StatusOK, response)
 }
 
 // GetPOIsByCityID godoc

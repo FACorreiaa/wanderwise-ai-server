@@ -33,6 +33,7 @@ type Service interface {
 	RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) error
 	RemovePoiFromFavouritesByName(ctx context.Context, userID uuid.UUID, poiName string) error
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
+	GetFavouritePOIsByUserIDPaginated(ctx context.Context, userID uuid.UUID, limit, offset int) ([]types.POIDetailedInfo, int, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
 
 	// SearchPOIs Traditional search
@@ -159,6 +160,15 @@ func (s *ServiceImpl) GetFavouritePOIsByUserID(ctx context.Context, userID uuid.
 		return nil, err
 	}
 	return pois, nil
+}
+
+func (s *ServiceImpl) GetFavouritePOIsByUserIDPaginated(ctx context.Context, userID uuid.UUID, limit, offset int) ([]types.POIDetailedInfo, int, error) {
+	pois, total, err := s.poiRepository.GetFavouritePOIsByUserIDPaginated(ctx, userID, limit, offset)
+	if err != nil {
+		s.logger.Error("failed to get paginated favourite POIs by user ID", "error", err)
+		return nil, 0, err
+	}
+	return pois, total, nil
 }
 func (s *ServiceImpl) GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error) {
 	pois, err := s.poiRepository.GetPOIsByCityID(ctx, cityID)

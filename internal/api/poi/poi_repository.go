@@ -47,6 +47,7 @@ type Repository interface {
 	FindLLMPOIByName(ctx context.Context, name string) (uuid.UUID, error)
 	CreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error)
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
+	GetFavouritePOIsByUserIDPaginated(ctx context.Context, userID uuid.UUID, limit, offset int) ([]types.POIDetailedInfo, int, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
 
 	// POI details
@@ -495,6 +496,170 @@ ORDER BY added_at DESC;
 	}
 	r.logger.Info("Favourite POIs retrieved successfully", slog.String("userID", userID.String()), slog.Int("count", len(pois)))
 	return pois, nil
+}
+
+func (r *RepositoryImpl) GetFavouritePOIsByUserIDPaginated(ctx context.Context, userID uuid.UUID, limit, offset int) ([]types.POIDetailedInfo, int, error) {
+	// First get the total count
+	countQuery := `
+		SELECT COUNT(*) FROM (
+			SELECT 1 FROM user_favorite_pois ufp
+			INNER JOIN points_of_interest poi ON ufp.poi_id = poi.id
+			WHERE ufp.user_id = $1
+
+			UNION ALL
+
+			SELECT 1 FROM user_favorite_llm_pois uflp
+			INNER JOIN llm_poi ON uflp.llm_poi_id = llm_poi.id
+			WHERE uflp.user_id = $1
+		) combined_count
+	`
+	
+	var totalCount int
+	err := r.pgpool.QueryRow(ctx, countQuery, userID).Scan(&totalCount)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count favourite POIs: %w", err)
+	}
+
+	// Then get the paginated results
+	query := `
+		SELECT
+    favorite_id,
+    notes,
+    added_at,
+    id,
+    name,
+    longitude,
+    latitude,
+    category,
+    description_poi,
+    address,
+    website,
+    phone_number,
+    opening_hours,
+    rating,
+    price_level,
+    poi_source
+FROM (
+         -- Regular POI favorites
+         SELECT
+             ufp.id as favorite_id,
+             ufp.notes,
+             ufp.added_at,
+             poi.id,
+             poi.name,
+             ST_X(poi.location) AS longitude,
+             ST_Y(poi.location) AS latitude,
+             poi.poi_type AS category,
+             poi.description AS description_poi,
+             poi.address,
+             poi.website,
+             poi.phone_number,
+             poi.opening_hours,
+             poi.average_rating as rating,
+             poi.price_level::text as price_level,
+             'regular' as poi_source
+         FROM user_favorite_pois ufp
+                  INNER JOIN points_of_interest poi ON ufp.poi_id = poi.id
+         WHERE ufp.user_id = $1
+
+         UNION ALL
+
+         -- LLM POI favorites
+         SELECT
+             uflp.id as favorite_id,
+             uflp.notes,
+             uflp.added_at,
+             llm_poi.id,
+             llm_poi.name,
+             llm_poi.longitude,
+             llm_poi.latitude,
+             llm_poi.category,
+             llm_poi.description AS description_poi,
+             llm_poi.address,
+             llm_poi.website,
+             llm_poi.phone_number,
+             llm_poi.opening_hours,
+             llm_poi.rating,
+             llm_poi.price_level,
+             'llm' as poi_source
+         FROM user_favorite_llm_pois uflp
+                  INNER JOIN llm_poi ON uflp.llm_poi_id = llm_poi.id
+         WHERE uflp.user_id = $1
+     ) combined_favorites
+ORDER BY added_at DESC
+LIMIT $2 OFFSET $3;
+	`
+	
+	rows, err := r.pgpool.Query(ctx, query, userID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query favourite POIs: %w", err)
+	}
+	defer rows.Close()
+	
+	var pois []types.POIDetailedInfo
+	for rows.Next() {
+		var poi types.POIDetailedInfo
+		var favoriteID uuid.UUID
+		var notes *string
+		var addedAt time.Time
+		var address, website, phoneNumber *string
+		var openingHours *string
+		var rating *float64
+		var priceLevel *string
+		var poiSource string
+
+		err := rows.Scan(
+			&favoriteID,         // favorite_id
+			&notes,              // notes
+			&addedAt,            // added_at
+			&poi.ID,             // id
+			&poi.Name,           // name
+			&poi.Longitude,      // longitude
+			&poi.Latitude,       // latitude
+			&poi.Category,       // category
+			&poi.DescriptionPOI, // description_poi
+			&address,            // address
+			&website,            // website
+			&phoneNumber,        // phone_number
+			&openingHours,       // opening_hours
+			&rating,             // rating
+			&priceLevel,         // price_level
+			&poiSource,          // poi_source
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan favourite POI row: %w", err)
+		}
+
+		// Set optional fields
+		if address != nil {
+			poi.Address = *address
+		}
+		if website != nil {
+			poi.Website = *website
+		}
+		if phoneNumber != nil {
+			poi.PhoneNumber = *phoneNumber
+		}
+		if rating != nil {
+			poi.Rating = *rating
+		}
+		if priceLevel != nil {
+			poi.PriceLevel = *priceLevel
+		}
+
+		pois = append(pois, poi)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error iterating favourite POI rows: %w", err)
+	}
+	
+	r.logger.Info("Paginated favourite POIs retrieved successfully", 
+		slog.String("userID", userID.String()), 
+		slog.Int("count", len(pois)),
+		slog.Int("total", totalCount),
+		slog.Int("limit", limit),
+		slog.Int("offset", offset))
+	return pois, totalCount, nil
 }
 
 func (r *RepositoryImpl) GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error) {
