@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
+	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -426,102 +426,70 @@ func (r *RepositoryImpl) UpdateSearchProfile(ctx context.Context, userID, profil
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	// Build the update query dynamically based on which fields are provided
-	var updates []string
-	args := []interface{}{}
-	paramIdx := 1
+	updateBuilder := squirrel.Update("user_preference_profiles").
+		PlaceholderFormat(squirrel.Dollar).
+		Where(squirrel.Eq{"id": profileID, "user_id": userID})
+
+	var hasUpdates bool
 
 	if params.ProfileName != "" {
-		updates = append(updates, fmt.Sprintf("profile_name = $%d", paramIdx))
-		args = append(args, params.ProfileName)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("profile_name", params.ProfileName)
+		hasUpdates = true
 	}
-
 	if params.IsDefault != nil {
-		updates = append(updates, fmt.Sprintf("is_default = $%d", paramIdx))
-		args = append(args, *params.IsDefault)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("is_default", *params.IsDefault)
+		hasUpdates = true
 	}
-
 	if params.SearchRadiusKm != nil {
-		updates = append(updates, fmt.Sprintf("search_radius_km = $%d", paramIdx))
-		args = append(args, *params.SearchRadiusKm)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("search_radius_km", *params.SearchRadiusKm)
+		hasUpdates = true
 	}
-
 	if params.PreferredTime != nil {
-		updates = append(updates, fmt.Sprintf("preferred_time = $%d", paramIdx))
-		args = append(args, *params.PreferredTime)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("preferred_time", *params.PreferredTime)
+		hasUpdates = true
 	}
-
 	if params.BudgetLevel != nil {
-		updates = append(updates, fmt.Sprintf("budget_level = $%d", paramIdx))
-		args = append(args, *params.BudgetLevel)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("budget_level", *params.BudgetLevel)
+		hasUpdates = true
 	}
-
 	if params.PreferredPace != nil {
-		updates = append(updates, fmt.Sprintf("preferred_pace = $%d", paramIdx))
-		args = append(args, *params.PreferredPace)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("preferred_pace", *params.PreferredPace)
+		hasUpdates = true
 	}
-
 	if params.PreferAccessiblePOIs != nil {
-		updates = append(updates, fmt.Sprintf("prefer_accessible_pois = $%d", paramIdx))
-		args = append(args, *params.PreferAccessiblePOIs)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("prefer_accessible_pois", *params.PreferAccessiblePOIs)
+		hasUpdates = true
 	}
-
 	if params.PreferOutdoorSeating != nil {
-		updates = append(updates, fmt.Sprintf("prefer_outdoor_seating = $%d", paramIdx))
-		args = append(args, *params.PreferOutdoorSeating)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("prefer_outdoor_seating", *params.PreferOutdoorSeating)
+		hasUpdates = true
 	}
-
 	if params.PreferDogFriendly != nil {
-		updates = append(updates, fmt.Sprintf("prefer_dog_friendly = $%d", paramIdx))
-		args = append(args, *params.PreferDogFriendly)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("prefer_dog_friendly", *params.PreferDogFriendly)
+		hasUpdates = true
 	}
-
 	if params.PreferredVibes != nil {
-		updates = append(updates, fmt.Sprintf("preferred_vibes = $%d", paramIdx))
-		args = append(args, params.PreferredVibes)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("preferred_vibes", params.PreferredVibes)
+		hasUpdates = true
 	}
-
 	if params.PreferredTransport != nil {
-		updates = append(updates, fmt.Sprintf("preferred_transport = $%d", paramIdx))
-		args = append(args, *params.PreferredTransport)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("preferred_transport", *params.PreferredTransport)
+		hasUpdates = true
 	}
-
 	if params.DietaryNeeds != nil {
-		updates = append(updates, fmt.Sprintf("dietary_needs = $%d", paramIdx))
-		args = append(args, params.DietaryNeeds)
-		paramIdx++
+		updateBuilder = updateBuilder.Set("dietary_needs", params.DietaryNeeds)
+		hasUpdates = true
 	}
 
 	// Update main profile if there are changes
-	if len(updates) > 0 {
-		// Always update the updated_at timestamp
-		updates = append(updates, fmt.Sprintf("updated_at = $%d", paramIdx))
-		args = append(args, time.Now())
-		paramIdx++
+	if hasUpdates {
+		updateBuilder = updateBuilder.Set("updated_at", time.Now())
 
-		args = append(args, profileID)
-		idPlaceholderNum := paramIdx
-		paramIdx++
-
-		args = append(args, userID)
-		userIDPlaceholderNum := paramIdx
-
-		query := fmt.Sprintf(`
-			UPDATE user_preference_profiles
-			SET %s
-			WHERE id = $%d AND user_id = $%d`, strings.Join(updates, ", "),
-			idPlaceholderNum, userIDPlaceholderNum)
+		query, args, err := updateBuilder.ToSql()
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("failed to build update query: %w", err)
+		}
 
 		tag, err := tx.Exec(ctx, query, args...)
 		if err != nil {

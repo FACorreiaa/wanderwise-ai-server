@@ -93,7 +93,6 @@ type MockPOIRepository struct {
 }
 
 func (m *MockPOIRepository) GetPOIsByLocationAndDistanceWithCategory(ctx context.Context, lat, lon, radiusMeters float64, category string) ([]types.POIDetailedInfo, error) {
-	//TODO implement me
 	panic("implement me")
 }
 

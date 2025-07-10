@@ -222,9 +222,7 @@ func LLMInteractionRoutes(HandlerImpl *llmChat.HandlerImpl, rateLimiter *middlew
 func POIRoutes(HandlerImpl *poi.HandlerImpl) http.Handler {
 	r := chi.NewRouter()
 	// Points of Interest routes
-	r.Get("/favourites", HandlerImpl.GetFavouritePOIsByUserID)   // GET http://localhost:8000/api/v1/pois/favourites
-	r.Post("/favourites", HandlerImpl.AddPoiToFavourites)        // POST http://localhost:8000/api/v1/pois/favourites
-	r.Delete("/favourites", HandlerImpl.RemovePoiFromFavourites) // DELETE http://localhost:8000/api/v1/pois/favourites/{poiID}
+
 	r.Get("/city/{cityID}", HandlerImpl.GetPOIsByCityID)
 	r.Get("/itineraries", HandlerImpl.GetItineraries)                           // GET /api/v1/itineraries?page=1&page_size=20
 	r.Get("/itineraries/itinerary/{itinerary_id}", HandlerImpl.GetItinerary)    // GET /api/v1/itineraries/{uuid}
@@ -236,6 +234,11 @@ func POIRoutes(HandlerImpl *poi.HandlerImpl) http.Handler {
 	r.Get("/discover/activities", HandlerImpl.GetNearbyActivities)   // GET http://localhost:8000/api/v1/pois/discover/activities
 	r.Get("/discover/hotels", HandlerImpl.GetNearbyHotels)           // GET http://localhost:8000/api/v1/pois/discover/hotels
 	r.Get("/discover/attractions", HandlerImpl.GetNearbyAttractions) // GET http://localhost:8000/api/v1/pois/discover/attractions
+
+	// Favorites routes
+	r.Get("/favourites", HandlerImpl.GetFavouritePOIsByUserID)   // GET http://localhost:8000/api/v1/pois/favourites
+	r.Post("/favourites", HandlerImpl.AddPoiToFavourites)        // POST http://localhost:8000/api/v1/pois/favourites
+	r.Delete("/favourites", HandlerImpl.RemovePoiFromFavourites) // DELETE http://localhost:8000/api/v1/pois/favourites
 
 	// Traditional search
 	r.Get("/search", HandlerImpl.GetPOIs) // GET http://localhost:8000/api/v1/pois/search

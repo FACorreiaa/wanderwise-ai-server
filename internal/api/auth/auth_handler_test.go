@@ -120,7 +120,7 @@ func TestLoginHandlerImpl(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
+		err = json.Unmarshal(w.Body.Bytes(), &response)
 		assert.NoError(t, err)
 
 		assert.Equal(t, "access-token", response["access_token"])
