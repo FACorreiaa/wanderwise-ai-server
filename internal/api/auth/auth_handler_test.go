@@ -13,6 +13,7 @@ import (
 
 	"github.com/markbates/goth"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
@@ -179,7 +180,8 @@ func TestLoginHandlerImpl(t *testing.T) {
 			"email":    "test@example.com",
 			"password": "wrong-password",
 		}
-		body, _ := json.Marshal(loginRequest)
+		body, err := json.Marshal(loginRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewBuffer(body))
@@ -205,7 +207,8 @@ func TestLoginHandlerImpl(t *testing.T) {
 			"email":    "test@example.com",
 			"password": "password123",
 		}
-		body, _ := json.Marshal(loginRequest)
+		body, err := json.Marshal(loginRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewBuffer(body))
@@ -240,7 +243,8 @@ func TestRegisterHandlerImpl(t *testing.T) {
 			"password": "password123",
 			"role":     "user",
 		}
-		body, _ := json.Marshal(registerRequest)
+		body, err := json.Marshal(registerRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewBuffer(body))
@@ -284,7 +288,8 @@ func TestRegisterHandlerImpl(t *testing.T) {
 			"email":    "test@example.com",
 			// Missing password
 		}
-		body, _ := json.Marshal(registerRequest)
+		body, err := json.Marshal(registerRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewBuffer(body))
@@ -308,7 +313,8 @@ func TestRegisterHandlerImpl(t *testing.T) {
 			"password": "password123",
 			"role":     "user",
 		}
-		body, _ := json.Marshal(registerRequest)
+		body, err := json.Marshal(registerRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewBuffer(body))
@@ -335,7 +341,8 @@ func TestRegisterHandlerImpl(t *testing.T) {
 			"password": "password123",
 			"role":     "user",
 		}
-		body, _ := json.Marshal(registerRequest)
+		body, err := json.Marshal(registerRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewBuffer(body))
@@ -366,7 +373,8 @@ func TestLogoutHandlerImpl(t *testing.T) {
 		logoutRequest := map[string]string{
 			"refreshToken": "valid-refresh-token",
 		}
-		body, _ := json.Marshal(logoutRequest)
+		body, err := json.Marshal(logoutRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/logout", bytes.NewBuffer(body))
@@ -409,7 +417,8 @@ func TestLogoutHandlerImpl(t *testing.T) {
 		logoutRequest := map[string]string{
 			// Missing refreshToken
 		}
-		body, _ := json.Marshal(logoutRequest)
+		body, err := json.Marshal(logoutRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/logout", bytes.NewBuffer(body))
@@ -430,7 +439,8 @@ func TestLogoutHandlerImpl(t *testing.T) {
 		logoutRequest := map[string]string{
 			"refreshToken": "invalid-refresh-token",
 		}
-		body, _ := json.Marshal(logoutRequest)
+		body, err := json.Marshal(logoutRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/logout", bytes.NewBuffer(body))
@@ -455,7 +465,8 @@ func TestLogoutHandlerImpl(t *testing.T) {
 		logoutRequest := map[string]string{
 			"refreshToken": "valid-refresh-token",
 		}
-		body, _ := json.Marshal(logoutRequest)
+		body, err := json.Marshal(logoutRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/logout", bytes.NewBuffer(body))
@@ -487,7 +498,8 @@ func TestRefreshTokenHandlerImpl(t *testing.T) {
 		refreshRequest := map[string]string{
 			"refreshToken": "valid-refresh-token",
 		}
-		body, _ := json.Marshal(refreshRequest)
+		body, err := json.Marshal(refreshRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/refresh", bytes.NewBuffer(body))
@@ -505,7 +517,7 @@ func TestRefreshTokenHandlerImpl(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
+		err = json.Unmarshal(w.Body.Bytes(), &response)
 		assert.NoError(t, err)
 
 		assert.Equal(t, "new-access-token", response["accessToken"])
@@ -538,7 +550,8 @@ func TestRefreshTokenHandlerImpl(t *testing.T) {
 		refreshRequest := map[string]string{
 			// Missing refreshToken
 		}
-		body, _ := json.Marshal(refreshRequest)
+		body, err := json.Marshal(refreshRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/refresh", bytes.NewBuffer(body))
@@ -559,7 +572,8 @@ func TestRefreshTokenHandlerImpl(t *testing.T) {
 		refreshRequest := map[string]string{
 			"refreshToken": "invalid-refresh-token",
 		}
-		body, _ := json.Marshal(refreshRequest)
+		body, err := json.Marshal(refreshRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/refresh", bytes.NewBuffer(body))
@@ -584,7 +598,8 @@ func TestRefreshTokenHandlerImpl(t *testing.T) {
 		refreshRequest := map[string]string{
 			"refreshToken": "valid-refresh-token",
 		}
-		body, _ := json.Marshal(refreshRequest)
+		body, err := json.Marshal(refreshRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/refresh", bytes.NewBuffer(body))
@@ -721,7 +736,8 @@ func TestChangePasswordHandlerImpl(t *testing.T) {
 			"oldPassword": "oldpassword",
 			"newPassword": "newpassword",
 		}
-		body, _ := json.Marshal(changePasswordRequest)
+		body, err := json.Marshal(changePasswordRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/change-password", bytes.NewBuffer(body))
@@ -773,7 +789,8 @@ func TestChangePasswordHandlerImpl(t *testing.T) {
 			"oldPassword": "oldpassword",
 			// Missing newPassword
 		}
-		body, _ := json.Marshal(changePasswordRequest)
+		body, err := json.Marshal(changePasswordRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/change-password", bytes.NewBuffer(body))
@@ -795,7 +812,8 @@ func TestChangePasswordHandlerImpl(t *testing.T) {
 			"oldPassword": "oldpassword",
 			"newPassword": "newpassword",
 		}
-		body, _ := json.Marshal(changePasswordRequest)
+		body, err := json.Marshal(changePasswordRequest)
+		require.NoError(t, err)
 
 		// Create request with no user ID in context
 		req := httptest.NewRequest(http.MethodPost, "/change-password", bytes.NewBuffer(body))
@@ -817,7 +835,8 @@ func TestChangePasswordHandlerImpl(t *testing.T) {
 			"oldPassword": "wrongpassword",
 			"newPassword": "newpassword",
 		}
-		body, _ := json.Marshal(changePasswordRequest)
+		body, err := json.Marshal(changePasswordRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/change-password", bytes.NewBuffer(body))
@@ -847,7 +866,8 @@ func TestChangePasswordHandlerImpl(t *testing.T) {
 			"oldPassword": "oldpassword",
 			"newPassword": "newpassword",
 		}
-		body, _ := json.Marshal(changePasswordRequest)
+		body, err := json.Marshal(changePasswordRequest)
+		require.NoError(t, err)
 
 		// Create request
 		req := httptest.NewRequest(http.MethodPost, "/change-password", bytes.NewBuffer(body))
@@ -871,7 +891,7 @@ func TestChangePasswordHandlerImpl(t *testing.T) {
 	})
 }
 
-func TestChangeEmailHandlerImpl(t *testing.T) {
+func TestChangeEmailHandlerImpl(_ *testing.T) {
 	// Create a mock service
 	mockService := new(MockAuthService)
 	logger := slog.Default()

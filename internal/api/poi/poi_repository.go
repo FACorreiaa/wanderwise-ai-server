@@ -132,10 +132,14 @@ func (r *RepositoryImpl) SavePoi(ctx context.Context, poi types.POIDetailedInfo,
 		poi.Category, "loci_ai", poi.DescriptionPOI,
 	).Scan(&id); err != nil {
 		if err == pgx.ErrNoRows {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				r.logger.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+			}
 			return uuid.Nil, nil
 		}
-		_ = tx.Rollback(ctx)
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			r.logger.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+		}
 		return uuid.Nil, fmt.Errorf("failed to insert POI: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -820,7 +824,9 @@ func (r *RepositoryImpl) SavePOIDetails(ctx context.Context, poi types.POIDetail
 		uuid.NullUUID{UUID: poi.LlmInteractionID, Valid: poi.LlmInteractionID != uuid.Nil},
 	)
 	if err != nil {
-		_ = tx.Rollback(ctx)
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			r.logger.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+		}
 		r.logger.ErrorContext(ctx, "Failed to save POI details",
 			slog.Any("error", err),
 			slog.String("poi_name", poi.Name),
@@ -883,7 +889,9 @@ func (r *RepositoryImpl) SavePOIDetails(ctx context.Context, poi types.POIDetail
 		"loci_ai", poi.Description, poi.Tags,
 	)
 	if err != nil {
-		_ = tx.Rollback(ctx)
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			r.logger.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+		}
 		r.logger.ErrorContext(ctx, "Failed to save POI to points_of_interest",
 			slog.Any("error", err),
 			slog.String("poi_name", poi.Name),
@@ -2003,7 +2011,7 @@ func (r *RepositoryImpl) SearchPOIsHybrid(ctx context.Context, filter types.POIF
 	if filter.Category != "" {
 		query += fmt.Sprintf(` AND poi_type = $%d`, argIndex)
 		args = append(args, filter.Category)
-		argIndex++
+		_ = argIndex + 1 // argIndex incremented but not used after this point
 	}
 
 	// Add semantic weight and embedding (adjust indexes based on whether category was added)
@@ -2620,7 +2628,7 @@ func (r *RepositoryImpl) SaveLlmInteraction(ctx context.Context, interaction *ty
 	return id, nil
 }
 
-func (r *RepositoryImpl) SaveLlmPoisToDatabase(ctx context.Context, userID uuid.UUID, pois []types.POIDetailedInfo, genAIResponse *types.GenAIResponse, llmInteractionID uuid.UUID) error {
+func (r *RepositoryImpl) SaveLlmPoisToDatabase(ctx context.Context, userID uuid.UUID, pois []types.POIDetailedInfo, _ *types.GenAIResponse, llmInteractionID uuid.UUID) error {
 	ctx, span := otel.Tracer("POIRepository").Start(ctx, "SaveLlmPoisToDatabase", trace.WithAttributes(
 		attribute.Int("poi.count", len(pois)),
 	))
@@ -2639,7 +2647,11 @@ func (r *RepositoryImpl) SaveLlmPoisToDatabase(ctx context.Context, userID uuid.
 		span.RecordError(err)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback on error
+	defer func() {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+		}
+	}() // Rollback on error
 
 	stmt, err := tx.Prepare(ctx, "insert_llm_poi", `
         INSERT INTO llm_suggested_pois (id, user_id, llm_interaction_id, name, latitude, longitude, category, description_poi, distance, location)
@@ -2776,9 +2788,18 @@ func (r *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDet
 	`
 
 	// Convert slices to JSON for storage
-	tagsJSON, _ := json.Marshal(poiData.Tags)
-	imagesJSON, _ := json.Marshal(poiData.Images)
-	openingHoursJSON, _ := json.Marshal(poiData.OpeningHours)
+	tagsJSON, err := json.Marshal(poiData.Tags)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to marshal tags: %w", err)
+	}
+	imagesJSON, err := json.Marshal(poiData.Images)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to marshal images: %w", err)
+	}
+	openingHoursJSON, err := json.Marshal(poiData.OpeningHours)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to marshal opening hours: %w", err)
+	}
 
 	// Use LLM interaction ID directly, but handle invalid UUIDs
 	var llmInteractionID *uuid.UUID
@@ -2787,7 +2808,7 @@ func (r *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDet
 	}
 
 	now := time.Now()
-	_, err := r.pgpool.Exec(ctx, query,
+	_, err = r.pgpool.Exec(ctx, query,
 		newID,
 		llmInteractionID,
 		poiData.City,

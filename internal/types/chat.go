@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -30,8 +31,8 @@ type LlmInteraction struct {
 	TotalTokens        int             `json:"total_tokens"`
 	LatencyMs          int             `json:"latency_ms"`
 	Timestamp          time.Time       `json:"timestamp"`
-	ModelName          string          `json:"model_name"`
-	Response           string          `json:"response"`
+	ModelName          string          `json:"model"`
+	Response           string          `json:"response_content"`
 	Latitude           *float64        `json:"latitude"`
 	Longitude          *float64        `json:"longitude"`
 	Distance           *float64        `json:"distance"`
@@ -289,13 +290,27 @@ type ContinueChatRequest struct {
 
 type SimpleIntentClassifier struct{}
 
-func (c *SimpleIntentClassifier) Classify(ctx context.Context, message string) (IntentType, error) {
+func (c *SimpleIntentClassifier) Classify(_ context.Context, message string) (IntentType, error) {
 	message = strings.ToLower(message)
-	if matched, _ := regexp.MatchString(`add|include|visit`, message); matched {
+	matched, err := regexp.MatchString(`add|include|visit`, message)
+	if err != nil {
+		return IntentModifyItinerary, fmt.Errorf("failed to match add pattern: %w", err)
+	}
+	if matched {
 		return IntentAddPOI, nil
-	} else if matched, _ := regexp.MatchString(`remove|delete|skip`, message); matched {
+	}
+	matched, err = regexp.MatchString(`remove|delete|skip`, message)
+	if err != nil {
+		return IntentModifyItinerary, fmt.Errorf("failed to match remove pattern: %w", err)
+	}
+	if matched {
 		return IntentRemovePOI, nil
-	} else if matched, _ := regexp.MatchString(`what|where|how|why|when`, message); matched {
+	}
+	matched, err = regexp.MatchString(`what|where|how|why|when`, message)
+	if err != nil {
+		return IntentModifyItinerary, fmt.Errorf("failed to match question pattern: %w", err)
+	}
+	if matched {
 		return IntentAskQuestion, nil
 	}
 	return IntentModifyItinerary, nil // Default intent
@@ -304,26 +319,30 @@ func (c *SimpleIntentClassifier) Classify(ctx context.Context, message string) (
 // DomainDetector detects the primary domain from user queries
 type DomainDetector struct{}
 
-func (d *DomainDetector) DetectDomain(ctx context.Context, message string) DomainType {
+func (d *DomainDetector) DetectDomain(_ context.Context, message string) DomainType {
 	message = strings.ToLower(message)
 
 	// Accommodation domain keywords
-	if matched, _ := regexp.MatchString(`hotel|hostel|accommodation|stay|sleep|room|booking|airbnb|lodge|resort|guesthouse`, message); matched {
+	matched, err := regexp.MatchString(`hotel|hostel|accommodation|stay|sleep|room|booking|airbnb|lodge|resort|guesthouse`, message)
+	if err == nil && matched {
 		return DomainAccommodation
 	}
 
 	// Dining domain keywords
-	if matched, _ := regexp.MatchString(`restaurant|food|eat|dine|meal|cuisine|drink|cafe|bar|lunch|dinner|breakfast|brunch`, message); matched {
+	matched, err = regexp.MatchString(`restaurant|food|eat|dine|meal|cuisine|drink|cafe|bar|lunch|dinner|breakfast|brunch`, message)
+	if err == nil && matched {
 		return DomainDining
 	}
 
 	// Activity domain keywords
-	if matched, _ := regexp.MatchString(`activity|museum|park|attraction|tour|visit|see|do|experience|adventure|shopping|nightlife`, message); matched {
+	matched, err = regexp.MatchString(`activity|museum|park|attraction|tour|visit|see|do|experience|adventure|shopping|nightlife`, message)
+	if err == nil && matched {
 		return DomainActivities
 	}
 
 	// Itinerary domain keywords
-	if matched, _ := regexp.MatchString(`itinerary|plan|schedule|trip|day|week|journey|route|organize|arrange`, message); matched {
+	matched, err = regexp.MatchString(`itinerary|plan|schedule|trip|day|week|journey|route|organize|arrange`, message)
+	if err == nil && matched {
 		return DomainItinerary
 	}
 
@@ -371,9 +390,9 @@ type CityInteractions struct {
 
 // RecentInteractionsFilter defines filters for recent interactions
 type RecentInteractionsFilter struct {
-	SortBy          string `json:"sort_by"`           // last_activity, city_name, interaction_count, poi_count
-	SortOrder       string `json:"sort_order"`        // asc, desc
-	Search          string `json:"search"`            // Search term for city name
-	MinInteractions int    `json:"min_interactions"`  // Minimum number of interactions
-	MaxInteractions int    `json:"max_interactions"`  // Maximum number of interactions
+	SortBy          string `json:"sort_by"`          // last_activity, city_name, interaction_count, poi_count
+	SortOrder       string `json:"sort_order"`       // asc, desc
+	Search          string `json:"search"`           // Search term for city name
+	MinInteractions int    `json:"min_interactions"` // Minimum number of interactions
+	MaxInteractions int    `json:"max_interactions"` // Maximum number of interactions
 }

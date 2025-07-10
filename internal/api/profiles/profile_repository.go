@@ -338,7 +338,9 @@ func (r *RepositoryImpl) CreateSearchProfile(ctx context.Context, userID uuid.UU
             VALUES ($1, $2)`
 		_, err = tx.Exec(ctx, query, p.ID, accommodationJSON)
 		if err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+			}
 			l.ErrorContext(ctx, "Failed to insert accommodation preferences", slog.Any("error", err))
 			return nil, fmt.Errorf("failed to insert accommodation preferences: %w", err)
 		}
@@ -347,7 +349,9 @@ func (r *RepositoryImpl) CreateSearchProfile(ctx context.Context, userID uuid.UU
 	if params.DiningPreferences != nil {
 		diningJSON, err := json.Marshal(params.DiningPreferences)
 		if err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+			}
 			l.ErrorContext(ctx, "Failed to marshal dining preferences", slog.Any("error", err))
 			return nil, fmt.Errorf("failed to marshal dining preferences: %w", err)
 		}
@@ -356,7 +360,9 @@ func (r *RepositoryImpl) CreateSearchProfile(ctx context.Context, userID uuid.UU
             VALUES ($1, $2)`
 		_, err = tx.Exec(ctx, query, p.ID, diningJSON)
 		if err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+			}
 			l.ErrorContext(ctx, "Failed to insert dining preferences", slog.Any("error", err))
 			return nil, fmt.Errorf("failed to insert dining preferences: %w", err)
 		}
@@ -365,7 +371,9 @@ func (r *RepositoryImpl) CreateSearchProfile(ctx context.Context, userID uuid.UU
 	if params.ActivityPreferences != nil {
 		activityJSON, err := json.Marshal(params.ActivityPreferences)
 		if err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+			}
 			l.ErrorContext(ctx, "Failed to marshal activity preferences", slog.Any("error", err))
 			return nil, fmt.Errorf("failed to marshal activity preferences: %w", err)
 		}
@@ -374,7 +382,9 @@ func (r *RepositoryImpl) CreateSearchProfile(ctx context.Context, userID uuid.UU
             VALUES ($1, $2)`
 		_, err = tx.Exec(ctx, query, p.ID, activityJSON)
 		if err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+			}
 			l.ErrorContext(ctx, "Failed to insert activity preferences", slog.Any("error", err))
 			return nil, fmt.Errorf("failed to insert activity preferences: %w", err)
 		}
@@ -383,7 +393,9 @@ func (r *RepositoryImpl) CreateSearchProfile(ctx context.Context, userID uuid.UU
 	if params.ItineraryPreferences != nil {
 		itineraryJSON, err := json.Marshal(params.ItineraryPreferences)
 		if err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+			}
 			l.ErrorContext(ctx, "Failed to marshal itinerary preferences", slog.Any("error", err))
 			return nil, fmt.Errorf("failed to marshal itinerary preferences: %w", err)
 		}
@@ -392,7 +404,9 @@ func (r *RepositoryImpl) CreateSearchProfile(ctx context.Context, userID uuid.UU
             VALUES ($1, $2)`
 		_, err = tx.Exec(ctx, query, p.ID, itineraryJSON)
 		if err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("error", rollbackErr))
+			}
 			l.ErrorContext(ctx, "Failed to insert itinerary preferences", slog.Any("error", err))
 			return nil, fmt.Errorf("failed to insert itinerary preferences: %w", err)
 		}
@@ -487,13 +501,17 @@ func (r *RepositoryImpl) UpdateSearchProfile(ctx context.Context, userID, profil
 
 		query, args, err := updateBuilder.ToSql()
 		if err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("rollback_error", rollbackErr))
+		}
 			return fmt.Errorf("failed to build update query: %w", err)
 		}
 
 		tag, err := tx.Exec(ctx, query, args...)
 		if err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("rollback_error", rollbackErr))
+		}
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" { // Unique violation
 				l.WarnContext(ctx, "Profile name already exists for this user", slog.Any("error", err))
@@ -508,7 +526,9 @@ func (r *RepositoryImpl) UpdateSearchProfile(ctx context.Context, userID, profil
 		}
 
 		if tag.RowsAffected() == 0 {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("rollback_error", rollbackErr))
+		}
 			err := fmt.Errorf("preference profile not found: %w", types.ErrNotFound)
 			l.WarnContext(ctx, "Attempted to update non-existent preference profile")
 			span.RecordError(err)
@@ -520,7 +540,9 @@ func (r *RepositoryImpl) UpdateSearchProfile(ctx context.Context, userID, profil
 	// Update domain-specific preferences if provided
 	if params.AccommodationPreferences != nil {
 		if err := r.updateAccommodationPreferencesInTx(ctx, tx, profileID, params.AccommodationPreferences); err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("rollback_error", rollbackErr))
+		}
 			l.ErrorContext(ctx, "Failed to update accommodation preferences", slog.Any("error", err))
 			return fmt.Errorf("failed to update accommodation preferences: %w", err)
 		}
@@ -528,7 +550,9 @@ func (r *RepositoryImpl) UpdateSearchProfile(ctx context.Context, userID, profil
 
 	if params.DiningPreferences != nil {
 		if err := r.updateDiningPreferencesInTx(ctx, tx, profileID, params.DiningPreferences); err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("rollback_error", rollbackErr))
+		}
 			l.ErrorContext(ctx, "Failed to update dining preferences", slog.Any("error", err))
 			return fmt.Errorf("failed to update dining preferences: %w", err)
 		}
@@ -536,7 +560,9 @@ func (r *RepositoryImpl) UpdateSearchProfile(ctx context.Context, userID, profil
 
 	if params.ActivityPreferences != nil {
 		if err := r.updateActivityPreferencesInTx(ctx, tx, profileID, params.ActivityPreferences); err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("rollback_error", rollbackErr))
+		}
 			l.ErrorContext(ctx, "Failed to update activity preferences", slog.Any("error", err))
 			return fmt.Errorf("failed to update activity preferences: %w", err)
 		}
@@ -544,7 +570,9 @@ func (r *RepositoryImpl) UpdateSearchProfile(ctx context.Context, userID, profil
 
 	if params.ItineraryPreferences != nil {
 		if err := r.updateItineraryPreferencesInTx(ctx, tx, profileID, params.ItineraryPreferences); err != nil {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("rollback_error", rollbackErr))
+		}
 			l.ErrorContext(ctx, "Failed to update itinerary preferences", slog.Any("error", err))
 			return fmt.Errorf("failed to update itinerary preferences: %w", err)
 		}
@@ -662,7 +690,9 @@ func (r *RepositoryImpl) SetDefaultSearchProfile(ctx context.Context, userID, pr
 	// First, set all profiles for this user to not be default
 	_, err = tx.Exec(ctx, "UPDATE user_preference_profiles SET is_default = FALSE WHERE user_id = $1", userID)
 	if err != nil {
-		_ = tx.Rollback(ctx)
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("rollback_error", rollbackErr))
+		}
 		l.ErrorContext(ctx, "Failed to reset default profiles", slog.Any("error", err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "DB UPDATE failed")
@@ -672,7 +702,9 @@ func (r *RepositoryImpl) SetDefaultSearchProfile(ctx context.Context, userID, pr
 	// Then set the specified profile as default
 	tag, err := tx.Exec(ctx, "UPDATE user_preference_profiles SET is_default = TRUE WHERE id = $1 AND user_id = $2", profileID, userID)
 	if err != nil {
-		_ = tx.Rollback(ctx)
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("rollback_error", rollbackErr))
+		}
 		l.ErrorContext(ctx, "Failed to set profile as default", slog.Any("error", err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "DB UPDATE failed")
@@ -680,7 +712,9 @@ func (r *RepositoryImpl) SetDefaultSearchProfile(ctx context.Context, userID, pr
 	}
 
 	if tag.RowsAffected() == 0 {
-		_ = tx.Rollback(ctx)
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			l.ErrorContext(ctx, "Failed to rollback transaction", slog.Any("rollback_error", rollbackErr))
+		}
 		// This should not happen since we already checked if the profile exists
 		err := fmt.Errorf("preference profile not found: %w", types.ErrNotFound)
 		l.WarnContext(ctx, "Attempted to set non-existent profile as default")

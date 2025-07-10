@@ -1120,7 +1120,7 @@ func (s *ServiceImpl) filterAttractions(attractions []types.POIDetailedInfo, att
 
 // TODO
 // generateRestaurantsFromLLM
-func (s *ServiceImpl) generateRestaurantsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, cuisineType, priceRange string) (*types.GenAIResponse, error) {
+func (s *ServiceImpl) generateRestaurantsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, _, _ string) (*types.GenAIResponse, error) {
 	resultCh := make(chan types.GenAIResponse, 1)
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -1220,7 +1220,7 @@ func (s *ServiceImpl) getGeneralRestaurantByDistance(wg *sync.WaitGroup,
 	}
 }
 
-func (s *ServiceImpl) generateActivitiesFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, activityType, duration string) (*types.GenAIResponse, error) {
+func (s *ServiceImpl) generateActivitiesFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, _, _ string) (*types.GenAIResponse, error) {
 	resultCh := make(chan types.GenAIResponse, 1)
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -1320,7 +1320,7 @@ func (s *ServiceImpl) getGeneralActivitiesByDistance(wg *sync.WaitGroup,
 	}
 }
 
-func (s *ServiceImpl) generateHotelsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, starRating, amenities string) (*types.GenAIResponse, error) {
+func (s *ServiceImpl) generateHotelsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, _, _ string) (*types.GenAIResponse, error) {
 	resultCh := make(chan types.GenAIResponse, 1)
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -1420,7 +1420,7 @@ func (s *ServiceImpl) getGeneralHotelsByDistance(wg *sync.WaitGroup,
 	}
 }
 
-func (s *ServiceImpl) generateAttractionsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, attractionType, isOutdoor string) (*types.GenAIResponse, error) {
+func (s *ServiceImpl) generateAttractionsFromLLM(ctx context.Context, userID uuid.UUID, lat, lon, distance float64, _, _ string) (*types.GenAIResponse, error) {
 	resultCh := make(chan types.GenAIResponse, 1)
 	var wg sync.WaitGroup
 	wg.Add(1)

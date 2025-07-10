@@ -165,7 +165,9 @@ func RateLimitMiddleware(rateLimiter *RateLimiter, logger *slog.Logger) func(htt
 
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
-				w.Write([]byte(`{"error":"Rate limit exceeded. Please try again later."}`))
+				if _, err := w.Write([]byte(`{"error":"Rate limit exceeded. Please try again later."}`)); err != nil {
+					logger.ErrorContext(r.Context(), "Failed to write rate limit response", slog.Any("error", err))
+				}
 				return
 			}
 

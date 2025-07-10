@@ -56,7 +56,7 @@ func NewHandlerImpl(userService tagsService, logger *slog.Logger) *HandlerImpl {
 // @Failure      401 {object} types.Response "Unauthorized"
 // @Failure      500 {object} types.Response "Internal Server Error"
 // @Security     BearerAuth
-// @Router       /user/tags [get]
+// @Router       /user/tags [get].
 func (u *HandlerImpl) GetTags(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("GetTagsHandlerImpl").Start(r.Context(), "GetTags", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),

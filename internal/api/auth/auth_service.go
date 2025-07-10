@@ -96,7 +96,7 @@ func (s *AuthServiceImpl) Login(ctx context.Context, email, password string) (st
 	return accessToken, refreshToken, nil
 }
 
-func (s *AuthServiceImpl) Register(ctx context.Context, username, email, password, role string) error {
+func (s *AuthServiceImpl) Register(ctx context.Context, username, email, password, _ string) error {
 	l := s.logger.With(slog.String("method", "Register"), slog.String("email", email))
 	l.DebugContext(ctx, "Attempting registration")
 
@@ -266,7 +266,7 @@ func (s *AuthServiceImpl) GetUserByID(ctx context.Context, userID string) (*type
 }
 
 // --- Internal Helper: generateTokens ---
-func (s *AuthServiceImpl) GenerateTokens(ctx context.Context, user *types.UserAuth, sub *types.Subscription) (accessToken string, refreshToken string, err error) {
+func (s *AuthServiceImpl) GenerateTokens(ctx context.Context, user *types.UserAuth, _ *types.Subscription) (accessToken string, refreshToken string, err error) {
 	l := s.logger.With(slog.String("method", "generateTokens"), slog.String("userID", user.ID))
 
 	// --- Access Token ---
@@ -354,10 +354,10 @@ func (s *AuthServiceImpl) ValidateRefreshToken(ctx context.Context, refreshToken
 // Implement a dummy for now if needed for compilation
 type dummySubsRepo struct{}
 
-func (d *dummySubsRepo) GetCurrentSubscriptionByUserID(ctx context.Context, userID string) (*types.Subscription, error) {
+func (d *dummySubsRepo) GetCurrentSubscriptionByUserID(_ context.Context, _ string) (*types.Subscription, error) {
 	return &types.Subscription{Plan: "free", Status: "active"}, nil // Always return free/active
 }
-func (d *dummySubsRepo) CreateDefaultSubscription(ctx context.Context, userID string) error {
+func (d *dummySubsRepo) CreateDefaultSubscription(_ context.Context, _ string) error {
 	return nil // Do nothing
 }
 func NewDummySubsRepo() types.SubscriptionRepository { return &dummySubsRepo{} }

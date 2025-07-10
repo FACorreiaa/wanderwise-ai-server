@@ -74,9 +74,7 @@ func cleanJSONResponse(response string) string {
 		response = strings.TrimPrefix(response, "```")
 	}
 
-	if strings.HasSuffix(response, "```") {
-		response = strings.TrimSuffix(response, "```")
-	}
+	response = strings.TrimSuffix(response, "```")
 
 	response = strings.TrimSpace(response)
 

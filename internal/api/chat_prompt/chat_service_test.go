@@ -94,6 +94,14 @@ func (m *MockPOIRepository) GetFavouritePOIsByUserID(ctx context.Context, userID
 	return args.Get(0).([]types.POIDetailedInfo), args.Error(1)
 }
 
+func (m *MockPOIRepository) GetFavouritePOIsByUserIDPaginated(ctx context.Context, userID uuid.UUID, limit, offset int) ([]types.POIDetailedInfo, int, error) {
+	args := m.Called(ctx, userID, limit, offset)
+	if args.Get(0) == nil {
+		return nil, 0, args.Error(2)
+	}
+	return args.Get(0).([]types.POIDetailedInfo), args.Get(1).(int), args.Error(2)
+}
+
 func (m *MockPOIRepository) GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error) {
 	args := m.Called(ctx, cityID)
 	if args.Get(0) == nil {

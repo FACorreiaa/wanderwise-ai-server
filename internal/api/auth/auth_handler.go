@@ -18,6 +18,11 @@ import (
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
+// ProviderKey is a custom type for context keys to avoid collisions
+type ProviderKey string
+
+const providerKey ProviderKey = "provider"
+
 var _ Handler = (*HandlerImpl)(nil)
 
 type Handler interface {
@@ -524,7 +529,7 @@ func (h *HandlerImpl) LoginWithGoogle(w http.ResponseWriter, r *http.Request) {
 	l := h.logger.With(slog.String("HandlerImpl", "LoginWithGoogle"))
 
 	// Set the provider in the context (Goth uses this to determine which provider to use)
-	ctx = context.WithValue(ctx, "provider", "google")
+	ctx = context.WithValue(ctx, providerKey, "google")
 	r = r.WithContext(ctx)
 
 	// Begin the authentication process and redirect the user to Google's login page
@@ -554,7 +559,7 @@ func (h *HandlerImpl) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	l := h.logger.With(slog.String("HandlerImpl", "GoogleCallback"))
 
 	// Set the provider in the context
-	ctx = context.WithValue(ctx, "provider", "google")
+	ctx = context.WithValue(ctx, providerKey, "google")
 	r = r.WithContext(ctx)
 
 	// Complete the authentication process and retrieve user information

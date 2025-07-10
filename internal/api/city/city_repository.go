@@ -97,7 +97,7 @@ func NewNullString(s string) sql.NullString {
 	}
 }
 
-// Helper function to convert 0.0 float to sql.NullFloat64 for database insertion
+// NewNullFloat64 Helper function to convert 0.0 float to sql.NullFloat64 for database insertion
 func NewNullFloat64(f float64) sql.NullFloat64 {
 	if f == 0.0 { // Or whatever your condition for "not set" is, e.g. NaN
 		return sql.NullFloat64{}
@@ -108,7 +108,7 @@ func NewNullFloat64(f float64) sql.NullFloat64 {
 	}
 }
 
-// You'll also need to update FindCityByNameAndCountry to retrieve these new fields.
+// FindCityByNameAndCountry You'll also need to update FindCityByNameAndCountry to retrieve these new fields.
 func (r *RepositoryImpl) FindCityByNameAndCountry(ctx context.Context, cityName, countryName string) (*types.CityDetail, error) {
 	query := `
         SELECT 
@@ -539,7 +539,7 @@ func (r *RepositoryImpl) GetAllCities(ctx context.Context) ([]types.CityDetail, 
 }
 
 // determineCityID finds the city ID and name closest to the given latitude and longitude
-func (l *RepositoryImpl) GetCity(ctx context.Context, lat, lon float64) (uuid.UUID, string, error) {
+func (r *RepositoryImpl) GetCity(ctx context.Context, lat, lon float64) (uuid.UUID, string, error) {
 	// Start OpenTelemetry tracing
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "determineCityID", trace.WithAttributes(
 		attribute.Float64("lat", lat),
@@ -548,7 +548,7 @@ func (l *RepositoryImpl) GetCity(ctx context.Context, lat, lon float64) (uuid.UU
 	defer span.End()
 
 	// Log the request
-	l.logger.DebugContext(ctx, "Determining city ID for coordinates",
+	r.logger.DebugContext(ctx, "Determining city ID for coordinates",
 		slog.Float64("lat", lat),
 		slog.Float64("lon", lon))
 
@@ -565,21 +565,21 @@ func (l *RepositoryImpl) GetCity(ctx context.Context, lat, lon float64) (uuid.UU
 
 	var cityID uuid.UUID
 	var cityName string
-	err := l.pgpool.QueryRow(ctx, query, point).Scan(&cityID, &cityName)
+	err := r.pgpool.QueryRow(ctx, query, point).Scan(&cityID, &cityName)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			l.logger.WarnContext(ctx, "No city found for the given coordinates")
+			r.logger.WarnContext(ctx, "No city found for the given coordinates")
 			span.SetStatus(codes.Error, "No city found")
 			return uuid.Nil, "", fmt.Errorf("no city found for coordinates (%f, %f)", lat, lon)
 		}
-		l.logger.ErrorContext(ctx, "Failed to determine city ID", slog.Any("error", err))
+		r.logger.ErrorContext(ctx, "Failed to determine city ID", slog.Any("error", err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Database query failed")
 		return uuid.Nil, "", fmt.Errorf("failed to determine city ID: %w", err)
 	}
 
 	// Log success and set tracing attributes
-	l.logger.InfoContext(ctx, "City determined",
+	r.logger.InfoContext(ctx, "City determined",
 		slog.String("city_id", cityID.String()),
 		slog.String("city_name", cityName))
 	span.SetAttributes(

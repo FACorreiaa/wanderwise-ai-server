@@ -21,7 +21,7 @@ func NewCityHandler(service Service, logger *slog.Logger) *Handler {
 	}
 }
 
-// GetAllCities handles GET /cities - returns all cities from the database
+// GetAllCities handles GET /cities
 func (h *Handler) GetAllCities(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("CityHandler").Start(r.Context(), "GetAllCities")
 	defer span.End()

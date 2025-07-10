@@ -44,9 +44,17 @@ func cacheStream(ctx context.Context) {
 
 	fmt.Println("Option 2: using the List function.")
 	// Example 2.1 - List the first page.
-	page, _ := client.Caches.List(ctx, &genai.ListCachedContentsConfig{PageSize: 2})
+	page, err := client.Caches.List(ctx, &genai.ListCachedContentsConfig{PageSize: 2})
+	if err != nil {
+		fmt.Printf("Failed to list cached contents: %v\n", err)
+		return
+	}
 	// Example 2.2 - Continue to the next page.
-	page, _ = page.Next(ctx)
+	page, err = page.Next(ctx)
+	if err != nil {
+		fmt.Printf("Failed to get next page: %v\n", err)
+		return
+	}
 	// Example 2.3 - Resume the page iteration using the next page token.
 	page, err = client.Caches.List(ctx, &genai.ListCachedContentsConfig{PageSize: 2, PageToken: page.NextPageToken})
 	if err == genai.ErrPageDone {

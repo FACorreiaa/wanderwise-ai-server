@@ -26,9 +26,7 @@ func cleanJSONResponse(response string) string {
 		response = strings.TrimPrefix(response, "```")
 	}
 
-	if strings.HasSuffix(response, "```") {
-		response = strings.TrimSuffix(response, "```")
-	}
+	response = strings.TrimSuffix(response, "```")
 
 	response = strings.TrimSpace(response)
 
@@ -92,7 +90,15 @@ func extractPOIName(message string) string {
 	// Capitalize each word for proper formatting
 	// cases.Title
 	// use this https://pkg.go.dev/golang.org/x/text/cases later and handle language as well
-	return strings.Title(strings.Join(filtered, " "))
+	// TODO: Replace with golang.org/x/text/cases.Title for proper Unicode support
+	// For now, use a simple manual title case implementation
+	words = strings.Split(strings.Join(filtered, " "), " ")
+	for i, word := range words {
+		if len(word) > 0 {
+			words[i] = strings.ToUpper(word[:1]) + strings.ToLower(word[1:])
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 // helpers
@@ -227,7 +233,7 @@ func (l *ServiceImpl) handleItineraryFromResponse(
 	}
 }
 
-func (l *ServiceImpl) handleHotelsFromResponse(ctx context.Context, content string, cityID, userID, llmInteractionID uuid.UUID) {
+func (l *ServiceImpl) handleHotelsFromResponse(ctx context.Context, content string, cityID, _, llmInteractionID uuid.UUID) {
 	var hotelData struct {
 		Hotels []types.HotelDetailedInfo `json:"hotels"`
 	}
@@ -248,7 +254,7 @@ func (l *ServiceImpl) handleHotelsFromResponse(ctx context.Context, content stri
 		slog.Int("hotel_count", len(hotelData.Hotels)))
 }
 
-func (l *ServiceImpl) handleRestaurantsFromResponse(ctx context.Context, content string, cityID, userID, llmInteractionID uuid.UUID) {
+func (l *ServiceImpl) handleRestaurantsFromResponse(ctx context.Context, content string, cityID, _, llmInteractionID uuid.UUID) {
 	var restaurantData struct {
 		Restaurants []types.RestaurantDetailedInfo `json:"restaurants"`
 	}

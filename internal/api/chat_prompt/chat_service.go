@@ -1009,60 +1009,60 @@ func (l *ServiceImpl) generatePOIData(ctx context.Context, poiName, cityName str
 }
 
 // enhancePOIRecommendationsWithSemantics uses embeddings to find similar POIs and enrich recommendations
-func (l *ServiceImpl) enhancePOIRecommendationsWithSemantics(ctx context.Context, userMessage string, cityID uuid.UUID, userPreferences []string, limit int) ([]types.POIDetailedInfo, error) {
-	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "enhancePOIRecommendationsWithSemantics", trace.WithAttributes(
-		attribute.String("user.message", userMessage),
-		attribute.String("city.id", cityID.String()),
-		attribute.Int("limit", limit),
-	))
-	defer span.End()
-
-	l.logger.DebugContext(ctx, "Enhancing POI recommendations with semantic search",
-		slog.String("message", userMessage),
-		slog.String("city_id", cityID.String()))
-
-	if l.embeddingService == nil {
-		l.logger.WarnContext(ctx, "Embedding service not available, falling back to traditional search")
-		span.AddEvent("Embedding service not available")
-		return []types.POIDetailedInfo{}, nil
-	}
-
-	// Generate embedding for user message combined with preferences
-	searchQuery := userMessage
-	if len(userPreferences) > 0 {
-		searchQuery += " " + strings.Join(userPreferences, " ")
-	}
-
-	queryEmbedding, err := l.embeddingService.GenerateQueryEmbedding(ctx, searchQuery)
-	if err != nil {
-		l.logger.ErrorContext(ctx, "Failed to generate query embedding",
-			slog.Any("error", err),
-			slog.String("query", searchQuery))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Failed to generate query embedding")
-		return []types.POIDetailedInfo{}, fmt.Errorf("failed to generate query embedding: %w", err)
-	}
-
-	// Search for similar POIs in the city
-	similarPOIs, err := l.poiRepo.FindSimilarPOIsByCity(ctx, queryEmbedding, cityID, limit)
-	if err != nil {
-		l.logger.ErrorContext(ctx, "Failed to find similar POIs", slog.Any("error", err))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Failed to find similar POIs")
-		return []types.POIDetailedInfo{}, fmt.Errorf("failed to find similar POIs: %w", err)
-	}
-
-	l.logger.InfoContext(ctx, "Found semantically similar POIs",
-		slog.Int("count", len(similarPOIs)),
-		slog.String("city_id", cityID.String()))
-	span.SetAttributes(
-		attribute.Int("similar_pois.count", len(similarPOIs)),
-		attribute.String("search.query", searchQuery),
-	)
-	span.SetStatus(codes.Ok, "Semantic POI recommendations enhanced")
-
-	return similarPOIs, nil
-}
+//func (l *ServiceImpl) enhancePOIRecommendationsWithSemantics(ctx context.Context, userMessage string, cityID uuid.UUID, userPreferences []string, limit int) ([]types.POIDetailedInfo, error) {
+//	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "enhancePOIRecommendationsWithSemantics", trace.WithAttributes(
+//		attribute.String("user.message", userMessage),
+//		attribute.String("city.id", cityID.String()),
+//		attribute.Int("limit", limit),
+//	))
+//	defer span.End()
+//
+//	l.logger.DebugContext(ctx, "Enhancing POI recommendations with semantic search",
+//		slog.String("message", userMessage),
+//		slog.String("city_id", cityID.String()))
+//
+//	if l.embeddingService == nil {
+//		l.logger.WarnContext(ctx, "Embedding service not available, falling back to traditional search")
+//		span.AddEvent("Embedding service not available")
+//		return []types.POIDetailedInfo{}, nil
+//	}
+//
+//	// Generate embedding for user message combined with preferences
+//	searchQuery := userMessage
+//	if len(userPreferences) > 0 {
+//		searchQuery += " " + strings.Join(userPreferences, " ")
+//	}
+//
+//	queryEmbedding, err := l.embeddingService.GenerateQueryEmbedding(ctx, searchQuery)
+//	if err != nil {
+//		l.logger.ErrorContext(ctx, "Failed to generate query embedding",
+//			slog.Any("error", err),
+//			slog.String("query", searchQuery))
+//		span.RecordError(err)
+//		span.SetStatus(codes.Error, "Failed to generate query embedding")
+//		return []types.POIDetailedInfo{}, fmt.Errorf("failed to generate query embedding: %w", err)
+//	}
+//
+//	// Search for similar POIs in the city
+//	similarPOIs, err := l.poiRepo.FindSimilarPOIsByCity(ctx, queryEmbedding, cityID, limit)
+//	if err != nil {
+//		l.logger.ErrorContext(ctx, "Failed to find similar POIs", slog.Any("error", err))
+//		span.RecordError(err)
+//		span.SetStatus(codes.Error, "Failed to find similar POIs")
+//		return []types.POIDetailedInfo{}, fmt.Errorf("failed to find similar POIs: %w", err)
+//	}
+//
+//	l.logger.InfoContext(ctx, "Found semantically similar POIs",
+//		slog.Int("count", len(similarPOIs)),
+//		slog.String("city_id", cityID.String()))
+//	span.SetAttributes(
+//		attribute.Int("similar_pois.count", len(similarPOIs)),
+//		attribute.String("search.query", searchQuery),
+//	)
+//	span.SetStatus(codes.Ok, "Semantic POI recommendations enhanced")
+//
+//	return similarPOIs, nil
+//}
 
 // generateSemanticPOIRecommendations generates POI recommendations using semantic search
 func (l *ServiceImpl) generateSemanticPOIRecommendations(ctx context.Context, userMessage string, cityID uuid.UUID, userID uuid.UUID, userLocation *types.UserLocation, semanticWeight float64) ([]types.POIDetailedInfo, error) {
@@ -1316,7 +1316,7 @@ func (l *ServiceImpl) sendEvent(ctx context.Context, ch chan<- types.StreamEvent
 			case <-time.After(2 * time.Second): // Use a reasonable timeout
 				l.logger.WarnContext(ctx, "Dropped stream event due to slow consumer or blocked channel (timeout)", slog.String("eventType", event.Type))
 				l.deadLetterCh <- event // Send to dead letter queue
-				return false
+				// Continue to retry after backoff
 			}
 		}
 		time.Sleep(100 * time.Millisecond) // Backoff
@@ -1459,7 +1459,7 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 
 	// --- 5. Handle Intent and Generate Response ---
 	var finalResponseMessage string
-	var assistantMessageType types.MessageType = types.TypeResponse
+	assistantMessageType := types.TypeResponse
 	itineraryModifiedByThisTurn := false
 
 	switch intent { // Align with ContinueSession's string-based intents
@@ -2004,7 +2004,12 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		"domain":      string(domain),
 		"preferences": basePreferences,
 	}
-	cacheKeyBytes, _ := json.Marshal(cacheKeyData)
+	cacheKeyBytes, err := json.Marshal(cacheKeyData)
+	if err != nil {
+		l.logger.ErrorContext(ctx, "Failed to marshal cache key data", slog.Any("error", err))
+		// Use a fallback cache key
+		cacheKeyBytes = []byte(fmt.Sprintf("fallback_%s_%s", cleanedMessage, cityName))
+	}
 	hash := md5.Sum(cacheKeyBytes)
 	cacheKey := hex.EncodeToString(hash[:])
 
@@ -2292,7 +2297,12 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStreamFree(ctx context.Context, c
 		"message": cleanedMessage,
 		"domain":  string(domain),
 	}
-	cacheKeyBytes, _ := json.Marshal(cacheKeyData)
+	cacheKeyBytes, err := json.Marshal(cacheKeyData)
+	if err != nil {
+		l.logger.ErrorContext(ctx, "Failed to marshal cache key data", slog.Any("error", err))
+		// Use a fallback cache key
+		cacheKeyBytes = []byte(fmt.Sprintf("fallback_%s_%s", cleanedMessage, cityName))
+	}
 	hash := md5.Sum(cacheKeyBytes)
 	cacheKey := hex.EncodeToString(hash[:])
 
@@ -2540,7 +2550,7 @@ func (l *ServiceImpl) ensureItineraryExists(session *types.ChatSession) {
 }
 
 // parseCityDataFromResponse extracts and parses city data from streamed response content
-func (l *ServiceImpl) parseCityDataFromResponse(ctx context.Context, responseContent string) (*types.GeneralCityData, error) {
+func (l *ServiceImpl) parseCityDataFromResponse(_ context.Context, responseContent string) (*types.GeneralCityData, error) {
 	// Clean the response by extracting JSON content between ```json and ```
 	cleanedResponse := responseContent
 

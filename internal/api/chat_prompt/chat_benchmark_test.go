@@ -446,7 +446,10 @@ func generateTestAuthToken(userID uuid.UUID) string {
 		"iat":     time.Now().Unix(),
 	}
 
-	claimsBytes, _ := json.Marshal(claims)
+	claimsBytes, err := json.Marshal(claims)
+	if err != nil {
+		return ""
+	}
 	return fmt.Sprintf("test.%s.signature", string(claimsBytes))
 }
 

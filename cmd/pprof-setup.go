@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net/http"
-	_ "net/http/pprof"
+	_ "net/http/pprof" // Required for pprof endpoint registration
 	"os"
 )
 

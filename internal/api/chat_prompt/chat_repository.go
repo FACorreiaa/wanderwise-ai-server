@@ -86,7 +86,7 @@ func (r *RepositoryImpl) SaveInteraction(ctx context.Context, interaction types.
 	}
 	defer func() {
 		if p := recover(); p != nil {
-			_ = tx.Rollback(ctx)
+			err = tx.Rollback(ctx)
 			panic(p)
 		}
 		if err != nil {
@@ -349,7 +349,7 @@ func (r *RepositoryImpl) GetLlmSuggestedPOIsByInteractionSortedByDistance(
 	if cityID != uuid.Nil {
 		query += fmt.Sprintf("AND city_id = $%d ", argCounter)
 		args = append(args, cityID)
-		argCounter++
+		_ = argCounter + 1 // argCounter incremented but not used after this point
 	}
 
 	query += "ORDER BY distance ASC"
@@ -834,9 +834,21 @@ func (r *RepositoryImpl) CreateSession(ctx context.Context, session types.ChatSe
             created_at, updated_at, expires_at, status
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     `
-	itineraryJSON, _ := json.Marshal(session.CurrentItinerary)
-	historyJSON, _ := json.Marshal(session.ConversationHistory)
-	contextJSON, _ := json.Marshal(session.SessionContext)
+	itineraryJSON, err := json.Marshal(session.CurrentItinerary)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal itinerary", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal itinerary: %w", err)
+	}
+	historyJSON, err := json.Marshal(session.ConversationHistory)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal history", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal history: %w", err)
+	}
+	contextJSON, err := json.Marshal(session.SessionContext)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal context", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal context: %w", err)
+	}
 
 	_, err = tx.Exec(ctx, query, session.ID, session.UserID, session.ProfileID, session.CityName,
 		itineraryJSON, historyJSON, contextJSON, session.CreatedAt, session.UpdatedAt, session.ExpiresAt, session.Status)
@@ -1418,11 +1430,23 @@ func (r *RepositoryImpl) UpdateSession(ctx context.Context, session types.ChatSe
                                  updated_at = $5, expires_at = $6, status = $7
         WHERE id = $1
     `
-	itineraryJSON, _ := json.Marshal(session.CurrentItinerary)
-	historyJSON, _ := json.Marshal(session.ConversationHistory)
-	contextJSON, _ := json.Marshal(session.SessionContext)
+	itineraryJSON, err := json.Marshal(session.CurrentItinerary)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal itinerary", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal itinerary: %w", err)
+	}
+	historyJSON, err := json.Marshal(session.ConversationHistory)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal history", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal history: %w", err)
+	}
+	contextJSON, err := json.Marshal(session.SessionContext)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to marshal context", slog.Any("error", err))
+		return fmt.Errorf("failed to marshal context: %w", err)
+	}
 
-	_, err := r.pgpool.Exec(ctx, query, session.ID, itineraryJSON, historyJSON, contextJSON,
+	_, err = r.pgpool.Exec(ctx, query, session.ID, itineraryJSON, historyJSON, contextJSON,
 		session.UpdatedAt, session.ExpiresAt, session.Status)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "Failed to update session", slog.Any("error", err))
@@ -1526,7 +1550,7 @@ func (r *RepositoryImpl) SaveSinglePOI(ctx context.Context, poi types.POIDetaile
 	return returnedID, nil
 }
 
-func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, sessionID, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error) {
+func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, _, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error) {
 
 	query := `
         SELECT id, name, latitude, longitude, category, description_poi, 
@@ -1690,7 +1714,7 @@ func parsePOIsFromResponse(responseText string, logger *slog.Logger) ([]types.PO
 	return []types.POIDetailedInfo{}, nil
 }
 
-func (r *RepositoryImpl) GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetailedInfo types.POIDetailedInfo, cityID uuid.UUID, sourceInteractionID uuid.UUID) (uuid.UUID, error) {
+func (r *RepositoryImpl) GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetailedInfo types.POIDetailedInfo, cityID uuid.UUID, _ uuid.UUID) (uuid.UUID, error) {
 	var poiDBID uuid.UUID
 	findPoiQuery := `SELECT id FROM points_of_interest WHERE name = $1 AND city_id = $2 LIMIT 1`
 	err := tx.QueryRow(ctx, findPoiQuery, POIDetailedInfo.Name, cityID).Scan(&poiDBID)
@@ -2002,9 +2026,10 @@ func calculateComplexityScore(pois, hotels, restaurants, messageCount int, hasIt
 // countMessagesByRole counts messages by user and assistant roles
 func countMessagesByRole(messages []types.ConversationMessage) (userCount, assistantCount int) {
 	for _, msg := range messages {
-		if msg.Role == "user" {
+		switch msg.Role {
+		case "user":
 			userCount++
-		} else if msg.Role == "assistant" {
+		case "assistant":
 			assistantCount++
 		}
 	}
