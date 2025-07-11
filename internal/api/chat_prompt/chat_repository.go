@@ -1492,45 +1492,29 @@ func (r *RepositoryImpl) SaveSinglePOI(ctx context.Context, poi types.POIDetaile
 		recordID = uuid.New()
 	}
 
-	// Columns: id, user_id, city_id, llm_interaction_id, name, latitude, longitude, location, category, description_poi (10 columns)
-	// Values: $1, $2, $3, $4, $5, $6, $7, ST_MakePoint($7, $6), $8, $9 (10 value expressions for 9 placeholders + ST_MakePoint)
-	// Corrected: 9 distinct columns from poiData + 1 for location, then id for the record.
-	// Order of columns in INSERT INTO: id, user_id, city_id, llm_interaction_id, name, latitude, longitude, location, category, description_poi
-	// Placeholders:                $1,    $2,      $3,      $4,                 $5,   $6,       $7,        ST_MakePoint($7,$6), $8, $9
 	query := `
         INSERT INTO llm_suggested_pois (
             id, user_id, city_id, llm_interaction_id, name, 
-            latitude, longitude, "location", -- Ensure "location" is quoted if it's a reserved keyword or mixed case
+            latitude, longitude, "location", 
             category, description_poi 
-            -- Removed distance from INSERT list
         ) VALUES (
             $1, $2, $3, $4, $5, 
-            $6, $7, ST_SetSRID(ST_MakePoint($7, $6), 4326), -- Longitude ($7) first, then Latitude ($6)
+            $6, $7, ST_SetSRID(ST_MakePoint($7, $6), 4326), 
             $8, $9
         )
+        ON CONFLICT (name, latitude, longitude) DO NOTHING
         RETURNING id
     `
-	// Arguments should be:
-	// $1: recordID (for llm_suggested_pois.id)
-	// $2: userID
-	// $3: cityID
-	// $4: llmInteractionID
-	// $5: poi.Name
-	// $6: poi.Latitude  (for the latitude column)
-	// $7: poi.Longitude (for the longitude column AND for ST_MakePoint's X)
-	// $8: poi.Category
-	// $9: poi.DescriptionPOI
 
 	var returnedID uuid.UUID
 	err = tx.QueryRow(ctx, query,
-		recordID,         // $1: id
-		userID,           // $2: user_id
-		cityID,           // $3: city_id
-		llmInteractionID, // $4: llm_interaction_id
-		poi.Name,         // $5: name
-		poi.Latitude,     // $6: latitude column value
-		poi.Longitude,    // $7: longitude column value (also used as X in ST_MakePoint)
-		// ST_MakePoint will use $7 (poi.Longitude) as X and $6 (poi.Latitude) as Y
+		recordID,           // $1: id
+		userID,             // $2: user_id
+		cityID,             // $3: city_id
+		llmInteractionID,   // $4: llm_interaction_id
+		poi.Name,           // $5: name
+		poi.Latitude,       // $6: latitude column value
+		poi.Longitude,      // $7: longitude column value (also used as X in ST_MakePoint)
 		poi.Category,       // $8: category
 		poi.DescriptionPOI, // $9: description_poi
 	).Scan(&returnedID)
