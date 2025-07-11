@@ -21,7 +21,16 @@ func NewCityHandler(service Service, logger *slog.Logger) *Handler {
 	}
 }
 
-// GetAllCities handles GET /cities
+// GetAllCities godoc
+// @Summary      Get All Cities
+// @Description  Retrieves all cities available in the system
+// @Tags         Cities
+// @Accept       json
+// @Produce      json
+// @Success      200 {array} interface{} "List of all cities"
+// @Failure      405 {object} types.Response "Method Not Allowed"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Router       /cities [get]
 func (h *Handler) GetAllCities(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("CityHandler").Start(r.Context(), "GetAllCities")
 	defer span.End()

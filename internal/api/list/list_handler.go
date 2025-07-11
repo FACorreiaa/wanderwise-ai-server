@@ -48,6 +48,19 @@ func NewHandler(service Service, logger *slog.Logger /*, llmService *llmChat.Ser
 	}
 }
 
+// CreateTopLevelListHandler godoc
+// @Summary      Create Top Level List
+// @Description  Creates a new top-level list or itinerary for the authenticated user
+// @Tags         Lists
+// @Accept       json
+// @Produce      json
+// @Param        list body types.CreateListRequest true "List creation details"
+// @Success      201 {object} interface{} "List created successfully"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /lists [post]
 func (h *HandlerImpl) CreateTopLevelListHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "CreateTopLevelList")
 	defer span.End()
@@ -161,6 +174,21 @@ func (h *HandlerImpl) CreateItineraryForListHandler(w http.ResponseWriter, r *ht
 	api.WriteJSONResponse(w, r, http.StatusCreated, itinerary)
 }
 
+// GetListDetailsHandler godoc
+// @Summary      Get List Details
+// @Description  Retrieves detailed information about a specific list including items
+// @Tags         Lists
+// @Accept       json
+// @Produce      json
+// @Param        listID path string true "List ID"
+// @Success      200 {object} interface{} "List details"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      403 {object} types.Response "Access denied"
+// @Failure      404 {object} types.Response "List not found"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /lists/{listID} [get]
 func (h *HandlerImpl) GetListDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "GetListDetails")
 	defer span.End()
@@ -339,6 +367,22 @@ func (h *HandlerImpl) DeleteListHandler(w http.ResponseWriter, r *http.Request) 
 
 // Generic list item handlers that support different content types
 
+// AddListItemHandler godoc
+// @Summary      Add Item to List
+// @Description  Adds an item (POI, itinerary, etc.) to a specific list
+// @Tags         Lists
+// @Accept       json
+// @Produce      json
+// @Param        listID path string true "List ID"
+// @Param        item body types.AddListItemRequest true "Item to add to the list"
+// @Success      201 {object} interface{} "Item added to list successfully"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      403 {object} types.Response "Access denied"
+// @Failure      404 {object} types.Response "List or item not found"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /lists/{listID}/items [post]
 func (h *HandlerImpl) AddListItemHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "AddListItem")
 	defer span.End()
@@ -765,6 +809,19 @@ func (h *HandlerImpl) RemovePOIListItemHandler(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetUserListsHandler godoc
+// @Summary      Get User Lists
+// @Description  Retrieves all lists for the authenticated user, optionally filtered by type (itinerary or collection)
+// @Tags         Lists
+// @Accept       json
+// @Produce      json
+// @Param        type query string false "List type filter ('itinerary' or 'collection')"
+// @Success      200 {array} interface{} "User lists"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /lists [get]
 func (h *HandlerImpl) GetUserListsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "GetUserLists")
 	defer span.End()

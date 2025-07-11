@@ -96,6 +96,19 @@ func (u *HandlerImpl) GetTags(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSONResponse(w, r, http.StatusOK, tags)
 }
 
+// GetTag godoc
+// @Summary      Get Specific User Tag
+// @Description  Retrieves a specific tag by ID for the authenticated user
+// @Tags         User Tags
+// @Accept       json
+// @Produce      json
+// @Param        tagID path string true "Tag ID"
+// @Success      200 {object} types.Tags "User Tag"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Unauthorized"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /user/tags/{tagID} [get]
 func (u *HandlerImpl) GetTag(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("GetTagHandlerImpl").Start(r.Context(), "GetTag", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -145,6 +158,19 @@ func (u *HandlerImpl) GetTag(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSONResponse(w, r, http.StatusOK, tag)
 }
 
+// CreateTag godoc
+// @Summary      Create User Tag
+// @Description  Creates a new personal tag for the authenticated user
+// @Tags         User Tags
+// @Accept       json
+// @Produce      json
+// @Param        tag body types.CreatePersonalTagParams true "Tag creation details"
+// @Success      200 {object} types.Tags "Created User Tag"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Unauthorized"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /user/tags [post]
 func (u *HandlerImpl) CreateTag(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("CreateTagHandlerImpl").Start(r.Context(), "CreateTag", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -193,6 +219,20 @@ func (u *HandlerImpl) CreateTag(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSONResponse(w, r, http.StatusOK, tag)
 }
 
+// DeleteTag godoc
+// @Summary      Delete User Tag
+// @Description  Deletes a specific tag for the authenticated user
+// @Tags         User Tags
+// @Accept       json
+// @Produce      json
+// @Param        tagID path string true "Tag ID to delete"
+// @Success      200 "Tag deleted successfully"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Unauthorized"
+// @Failure      404 {object} types.Response "Tag not found"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /user/tags/{tagID} [delete]
 func (u *HandlerImpl) DeleteTag(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("DeleteTagHandlerImpl").Start(r.Context(), "DeleteTag", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -248,6 +288,21 @@ func (u *HandlerImpl) DeleteTag(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSONResponse(w, r, http.StatusOK, nil)
 }
 
+// UpdateTag godoc
+// @Summary      Update User Tag
+// @Description  Updates a specific tag for the authenticated user
+// @Tags         User Tags
+// @Accept       json
+// @Produce      json
+// @Param        tagID path string true "Tag ID to update"
+// @Param        tag body types.UpdatePersonalTagParams true "Tag update details"
+// @Success      200 "Tag updated successfully"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Unauthorized"
+// @Failure      404 {object} types.Response "Tag not found"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /user/tags/{tagID} [put]
 func (u *HandlerImpl) UpdateTag(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("UpdateTagHandlerImpl").Start(r.Context(), "UpdateTag", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),

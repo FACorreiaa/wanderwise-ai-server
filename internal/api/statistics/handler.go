@@ -34,7 +34,18 @@ func NewHandler(service Service, logger *slog.Logger, jwtCfg config.JWTConfig) *
 	}
 }
 
-// GetMainPageStatisticsHandler handles HTTP requests for main page statistics
+// GetMainPageStatisticsHandler godoc
+// @Summary      Get Main Page Statistics
+// @Description  Retrieves main page statistics for the authenticated user including total users, itineraries, and POIs
+// @Tags         Statistics
+// @Accept       json
+// @Produce      json
+// @Success      200 {object} interface{} "Main page statistics"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /statistics/main [get]
 func (h *HandlerImpl) GetMainPageStatisticsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("StatisticsHandler").Start(r.Context(), "GetMainPageStatistics")
 	defer span.End()
@@ -89,8 +100,15 @@ func (h *HandlerImpl) GetMainPageStatisticsHandler(w http.ResponseWriter, r *htt
 	api.WriteJSONResponse(w, r, http.StatusOK, stats)
 }
 
-// StatisticsSSEHandler handles Server-Sent Events for real-time statistics updates
-// This endpoint is public to provide real-time aggregate statistics like an airport counter
+// StatisticsSSEHandler godoc
+// @Summary      Statistics Server-Sent Events
+// @Description  Provides real-time statistics updates via Server-Sent Events (SSE) for aggregate statistics
+// @Tags         Statistics
+// @Accept       json
+// @Produce      text/event-stream
+// @Success      200 {string} string "Event stream connection established"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Router       /statistics/sse [get]
 func (h *HandlerImpl) StatisticsSSEHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("StatisticsHandler").Start(r.Context(), "StatisticsSSE")
 	defer span.End()
@@ -191,7 +209,18 @@ func (h *HandlerImpl) sendStatisticsEvent(ctx context.Context, w http.ResponseWr
 	return nil
 }
 
-// GetDetailedPOIStatisticsHandler handles HTTP requests for detailed POI statistics
+// GetDetailedPOIStatisticsHandler godoc
+// @Summary      Get Detailed POI Statistics
+// @Description  Retrieves detailed POI statistics for the authenticated user including general POIs, suggested POIs, hotels, restaurants
+// @Tags         Statistics
+// @Accept       json
+// @Produce      json
+// @Success      200 {object} interface{} "Detailed POI statistics"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /statistics/poi [get]
 func (h *HandlerImpl) GetDetailedPOIStatisticsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("StatisticsHandler").Start(r.Context(), "GetDetailedPOIStatistics")
 	defer span.End()
@@ -232,7 +261,18 @@ func (h *HandlerImpl) GetDetailedPOIStatisticsHandler(w http.ResponseWriter, r *
 	api.WriteJSONResponse(w, r, http.StatusOK, stats)
 }
 
-// GetLandingPageStatisticsHandler handles HTTP requests for user-specific landing page statistics
+// GetLandingPageStatisticsHandler godoc
+// @Summary      Get Landing Page Statistics
+// @Description  Retrieves user-specific landing page statistics including saved places, itineraries, cities explored, and discoveries
+// @Tags         Statistics
+// @Accept       json
+// @Produce      json
+// @Success      200 {object} interface{} "Landing page statistics"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /statistics/landing [get]
 func (h *HandlerImpl) GetLandingPageStatisticsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("StatisticsHandler").Start(r.Context(), "GetLandingPageStatistics")
 	defer span.End()

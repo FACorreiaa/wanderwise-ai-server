@@ -51,6 +51,19 @@ func NewLLMHandlerImpl(llmInteractionService LlmInteractiontService, logger *slo
 	}
 }
 
+// SaveItenerary godoc
+// @Summary      Save Itinerary
+// @Description  Saves a generated itinerary from a chat interaction for the authenticated user
+// @Tags         Chat
+// @Accept       json
+// @Produce      json
+// @Param        itinerary body types.BookmarkRequest true "Itinerary data to save"
+// @Success      201 {object} interface{} "Itinerary saved successfully"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /chat/save-itinerary [post]
 func (h *HandlerImpl) SaveItenerary(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "SaveItenerary", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -107,6 +120,19 @@ func (h *HandlerImpl) SaveItenerary(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSONResponse(w, r, http.StatusCreated, savedItinerary)
 }
 
+// GetBookmarkedItineraries godoc
+// @Summary      Get Bookmarked Itineraries
+// @Description  Retrieves paginated list of bookmarked itineraries for the authenticated user
+// @Tags         Chat
+// @Accept       json
+// @Produce      json
+// @Param        page query int false "Page number for pagination (default: 1)"
+// @Param        limit query int false "Number of items per page (default: 10, max: 100)"
+// @Success      200 {object} interface{} "Paginated list of bookmarked itineraries"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /chat/bookmarks [get]
 func (h *HandlerImpl) GetBookmarkedItineraries(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetBookmarkedItineraries", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -168,6 +194,20 @@ func (h *HandlerImpl) GetBookmarkedItineraries(w http.ResponseWriter, r *http.Re
 
 }
 
+// GetUserChatSessions godoc
+// @Summary      Get User Chat Sessions
+// @Description  Retrieves paginated list of chat sessions for the authenticated user
+// @Tags         Chat
+// @Accept       json
+// @Produce      json
+// @Param        page query int false "Page number for pagination (default: 1)"
+// @Param        limit query int false "Number of items per page (default: 10, max: 50)"
+// @Success      200 {object} interface{} "Paginated list of chat sessions"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /chat/sessions [get]
 func (h *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetUserChatSessions", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -254,6 +294,19 @@ func (h *HandlerImpl) GetUserChatSessions(w http.ResponseWriter, r *http.Request
 	api.WriteJSONResponse(w, r, http.StatusOK, response)
 }
 
+// RemoveItenerary godoc
+// @Summary      Remove Itinerary
+// @Description  Removes a saved itinerary for the authenticated user
+// @Tags         Chat
+// @Accept       json
+// @Produce      json
+// @Param        itineraryID path string true "Itinerary ID to remove"
+// @Success      204 "Itinerary removed successfully"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /chat/itineraries/{itineraryID} [delete]
 func (h *HandlerImpl) RemoveItenerary(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "RemoveItenerary", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -300,6 +353,19 @@ func (h *HandlerImpl) RemoveItenerary(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSONResponse(w, r, http.StatusNoContent, nil)
 }
 
+// GetPOIDetails godoc
+// @Summary      Get POI Details
+// @Description  Retrieves detailed information about points of interest for a specific city
+// @Tags         Chat
+// @Accept       json
+// @Produce      json
+// @Param        poi_request body types.POIDetailrequest true "POI detail request with city name and coordinates"
+// @Success      200 {object} interface{} "POI details"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /chat/poi-details [post]
 func (h *HandlerImpl) GetPOIDetails(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "GetPOIDetails", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -388,7 +454,20 @@ func (h *HandlerImpl) GetPOIDetails(w http.ResponseWriter, r *http.Request) {
 	span.SetStatus(codes.Ok, "Success")
 }
 
-// StartChatMessageStream handles unified chat requests with streaming
+// StartChatMessageStream godoc
+// @Summary      Start Chat Message Stream
+// @Description  Initiates a chat conversation with streaming responses for authenticated users with profiles
+// @Tags         Chat
+// @Accept       json
+// @Produce      text/event-stream
+// @Param        profileID path string true "User Profile ID"
+// @Param        chat_request body object true "Chat message and optional user location"
+// @Success      200 {string} string "Event stream connection established"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /chat/stream/{profileID} [post]
 func (h *HandlerImpl) StartChatMessageStream(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "ProcessUnifiedChatMessageStream", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -534,7 +613,17 @@ func (h *HandlerImpl) StartChatMessageStream(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// ProcessUnifiedChatMessageStream handles unified chat requests with streaming
+// StartChatMessageStreamFree godoc
+// @Summary      Start Free Chat Message Stream
+// @Description  Initiates a free chat conversation with streaming responses (no authentication required)
+// @Tags         Chat
+// @Accept       json
+// @Produce      text/event-stream
+// @Param        chat_request body object true "Chat message and optional user location"
+// @Success      200 {string} string "Event stream connection established"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Router       /chat/stream/free [post]
 func (h *HandlerImpl) StartChatMessageStreamFree(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer("HandlerImpl").Start(r.Context(), "ProcessUnifiedChatMessageStream", trace.WithAttributes(
 		semconv.HTTPRequestMethodKey.String(r.Method),
@@ -651,6 +740,20 @@ func (h *HandlerImpl) StartChatMessageStreamFree(w http.ResponseWriter, r *http.
 	}
 }
 
+// ContinueChatSessionStream godoc
+// @Summary      Continue Chat Session Stream
+// @Description  Continues an existing chat session with streaming responses
+// @Tags         Chat
+// @Accept       json
+// @Produce      text/event-stream
+// @Param        sessionID path string true "Chat Session ID"
+// @Param        continue_request body object true "Message to continue the conversation"
+// @Success      200 {string} string "Event stream connection established"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /chat/sessions/{sessionID}/continue [post]
 func (h *HandlerImpl) ContinueChatSessionStream(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sessionIDStr := chi.URLParam(r, "sessionID")
