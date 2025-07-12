@@ -29,6 +29,17 @@ type Service interface {
 	UpdateListItem(ctx context.Context, userID, listID, itemID uuid.UUID, params types.UpdateListItemRequest) (*types.ListItem, error)
 	RemoveListItem(ctx context.Context, userID, listID, itemID uuid.UUID) error
 
+	// Saved Lists functionality
+	SaveList(ctx context.Context, userID, listID uuid.UUID) error
+	UnsaveList(ctx context.Context, userID, listID uuid.UUID) error
+	GetUserSavedLists(ctx context.Context, userID uuid.UUID) ([]*types.List, error)
+
+	// Content type specific methods
+	GetListItemsByContentType(ctx context.Context, userID, listID uuid.UUID, contentType types.ContentType) ([]*types.ListItem, error)
+
+	// Search and filtering
+	SearchLists(ctx context.Context, searchTerm, category, contentType, theme string, cityID *uuid.UUID) ([]*types.List, error)
+
 	// Legacy POI-specific methods (for backward compatibility)
 	AddPOIListItem(ctx context.Context, userID, listID, poiID uuid.UUID, params types.AddListItemRequest) (*types.ListItem, error)
 	UpdatePOIListItem(ctx context.Context, userID, listID, poiID uuid.UUID, params types.UpdateListItemRequest) (*types.ListItem, error)
@@ -719,6 +730,185 @@ func (s *ServiceImpl) GetUserLists(ctx context.Context, userID uuid.UUID, isItin
 
 	l.InfoContext(ctx, "User lists fetched successfully", slog.Int("count", len(lists)))
 	span.SetStatus(codes.Ok, "User lists fetched")
+	return lists, nil
+}
+
+func (s *ServiceImpl) SaveList(ctx context.Context, userID, listID uuid.UUID) error {
+	ctx, span := otel.Tracer("ItineraryListService").Start(ctx, "SaveList", trace.WithAttributes(
+		attribute.String("user.id", userID.String()),
+		attribute.String("list.id", listID.String()),
+	))
+	defer span.End()
+
+	l := s.logger.With(slog.String("method", "SaveList"),
+		slog.String("userID", userID.String()),
+		slog.String("listID", listID.String()))
+	l.DebugContext(ctx, "Saving list for user")
+
+	// Verify the list exists and is public (or belongs to user)
+	list, err := s.listRepository.GetList(ctx, listID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get list", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "List not found")
+		return fmt.Errorf("list not found: %w", err)
+	}
+
+	// User cannot save their own list
+	if list.UserID == userID {
+		l.WarnContext(ctx, "User cannot save their own list")
+		span.SetStatus(codes.Error, "Cannot save own list")
+		return fmt.Errorf("cannot save your own list")
+	}
+
+	// List must be public to be saved by others
+	if !list.IsPublic {
+		l.WarnContext(ctx, "Cannot save private list")
+		span.SetStatus(codes.Error, "Cannot save private list")
+		return fmt.Errorf("cannot save private list")
+	}
+
+	// Save the list
+	err = s.listRepository.SaveList(ctx, userID, listID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to save list", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to save list")
+		return fmt.Errorf("failed to save list: %w", err)
+	}
+
+	l.InfoContext(ctx, "List saved successfully")
+	span.SetStatus(codes.Ok, "List saved")
+	return nil
+}
+
+func (s *ServiceImpl) UnsaveList(ctx context.Context, userID, listID uuid.UUID) error {
+	ctx, span := otel.Tracer("ItineraryListService").Start(ctx, "UnsaveList", trace.WithAttributes(
+		attribute.String("user.id", userID.String()),
+		attribute.String("list.id", listID.String()),
+	))
+	defer span.End()
+
+	l := s.logger.With(slog.String("method", "UnsaveList"),
+		slog.String("userID", userID.String()),
+		slog.String("listID", listID.String()))
+	l.DebugContext(ctx, "Unsaving list for user")
+
+	// Unsave the list
+	err := s.listRepository.UnsaveList(ctx, userID, listID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to unsave list", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to unsave list")
+		return fmt.Errorf("failed to unsave list: %w", err)
+	}
+
+	l.InfoContext(ctx, "List unsaved successfully")
+	span.SetStatus(codes.Ok, "List unsaved")
+	return nil
+}
+
+func (s *ServiceImpl) GetUserSavedLists(ctx context.Context, userID uuid.UUID) ([]*types.List, error) {
+	ctx, span := otel.Tracer("ItineraryListService").Start(ctx, "GetUserSavedLists", trace.WithAttributes(
+		attribute.String("user.id", userID.String()),
+	))
+	defer span.End()
+
+	l := s.logger.With(slog.String("method", "GetUserSavedLists"),
+		slog.String("userID", userID.String()))
+	l.DebugContext(ctx, "Getting user saved lists")
+
+	// Get saved lists from repository
+	lists, err := s.listRepository.GetUserSavedLists(ctx, userID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get user saved lists", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to get saved lists")
+		return nil, fmt.Errorf("failed to get saved lists: %w", err)
+	}
+
+	l.InfoContext(ctx, "User saved lists fetched successfully", slog.Int("count", len(lists)))
+	span.SetStatus(codes.Ok, "Saved lists fetched")
+	return lists, nil
+}
+
+func (s *ServiceImpl) GetListItemsByContentType(ctx context.Context, userID, listID uuid.UUID, contentType types.ContentType) ([]*types.ListItem, error) {
+	ctx, span := otel.Tracer("ItineraryListService").Start(ctx, "GetListItemsByContentType", trace.WithAttributes(
+		attribute.String("user.id", userID.String()),
+		attribute.String("list.id", listID.String()),
+		attribute.String("content.type", string(contentType)),
+	))
+	defer span.End()
+
+	l := s.logger.With(slog.String("method", "GetListItemsByContentType"),
+		slog.String("userID", userID.String()),
+		slog.String("listID", listID.String()),
+		slog.String("contentType", string(contentType)))
+	l.DebugContext(ctx, "Getting list items by content type")
+
+	// Verify user has access to the list
+	list, err := s.listRepository.GetList(ctx, listID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get list", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "List not found")
+		return nil, fmt.Errorf("list not found: %w", err)
+	}
+
+	// Check if user has access (owner or public list)
+	if list.UserID != userID && !list.IsPublic {
+		l.WarnContext(ctx, "Access denied to list",
+			slog.String("listOwnerID", list.UserID.String()))
+		span.SetStatus(codes.Error, "Access denied")
+		return nil, fmt.Errorf("access denied to list")
+	}
+
+	// Get items by content type
+	items, err := s.listRepository.GetListItemsByContentType(ctx, listID, contentType)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to get list items by content type", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to get list items")
+		return nil, fmt.Errorf("failed to get list items: %w", err)
+	}
+
+	l.InfoContext(ctx, "List items by content type fetched successfully", slog.Int("count", len(items)))
+	span.SetStatus(codes.Ok, "List items fetched")
+	return items, nil
+}
+
+func (s *ServiceImpl) SearchLists(ctx context.Context, searchTerm, category, contentType, theme string, cityID *uuid.UUID) ([]*types.List, error) {
+	ctx, span := otel.Tracer("ItineraryListService").Start(ctx, "SearchLists", trace.WithAttributes(
+		attribute.String("search.term", searchTerm),
+		attribute.String("category", category),
+		attribute.String("content.type", contentType),
+		attribute.String("theme", theme),
+	))
+	defer span.End()
+
+	l := s.logger.With(slog.String("method", "SearchLists"),
+		slog.String("searchTerm", searchTerm),
+		slog.String("category", category),
+		slog.String("contentType", contentType),
+		slog.String("theme", theme))
+	l.DebugContext(ctx, "Searching lists")
+
+	if cityID != nil {
+		span.SetAttributes(attribute.String("city.id", cityID.String()))
+		l = l.With(slog.String("cityID", cityID.String()))
+	}
+
+	// Search lists using repository
+	lists, err := s.listRepository.SearchLists(ctx, searchTerm, category, contentType, theme, cityID)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to search lists", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to search lists")
+		return nil, fmt.Errorf("failed to search lists: %w", err)
+	}
+
+	l.InfoContext(ctx, "Lists search completed successfully", slog.Int("resultCount", len(lists)))
+	span.SetStatus(codes.Ok, "Lists search completed")
 	return lists, nil
 }
 

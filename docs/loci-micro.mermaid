@@ -1,0 +1,38 @@
+graph TD
+    subgraph "Internet"
+        User[User's Browser]
+    end
+
+    subgraph "Google Cloud Platform (GCP)"
+        subgraph "Backend Services (gRPC)"
+            US[Cloud Run: Users Service]
+            PS[Cloud Run: POI Service]
+            RS[Cloud Run: Recommendation Service]
+        end
+
+        subgraph "Database Layer"
+            CS_Users[Cloud SQL: Users DB]
+            CS_POIs[Cloud SQL: POIs DB]
+        end
+
+        API_GW[API Gateway]
+
+        LB[Cloud Load Balancer] --> API_GW
+
+        API_GW -- /users --> US
+        API_GW -- /pois --> PS
+
+        RS -- gRPC --> US
+        RS -- gRPC --> PS
+
+        US --> CS_Users
+        PS --> CS_POIs
+    end
+
+    User -- HTTPS (REST API) --> LB
+
+style US fill:#4285F4,stroke:#333,stroke-width:2px,color:#fff
+style PS fill:#4285F4,stroke:#333,stroke-width:2px,color:#fff
+style RS fill:#4285F4,stroke:#333,stroke-width:2px,color:#fff
+style CS_Users fill:#34A853,stroke:#333,stroke-width:2px,color:#fff
+style CS_POIs fill:#34A853,stroke:#333,stroke-width:2px,color:#fff

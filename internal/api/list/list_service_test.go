@@ -104,6 +104,43 @@ func (m *MockListRepository) GetSubLists(ctx context.Context, parentListID uuid.
 	return args.Get(0).([]*types.List), args.Error(1)
 }
 
+// Saved Lists functionality
+func (m *MockListRepository) SaveList(ctx context.Context, userID, listID uuid.UUID) error {
+	args := m.Called(ctx, userID, listID)
+	return args.Error(0)
+}
+
+func (m *MockListRepository) UnsaveList(ctx context.Context, userID, listID uuid.UUID) error {
+	args := m.Called(ctx, userID, listID)
+	return args.Error(0)
+}
+
+func (m *MockListRepository) GetUserSavedLists(ctx context.Context, userID uuid.UUID) ([]*types.List, error) {
+	args := m.Called(ctx, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*types.List), args.Error(1)
+}
+
+// Content type specific methods
+func (m *MockListRepository) GetListItemsByContentType(ctx context.Context, listID uuid.UUID, contentType types.ContentType) ([]*types.ListItem, error) {
+	args := m.Called(ctx, listID, contentType)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*types.ListItem), args.Error(1)
+}
+
+// Search and filtering
+func (m *MockListRepository) SearchLists(ctx context.Context, searchTerm, category, contentType, theme string, cityID *uuid.UUID) ([]*types.List, error) {
+	args := m.Called(ctx, searchTerm, category, contentType, theme, cityID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*types.List), args.Error(1)
+}
+
 // Helper to setup service with mock repository
 func setupListServiceTest() (*ServiceImpl, *MockListRepository) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))

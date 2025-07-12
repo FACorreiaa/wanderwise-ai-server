@@ -1,3 +1,10 @@
+```
+read lists-todo.md inside my docs folder on my server folder. 
+Implement the methods and services for the user to be able to manage lists for the existing existing items on the database to a list to a list. 
+The user, for example, can only add bookmarked (or data saved on the database) to a list. 
+I will implement the AI organisation in the future
+```
+
 # Lists Feature Analysis & TODO
 
 ## Current Implementation Analysis

@@ -1,0 +1,14 @@
+graph TD
+    subgraph "Internet"
+        User[User's Browser]
+    end
+
+subgraph "Google Cloud Platform (GCP)"
+LB[Cloud Load Balancer] --> CR[Cloud Run: Go Monolith Loci]
+CR --> CS[Cloud SQL: PostgreSQL + PostGIS]
+end
+
+User -- HTTPS --> LB
+
+style CR fill:#4285F4,stroke:#333,stroke-width:2px,color:#fff
+style CS fill:#34A853,stroke:#333,stroke-width:2px,color:#fff

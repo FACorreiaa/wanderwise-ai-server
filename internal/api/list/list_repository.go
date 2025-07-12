@@ -33,6 +33,17 @@ type Repository interface {
 	GetListItemByID(ctx context.Context, listID, itemID uuid.UUID) (types.ListItem, error)
 	DeleteListItemByID(ctx context.Context, listID, itemID uuid.UUID) error
 
+	// Saved Lists functionality
+	SaveList(ctx context.Context, userID, listID uuid.UUID) error
+	UnsaveList(ctx context.Context, userID, listID uuid.UUID) error
+	GetUserSavedLists(ctx context.Context, userID uuid.UUID) ([]*types.List, error)
+	
+	// Content type specific methods
+	GetListItemsByContentType(ctx context.Context, listID uuid.UUID, contentType types.ContentType) ([]*types.ListItem, error)
+	
+	// Search and filtering
+	SearchLists(ctx context.Context, searchTerm, category, contentType, theme string, cityID *uuid.UUID) ([]*types.List, error)
+
 	// Legacy POI-specific methods (for backward compatibility)
 	GetListItem(ctx context.Context, listID, poiID uuid.UUID) (types.ListItem, error)
 	AddListItem(ctx context.Context, item types.ListItem) error
@@ -386,4 +397,168 @@ func (r *RepositoryImpl) DeleteListItemByID(ctx context.Context, listID, itemID 
 		return fmt.Errorf("no list item found for list_id %s and item_id %s", listID, itemID)
 	}
 	return nil
+}
+
+// SaveList saves a list for a user (adds to saved_lists table)
+func (r *RepositoryImpl) SaveList(ctx context.Context, userID, listID uuid.UUID) error {
+	query := `
+		INSERT INTO saved_lists (user_id, list_id, saved_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (user_id, list_id) DO NOTHING
+	`
+	_, err := r.pgpool.Exec(ctx, query, userID, listID)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to save list", slog.Any("error", err))
+		return fmt.Errorf("failed to save list: %w", err)
+	}
+	return nil
+}
+
+// UnsaveList removes a saved list for a user
+func (r *RepositoryImpl) UnsaveList(ctx context.Context, userID, listID uuid.UUID) error {
+	query := `DELETE FROM saved_lists WHERE user_id = $1 AND list_id = $2`
+	result, err := r.pgpool.Exec(ctx, query, userID, listID)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to unsave list", slog.Any("error", err))
+		return fmt.Errorf("failed to unsave list: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("list was not saved by user")
+	}
+	return nil
+}
+
+// GetUserSavedLists retrieves all lists saved by a user
+func (r *RepositoryImpl) GetUserSavedLists(ctx context.Context, userID uuid.UUID) ([]*types.List, error) {
+	query := `
+		SELECT l.id, l.user_id, l.name, l.description, l.image_url, l.is_public, l.is_itinerary,
+		       l.parent_list_id, l.city_id, l.view_count, l.save_count, l.created_at, l.updated_at
+		FROM lists l
+		INNER JOIN saved_lists sl ON l.id = sl.list_id
+		WHERE sl.user_id = $1
+		ORDER BY sl.saved_at DESC
+	`
+	rows, err := r.pgpool.Query(ctx, query, userID)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to get user saved lists", slog.Any("error", err))
+		return nil, fmt.Errorf("failed to get user saved lists: %w", err)
+	}
+	defer rows.Close()
+
+	var lists []*types.List
+	for rows.Next() {
+		var list types.List
+		err := rows.Scan(
+			&list.ID, &list.UserID, &list.Name, &list.Description, &list.ImageURL, &list.IsPublic, &list.IsItinerary,
+			&list.ParentListID, &list.CityID, &list.ViewCount, &list.SaveCount, &list.CreatedAt, &list.UpdatedAt,
+		)
+		if err != nil {
+			r.logger.ErrorContext(ctx, "Failed to scan saved list", slog.Any("error", err))
+			return nil, fmt.Errorf("failed to scan saved list: %w", err)
+		}
+		lists = append(lists, &list)
+	}
+	if err = rows.Err(); err != nil {
+		r.logger.ErrorContext(ctx, "Error iterating saved list rows", slog.Any("error", err))
+		return nil, fmt.Errorf("error iterating saved list rows: %w", err)
+	}
+	return lists, nil
+}
+
+// GetListItemsByContentType retrieves all items of a specific content type from a list
+func (r *RepositoryImpl) GetListItemsByContentType(ctx context.Context, listID uuid.UUID, contentType types.ContentType) ([]*types.ListItem, error) {
+	query := `
+		SELECT list_id, item_id, content_type, position, notes, day_number, 
+		       time_slot, duration, source_llm_interaction_id, item_ai_description, 
+		       created_at, updated_at
+		FROM list_items 
+		WHERE list_id = $1 AND content_type = $2
+		ORDER BY position
+	`
+	rows, err := r.pgpool.Query(ctx, query, listID, contentType)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to get list items by content type", slog.Any("error", err))
+		return nil, fmt.Errorf("failed to get list items by content type: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*types.ListItem
+	for rows.Next() {
+		var item types.ListItem
+		err := rows.Scan(
+			&item.ListID, &item.ItemID, &item.ContentType, &item.Position, &item.Notes,
+			&item.DayNumber, &item.TimeSlot, &item.Duration, &item.SourceLlmInteractionID,
+			&item.ItemAIDescription, &item.CreatedAt, &item.UpdatedAt,
+		)
+		if err != nil {
+			r.logger.ErrorContext(ctx, "Failed to scan list item", slog.Any("error", err))
+			return nil, fmt.Errorf("failed to scan list item: %w", err)
+		}
+		items = append(items, &item)
+	}
+	if err = rows.Err(); err != nil {
+		r.logger.ErrorContext(ctx, "Error iterating list item rows", slog.Any("error", err))
+		return nil, fmt.Errorf("error iterating list item rows: %w", err)
+	}
+	return items, nil
+}
+
+// SearchLists searches for lists based on various criteria
+func (r *RepositoryImpl) SearchLists(ctx context.Context, searchTerm, category, contentType, theme string, cityID *uuid.UUID) ([]*types.List, error) {
+	query := `
+		SELECT DISTINCT l.id, l.user_id, l.name, l.description, l.image_url, l.is_public, l.is_itinerary,
+		       l.parent_list_id, l.city_id, l.view_count, l.save_count, l.created_at, l.updated_at
+		FROM lists l
+		LEFT JOIN list_items li ON l.id = li.list_id
+		WHERE l.is_public = true
+	`
+	
+	var args []interface{}
+	argIndex := 1
+	
+	if searchTerm != "" {
+		query += fmt.Sprintf(" AND (l.name ILIKE $%d OR l.description ILIKE $%d)", argIndex, argIndex+1)
+		args = append(args, "%"+searchTerm+"%", "%"+searchTerm+"%")
+		argIndex += 2
+	}
+	
+	if cityID != nil {
+		query += fmt.Sprintf(" AND l.city_id = $%d", argIndex)
+		args = append(args, *cityID)
+		argIndex++
+	}
+	
+	if contentType != "" {
+		query += fmt.Sprintf(" AND li.content_type = $%d", argIndex)
+		args = append(args, contentType)
+		argIndex++
+	}
+	
+	query += " ORDER BY l.save_count DESC, l.created_at DESC"
+	
+	rows, err := r.pgpool.Query(ctx, query, args...)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "Failed to search lists", slog.Any("error", err))
+		return nil, fmt.Errorf("failed to search lists: %w", err)
+	}
+	defer rows.Close()
+
+	var lists []*types.List
+	for rows.Next() {
+		var list types.List
+		err := rows.Scan(
+			&list.ID, &list.UserID, &list.Name, &list.Description, &list.ImageURL, &list.IsPublic, &list.IsItinerary,
+			&list.ParentListID, &list.CityID, &list.ViewCount, &list.SaveCount, &list.CreatedAt, &list.UpdatedAt,
+		)
+		if err != nil {
+			r.logger.ErrorContext(ctx, "Failed to scan search result", slog.Any("error", err))
+			return nil, fmt.Errorf("failed to scan search result: %w", err)
+		}
+		lists = append(lists, &list)
+	}
+	if err = rows.Err(); err != nil {
+		r.logger.ErrorContext(ctx, "Error iterating search result rows", slog.Any("error", err))
+		return nil, fmt.Errorf("error iterating search result rows: %w", err)
+	}
+	return lists, nil
 }

@@ -27,6 +27,20 @@ type Handler interface {
 	AddListItemHandler(w http.ResponseWriter, r *http.Request)
 	UpdateListItemHandler(w http.ResponseWriter, r *http.Request)
 	RemoveListItemHandler(w http.ResponseWriter, r *http.Request)
+	
+	// Saved Lists functionality
+	SaveListHandler(w http.ResponseWriter, r *http.Request)
+	UnsaveListHandler(w http.ResponseWriter, r *http.Request)
+	GetUserSavedListsHandler(w http.ResponseWriter, r *http.Request)
+	
+	// Content type specific endpoints
+	GetListRestaurantsHandler(w http.ResponseWriter, r *http.Request)
+	GetListHotelsHandler(w http.ResponseWriter, r *http.Request)
+	GetListItinerariesHandler(w http.ResponseWriter, r *http.Request)
+	
+	// Search and filtering
+	SearchListsHandler(w http.ResponseWriter, r *http.Request)
+	
 	// Legacy POI-specific handlers (for backward compatibility)
 	AddPOIListItemHandler(w http.ResponseWriter, r *http.Request)
 	UpdatePOIListItemHandler(w http.ResponseWriter, r *http.Request)
@@ -871,5 +885,459 @@ func (h *HandlerImpl) GetUserListsHandler(w http.ResponseWriter, r *http.Request
 
 	l.InfoContext(ctx, "User lists fetched successfully", slog.Int("count", len(lists)))
 	span.SetStatus(codes.Ok, "User lists fetched")
+	api.WriteJSONResponse(w, r, http.StatusOK, lists)
+}
+
+// SaveListHandler godoc
+// @Summary      Save List
+// @Description  Save a public list to user's saved lists
+// @Tags         Lists
+// @Accept       json
+// @Produce      json
+// @Param        listID path string true "List ID"
+// @Success      201 {object} interface{} "List saved successfully"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      404 {object} types.Response "List not found"
+// @Failure      409 {object} types.Response "List already saved"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /lists/{listID}/save [post]
+func (h *HandlerImpl) SaveListHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "SaveList")
+	defer span.End()
+	l := h.logger.With(slog.String("handler", "SaveListHandler"))
+
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		l.ErrorContext(ctx, "User ID not found in context")
+		span.SetStatus(codes.Error, "Unauthorized - User ID missing")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid user ID format", slog.String("userID_str", userIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid User ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("user.id", userID.String()))
+
+	listIDStr := chi.URLParam(r, "listID")
+	listID, err := uuid.Parse(listIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid list ID format", slog.String("listID_str", listIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid List ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid list ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("list.id", listID.String()))
+
+	l.DebugContext(ctx, "Attempting to save list")
+	err = h.service.SaveList(ctx, userID, listID)
+	if err != nil {
+		l.ErrorContext(ctx, "Service failed to save list", slog.Any("error", err))
+		span.RecordError(err)
+		if strings.Contains(err.Error(), "not found") {
+			span.SetStatus(codes.Error, "List not found")
+			api.ErrorResponse(w, r, http.StatusNotFound, "List not found")
+		} else if strings.Contains(err.Error(), "not public") {
+			span.SetStatus(codes.Error, "List not public")
+			api.ErrorResponse(w, r, http.StatusForbidden, "List is not public")
+		} else if strings.Contains(err.Error(), "already saved") {
+			span.SetStatus(codes.Error, "List already saved")
+			api.ErrorResponse(w, r, http.StatusConflict, "List already saved")
+		} else {
+			span.SetStatus(codes.Error, "Failed to save list")
+			api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to save list: "+err.Error())
+		}
+		return
+	}
+
+	l.InfoContext(ctx, "List saved successfully")
+	span.SetStatus(codes.Ok, "List saved")
+	api.WriteJSONResponse(w, r, http.StatusCreated, map[string]string{"message": "List saved successfully"})
+}
+
+// UnsaveListHandler godoc
+// @Summary      Unsave List
+// @Description  Remove a list from user's saved lists
+// @Tags         Lists
+// @Accept       json
+// @Produce      json
+// @Param        listID path string true "List ID"
+// @Success      204 "List unsaved successfully"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      404 {object} types.Response "List not found in saved lists"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /lists/{listID}/save [delete]
+func (h *HandlerImpl) UnsaveListHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "UnsaveList")
+	defer span.End()
+	l := h.logger.With(slog.String("handler", "UnsaveListHandler"))
+
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		l.ErrorContext(ctx, "User ID not found in context")
+		span.SetStatus(codes.Error, "Unauthorized - User ID missing")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid user ID format", slog.String("userID_str", userIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid User ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("user.id", userID.String()))
+
+	listIDStr := chi.URLParam(r, "listID")
+	listID, err := uuid.Parse(listIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid list ID format", slog.String("listID_str", listIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid List ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid list ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("list.id", listID.String()))
+
+	l.DebugContext(ctx, "Attempting to unsave list")
+	err = h.service.UnsaveList(ctx, userID, listID)
+	if err != nil {
+		l.ErrorContext(ctx, "Service failed to unsave list", slog.Any("error", err))
+		span.RecordError(err)
+		if strings.Contains(err.Error(), "not found") {
+			span.SetStatus(codes.Error, "Saved list not found")
+			api.ErrorResponse(w, r, http.StatusNotFound, "List not found in saved lists")
+		} else {
+			span.SetStatus(codes.Error, "Failed to unsave list")
+			api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to unsave list: "+err.Error())
+		}
+		return
+	}
+
+	l.InfoContext(ctx, "List unsaved successfully")
+	span.SetStatus(codes.Ok, "List unsaved")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetUserSavedListsHandler godoc
+// @Summary      Get User Saved Lists
+// @Description  Retrieves all lists saved by the authenticated user
+// @Tags         Lists
+// @Accept       json
+// @Produce      json
+// @Success      200 {array} interface{} "User saved lists"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /lists/saved [get]
+func (h *HandlerImpl) GetUserSavedListsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "GetUserSavedLists")
+	defer span.End()
+	l := h.logger.With(slog.String("handler", "GetUserSavedListsHandler"))
+
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		l.ErrorContext(ctx, "User ID not found in context")
+		span.SetStatus(codes.Error, "Unauthorized - User ID missing")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid user ID format", slog.String("userID_str", userIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid User ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("user.id", userID.String()))
+
+	l.DebugContext(ctx, "Attempting to get user saved lists")
+	lists, err := h.service.GetUserSavedLists(ctx, userID)
+	if err != nil {
+		l.ErrorContext(ctx, "Service failed to get user saved lists", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to get saved lists")
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to retrieve saved lists: "+err.Error())
+		return
+	}
+
+	l.InfoContext(ctx, "User saved lists fetched successfully", slog.Int("count", len(lists)))
+	span.SetStatus(codes.Ok, "User saved lists fetched")
+	api.WriteJSONResponse(w, r, http.StatusOK, lists)
+}
+
+// GetListRestaurantsHandler godoc
+// @Summary      Get List Restaurants
+// @Description  Get all restaurant items from a specific list
+// @Tags         Lists
+// @Accept       json
+// @Produce      json
+// @Param        listID path string true "List ID"
+// @Success      200 {array} interface{} "List restaurant items"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      404 {object} types.Response "List not found"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /lists/{listID}/items/restaurants [get]
+func (h *HandlerImpl) GetListRestaurantsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "GetListRestaurants")
+	defer span.End()
+	l := h.logger.With(slog.String("handler", "GetListRestaurantsHandler"))
+
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		l.ErrorContext(ctx, "User ID not found in context")
+		span.SetStatus(codes.Error, "Unauthorized - User ID missing")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid user ID format", slog.String("userID_str", userIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid User ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("user.id", userID.String()))
+
+	listIDStr := chi.URLParam(r, "listID")
+	listID, err := uuid.Parse(listIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid list ID format", slog.String("listID_str", listIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid List ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid list ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("list.id", listID.String()))
+
+	l.DebugContext(ctx, "Attempting to get list restaurants")
+	items, err := h.service.GetListItemsByContentType(ctx, userID, listID, types.ContentTypeRestaurant)
+	if err != nil {
+		l.ErrorContext(ctx, "Service failed to get list restaurants", slog.Any("error", err))
+		span.RecordError(err)
+		if strings.Contains(err.Error(), "not found") {
+			span.SetStatus(codes.Error, "List not found")
+			api.ErrorResponse(w, r, http.StatusNotFound, "List not found")
+		} else {
+			span.SetStatus(codes.Error, "Failed to get restaurants")
+			api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get list restaurants: "+err.Error())
+		}
+		return
+	}
+
+	l.InfoContext(ctx, "List restaurants fetched successfully", slog.Int("count", len(items)))
+	span.SetStatus(codes.Ok, "List restaurants fetched")
+	api.WriteJSONResponse(w, r, http.StatusOK, items)
+}
+
+// GetListHotelsHandler godoc
+// @Summary      Get List Hotels
+// @Description  Get all hotel items from a specific list
+// @Tags         Lists
+// @Accept       json
+// @Produce      json
+// @Param        listID path string true "List ID"
+// @Success      200 {array} interface{} "List hotel items"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      404 {object} types.Response "List not found"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /lists/{listID}/items/hotels [get]
+func (h *HandlerImpl) GetListHotelsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "GetListHotels")
+	defer span.End()
+	l := h.logger.With(slog.String("handler", "GetListHotelsHandler"))
+
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		l.ErrorContext(ctx, "User ID not found in context")
+		span.SetStatus(codes.Error, "Unauthorized - User ID missing")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid user ID format", slog.String("userID_str", userIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid User ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("user.id", userID.String()))
+
+	listIDStr := chi.URLParam(r, "listID")
+	listID, err := uuid.Parse(listIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid list ID format", slog.String("listID_str", listIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid List ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid list ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("list.id", listID.String()))
+
+	l.DebugContext(ctx, "Attempting to get list hotels")
+	items, err := h.service.GetListItemsByContentType(ctx, userID, listID, types.ContentTypeHotel)
+	if err != nil {
+		l.ErrorContext(ctx, "Service failed to get list hotels", slog.Any("error", err))
+		span.RecordError(err)
+		if strings.Contains(err.Error(), "not found") {
+			span.SetStatus(codes.Error, "List not found")
+			api.ErrorResponse(w, r, http.StatusNotFound, "List not found")
+		} else {
+			span.SetStatus(codes.Error, "Failed to get hotels")
+			api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get list hotels: "+err.Error())
+		}
+		return
+	}
+
+	l.InfoContext(ctx, "List hotels fetched successfully", slog.Int("count", len(items)))
+	span.SetStatus(codes.Ok, "List hotels fetched")
+	api.WriteJSONResponse(w, r, http.StatusOK, items)
+}
+
+// GetListItinerariesHandler godoc
+// @Summary      Get List Itineraries
+// @Description  Get all itinerary items from a specific list
+// @Tags         Lists
+// @Accept       json
+// @Produce      json
+// @Param        listID path string true "List ID"
+// @Success      200 {array} interface{} "List itinerary items"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      401 {object} types.Response "Authentication required"
+// @Failure      404 {object} types.Response "List not found"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Security     BearerAuth
+// @Router       /lists/{listID}/items/itineraries [get]
+func (h *HandlerImpl) GetListItinerariesHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "GetListItineraries")
+	defer span.End()
+	l := h.logger.With(slog.String("handler", "GetListItinerariesHandler"))
+
+	userIDStr, ok := auth.GetUserIDFromContext(ctx)
+	if !ok || userIDStr == "" {
+		l.ErrorContext(ctx, "User ID not found in context")
+		span.SetStatus(codes.Error, "Unauthorized - User ID missing")
+		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid user ID format", slog.String("userID_str", userIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid User ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("user.id", userID.String()))
+
+	listIDStr := chi.URLParam(r, "listID")
+	listID, err := uuid.Parse(listIDStr)
+	if err != nil {
+		l.ErrorContext(ctx, "Invalid list ID format", slog.String("listID_str", listIDStr), slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid List ID format")
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid list ID format")
+		return
+	}
+	span.SetAttributes(attribute.String("list.id", listID.String()))
+
+	l.DebugContext(ctx, "Attempting to get list itineraries")
+	items, err := h.service.GetListItemsByContentType(ctx, userID, listID, types.ContentTypeItinerary)
+	if err != nil {
+		l.ErrorContext(ctx, "Service failed to get list itineraries", slog.Any("error", err))
+		span.RecordError(err)
+		if strings.Contains(err.Error(), "not found") {
+			span.SetStatus(codes.Error, "List not found")
+			api.ErrorResponse(w, r, http.StatusNotFound, "List not found")
+		} else {
+			span.SetStatus(codes.Error, "Failed to get itineraries")
+			api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to get list itineraries: "+err.Error())
+		}
+		return
+	}
+
+	l.InfoContext(ctx, "List itineraries fetched successfully", slog.Int("count", len(items)))
+	span.SetStatus(codes.Ok, "List itineraries fetched")
+	api.WriteJSONResponse(w, r, http.StatusOK, items)
+}
+
+// SearchListsHandler godoc
+// @Summary      Search Lists
+// @Description  Search public lists with filters
+// @Tags         Lists
+// @Accept       json
+// @Produce      json
+// @Param        search query string false "Search term"
+// @Param        category query string false "Category filter"
+// @Param        content_type query string false "Content type filter"
+// @Param        theme query string false "Theme filter"
+// @Param        city_id query string false "City ID filter"
+// @Param        limit query int false "Limit results" default(10)
+// @Param        offset query int false "Offset for pagination" default(0)
+// @Success      200 {array} interface{} "Search results"
+// @Failure      400 {object} types.Response "Invalid Input"
+// @Failure      500 {object} types.Response "Internal Server Error"
+// @Router       /lists/search [get]
+func (h *HandlerImpl) SearchListsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ItineraryListHandler").Start(r.Context(), "SearchLists")
+	defer span.End()
+	l := h.logger.With(slog.String("handler", "SearchListsHandler"))
+
+	// Parse query parameters
+	query := r.URL.Query()
+	searchTerm := query.Get("search")
+	category := query.Get("category")
+	contentType := query.Get("content_type")
+	theme := query.Get("theme")
+	cityIDStr := query.Get("city_id")
+	
+	var cityID *uuid.UUID
+	if cityIDStr != "" {
+		parsed, err := uuid.Parse(cityIDStr)
+		if err != nil {
+			l.ErrorContext(ctx, "Invalid city ID format", slog.String("cityID_str", cityIDStr), slog.Any("error", err))
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "Invalid City ID format")
+			api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid city ID format")
+			return
+		}
+		cityID = &parsed
+	}
+
+	l.DebugContext(ctx, "Attempting to search lists", 
+		slog.String("search_term", searchTerm),
+		slog.String("category", category),
+		slog.String("content_type", contentType),
+		slog.String("theme", theme),
+	)
+	
+	lists, err := h.service.SearchLists(ctx, searchTerm, category, contentType, theme, cityID)
+	if err != nil {
+		l.ErrorContext(ctx, "Service failed to search lists", slog.Any("error", err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to search lists")
+		api.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to search lists: "+err.Error())
+		return
+	}
+
+	l.InfoContext(ctx, "Lists search completed successfully", slog.Int("count", len(lists)))
+	span.SetStatus(codes.Ok, "Lists searched")
 	api.WriteJSONResponse(w, r, http.StatusOK, lists)
 }

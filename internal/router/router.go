@@ -268,6 +268,19 @@ func ItineraryListRoutes(h *itineraryList.HandlerImpl) http.Handler {
 	r.Delete("/lists/{listID}", h.DeleteListHandler)                             // Delete a specific list
 	r.Post("/lists/{parentListID}/itineraries", h.CreateItineraryForListHandler) // Create an itinerary within a parent list
 
+	// Saved lists functionality
+	r.Get("/lists/saved", h.GetUserSavedListsHandler)           // Get user's saved lists
+	r.Post("/lists/{listID}/save", h.SaveListHandler)           // Save a public list
+	r.Delete("/lists/{listID}/save", h.UnsaveListHandler)       // Unsave a list
+	
+	// Search and filtering
+	r.Get("/lists/search", h.SearchListsHandler)                // Search public lists
+	
+	// Content type specific endpoints
+	r.Get("/lists/{listID}/items/restaurants", h.GetListRestaurantsHandler)  // Get restaurant items from a list
+	r.Get("/lists/{listID}/items/hotels", h.GetListHotelsHandler)            // Get hotel items from a list
+	r.Get("/lists/{listID}/items/itineraries", h.GetListItinerariesHandler) // Get itinerary items from a list
+
 	// Generic list item endpoints (support all content types)
 	r.Post("/lists/{listID}/items", h.AddListItemHandler)               // Add any content type to a list
 	r.Put("/lists/{listID}/items/{itemID}", h.UpdateListItemHandler)    // Update any item in a list
