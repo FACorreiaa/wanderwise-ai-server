@@ -150,12 +150,12 @@ func (l *ServiceImpl) getPersonalizedPOIWithSemanticContext(interestNames []stri
 	// Add semantic POI context
 	if len(semanticPOIs) > 0 {
 		prompt += "\n**Contextually Relevant POIs:**\n"
-		for i, poi := range semanticPOIs {
+		for i, p := range semanticPOIs {
 			if i >= 10 { // Limit context to avoid token overuse
 				break
 			}
 			prompt += fmt.Sprintf("- %s (%s): %s [Lat: %.6f, Lon: %.6f]\n",
-				poi.Name, poi.Category, poi.DescriptionPOI, poi.Latitude, poi.Longitude)
+				p.Name, p.Category, p.DescriptionPOI, p.Latitude, p.Longitude)
 		}
 		prompt += "\n**Instructions:** Use these semantic matches as inspiration and context. You may include them directly or use them to find similar places. Ensure variety and avoid exact duplicates.\n\n"
 	}
@@ -295,16 +295,16 @@ func (l *ServiceImpl) HandleCityData(ctx context.Context, cityData types.General
 }
 
 func (l *ServiceImpl) HandleGeneralPOIs(ctx context.Context, pois []types.POIDetailedInfo, cityID uuid.UUID) {
-	for _, poi := range pois {
-		existingPoi, err := l.poiRepo.FindPoiByNameAndCity(ctx, poi.Name, cityID)
+	for _, p := range pois {
+		existingPoi, err := l.poiRepo.FindPoiByNameAndCity(ctx, p.Name, cityID)
 		if err != nil {
-			l.logger.WarnContext(ctx, "Failed to check POI existence", slog.String("poi_name", poi.Name), slog.Any("error", err))
+			l.logger.WarnContext(ctx, "Failed to check POI existence", slog.String("poi_name", p.Name), slog.Any("error", err))
 			continue
 		}
 		if existingPoi == nil {
-			_, err = l.poiRepo.SavePoi(ctx, poi, cityID)
+			_, err = l.poiRepo.SavePoi(ctx, p, cityID)
 			if err != nil {
-				l.logger.WarnContext(ctx, "Failed to save POI", slog.String("poi_name", poi.Name), slog.Any("error", err))
+				l.logger.WarnContext(ctx, "Failed to save POI", slog.String("poi_name", p.Name), slog.Any("error", err))
 			}
 		}
 	}
@@ -471,13 +471,6 @@ func getBasePersonalizedPromptInstructions() string {
 - Include practical details like accessibility if relevant to user preferences
 - Consider user's pace and planning style preferences in the selection
 - Maximum 8-10 POIs to maintain quality over quantity`
-}
-
-func TruncateString(str string, num int) string {
-	if len(str) > num {
-		return str[0:num] + "..."
-	}
-	return str
 }
 
 func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req types.BookmarkRequest) (uuid.UUID, error) {
@@ -821,11 +814,11 @@ func (l *ServiceImpl) GetPOIDetailedInfosResponse(ctx context.Context, userID uu
 
 	// Check cache
 	if cached, found := l.cache.Get(cacheKey); found {
-		if poi, ok := cached.(*types.POIDetailedInfo); ok {
+		if p, ok := cached.(*types.POIDetailedInfo); ok {
 			l.logger.InfoContext(ctx, "Cache hit for POI details", slog.String("cache_key", cacheKey))
 			span.AddEvent("Cache hit")
 			span.SetStatus(codes.Ok, "POI details served from cache")
-			return poi, nil
+			return p, nil
 		}
 	}
 
@@ -843,20 +836,19 @@ func (l *ServiceImpl) GetPOIDetailedInfosResponse(ctx context.Context, userID uu
 	}
 	cityID := cityData.ID
 
-	// Check database
-	poi, err := l.poiRepo.FindPOIDetails(ctx, cityID, lat, lon, 100.0) // 100m tolerance
+	p, err := l.poiRepo.FindPOIDetails(ctx, cityID, lat, lon, 100.0) // 100m tolerance
 	if err != nil {
 		l.logger.ErrorContext(ctx, "Failed to query POI details from database", slog.Any("error", err))
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to query POI details: %w", err)
 	}
-	if poi != nil {
-		poi.City = city
-		l.cache.Set(cacheKey, poi, cache.DefaultExpiration)
+	if p != nil {
+		p.City = city
+		l.cache.Set(cacheKey, p, cache.DefaultExpiration)
 		l.logger.InfoContext(ctx, "Database hit for POI details", slog.String("cache_key", cacheKey))
 		span.AddEvent("Database hit")
 		span.SetStatus(codes.Ok, "POI details served from database")
-		return poi, nil
+		return p, nil
 	}
 
 	// Cache and database miss: fetch from Gemini API
@@ -912,7 +904,7 @@ func (l *ServiceImpl) GetPOIDetailedInfosResponse(ctx context.Context, userID uu
 // generatePOIData queries the LLM for POI details and calculates distance using PostGIS
 func (l *ServiceImpl) generatePOIData(ctx context.Context, poiName, cityName string, userLocation *types.UserLocation, userID, cityID uuid.UUID) (types.POIDetailedInfo, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GeneratePOIData", trace.WithAttributes(
-		attribute.String("poi.name", poiName),
+		attribute.String("p.name", poiName),
 		attribute.String("city.name", cityName),
 	))
 	defer span.End()
@@ -974,7 +966,7 @@ func (l *ServiceImpl) generatePOIData(ctx context.Context, poiName, cityName str
 			poiData.Distance = 0
 		} else {
 			poiData.Distance = distance
-			span.SetAttributes(attribute.Float64("poi.distance_meters", distance))
+			span.SetAttributes(attribute.Float64("p.distance_meters", distance))
 			l.logger.DebugContext(ctx, "Calculated distance for POI",
 				slog.String("poiName", poiName),
 				slog.Float64("distance_meters", distance))
@@ -999,10 +991,10 @@ func (l *ServiceImpl) generatePOIData(ctx context.Context, poiName, cityName str
 	}
 
 	span.SetAttributes(
-		attribute.String("poi.name", poiData.Name),
-		attribute.Float64("poi.latitude", poiData.Latitude),
-		attribute.Float64("poi.longitude", poiData.Longitude),
-		attribute.String("poi.category", poiData.Category),
+		attribute.String("p.name", poiData.Name),
+		attribute.Float64("p.latitude", poiData.Latitude),
+		attribute.Float64("p.longitude", poiData.Longitude),
+		attribute.String("p.category", poiData.Category),
 		attribute.String("llm_interaction.id", llmInteractionID.String()),
 	)
 	return poiData, nil
@@ -1137,29 +1129,29 @@ func (l *ServiceImpl) generateSemanticPOIRecommendations(ctx context.Context, us
 	}
 
 	// Generate embeddings for new POIs if needed
-	for i, poi := range pois {
-		if poi.ID == uuid.Nil {
+	for i, p := range pois {
+		if p.ID == uuid.Nil {
 			continue
 		}
 
 		// Generate embedding for this POI if it doesn't have one
-		embedding, err := l.embeddingService.GeneratePOIEmbedding(ctx, poi.Name, poi.DescriptionPOI, poi.Category)
+		embedding, err := l.embeddingService.GeneratePOIEmbedding(ctx, p.Name, p.DescriptionPOI, p.Category)
 		if err != nil {
 			l.logger.WarnContext(ctx, "Failed to generate embedding for POI",
 				slog.Any("error", err),
-				slog.String("poi_name", poi.Name))
+				slog.String("poi_name", p.Name))
 			continue
 		}
 
 		// Update POI with embedding
-		err = l.poiRepo.UpdatePOIEmbedding(ctx, poi.ID, embedding)
+		err = l.poiRepo.UpdatePOIEmbedding(ctx, p.ID, embedding)
 		if err != nil {
 			l.logger.WarnContext(ctx, "Failed to update POI embedding",
 				slog.Any("error", err),
-				slog.String("poi_id", poi.ID.String()))
+				slog.String("poi_id", p.ID.String()))
 		}
 
-		pois[i] = poi
+		pois[i] = p
 	}
 
 	l.logger.InfoContext(ctx, "Generated semantic POI recommendations",
@@ -1186,13 +1178,13 @@ func (l *ServiceImpl) handleSemanticRemovePOI(ctx context.Context, message strin
 	}
 
 	// Use semantic matching for removal - be more flexible with name matching
-	for i, poi := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
+	for i, p := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
 		// Check for exact match or semantic similarity
-		if strings.EqualFold(poi.Name, poiName) ||
-			strings.Contains(strings.ToLower(poi.Name), strings.ToLower(poiName)) ||
-			strings.Contains(strings.ToLower(poiName), strings.ToLower(poi.Name)) {
+		if strings.EqualFold(p.Name, poiName) ||
+			strings.Contains(strings.ToLower(p.Name), strings.ToLower(poiName)) ||
+			strings.Contains(strings.ToLower(poiName), strings.ToLower(p.Name)) {
 
-			removedName := poi.Name
+			removedName := p.Name
 			session.CurrentItinerary.AIItineraryResponse.PointsOfInterest = append(
 				session.CurrentItinerary.AIItineraryResponse.PointsOfInterest[:i],
 				session.CurrentItinerary.AIItineraryResponse.PointsOfInterest[i+1:]...,
@@ -1207,8 +1199,8 @@ func (l *ServiceImpl) handleSemanticRemovePOI(ctx context.Context, message strin
 	return fmt.Sprintf("I couldn't find %s in your itinerary. Here's what you currently have: %s",
 		poiName, strings.Join(func() []string {
 			var names []string
-			for _, poi := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
-				names = append(names, poi.Name)
+			for _, p := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
+				names = append(names, p.Name)
 			}
 			return names
 		}(), ", "))
@@ -1490,8 +1482,8 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 		if matches := regexp.MustCompile(`replace\s+(.+?)\s+with\s+(.+?)(?:\s+in\s+my\s+itinerary)?`).FindStringSubmatch(strings.ToLower(message)); len(matches) == 3 {
 			oldPOI := matches[1]
 			newPOIName := matches[2]
-			for i, poi := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
-				if strings.Contains(strings.ToLower(poi.Name), oldPOI) {
+			for i, p := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
+				if strings.Contains(strings.ToLower(p.Name), oldPOI) {
 					newPOI, err := l.generatePOIDataStream(ctx, newPOIName, session.SessionContext.CityName, userLocation, session.UserID, cityID, eventCh)
 					if err != nil {
 						finalResponseMessage = fmt.Sprintf("Could not replace %s with %s due to an error: %v", oldPOI, newPOIName, err)
@@ -1517,8 +1509,8 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 		if matches := regexp.MustCompile(`replace\s+(.+?)\s+with\s+(.+?)(?:\s+in\s+my\s+itinerary)?`).FindStringSubmatch(strings.ToLower(message)); len(matches) == 3 {
 			oldPOI := matches[1]
 			newPOIName := matches[2]
-			for i, poi := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
-				if strings.Contains(strings.ToLower(poi.Name), oldPOI) {
+			for i, p := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
+				if strings.Contains(strings.ToLower(p.Name), oldPOI) {
 					newPOI, err := l.generatePOIData(ctx, newPOIName, session.SessionContext.CityName, userLocation, session.UserID, cityID)
 					if err != nil {
 						l.logger.ErrorContext(ctx, "Failed to generate POI data", slog.Any("error", err))
@@ -1543,11 +1535,11 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 	if itineraryModifiedByThisTurn && userLocation != nil && userLocation.UserLat != 0 && userLocation.UserLon != 0 && session.CurrentItinerary != nil {
 		l.sendEvent(ctx, eventCh, types.StreamEvent{Type: types.EventTypeProgress, Data: "Sorting updated POIs by distance..."}, 3)
 		// Save new POIs to DB to ensure they have valid IDs
-		for i, poi := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
-			if poi.ID == uuid.Nil {
-				dbPoiID, saveErr := l.llmInteractionRepo.SaveSinglePOI(ctx, poi, session.UserID, cityID, poi.LlmInteractionID)
+		for i, p := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
+			if p.ID == uuid.Nil {
+				dbPoiID, saveErr := l.llmInteractionRepo.SaveSinglePOI(ctx, p, session.UserID, cityID, p.LlmInteractionID)
 				if saveErr != nil {
-					l.logger.WarnContext(ctx, "Failed to save new POI", slog.String("name", poi.Name), slog.Any("error", saveErr))
+					l.logger.WarnContext(ctx, "Failed to save new POI", slog.String("name", p.Name), slog.Any("error", saveErr))
 					continue
 				}
 				session.CurrentItinerary.AIItineraryResponse.PointsOfInterest[i].ID = dbPoiID
@@ -1619,7 +1611,7 @@ func (l *ServiceImpl) generatePOIDataStream(
 	eventCh chan<- types.StreamEvent,
 ) (types.POIDetailedInfo, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "generatePOIDataStream",
-		trace.WithAttributes(attribute.String("poi.name", poiName), attribute.String("city.name", cityName)))
+		trace.WithAttributes(attribute.String("p.name", poiName), attribute.String("city.name", cityName)))
 	defer span.End()
 
 	prompt := generatedContinuedConversationPrompt(poiName, cityName)
@@ -1806,12 +1798,10 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 			},
 		}, 3)
 
-		// Check if any semantic POI matches what user is asking for
 		for _, semanticPOI := range semanticPOIs[:min(3, len(semanticPOIs))] {
-			// Check if this semantic POI is already in itinerary
 			alreadyExists := false
 			for _, existingPOI := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
-				if strings.EqualFold(existingPOI.Name, semanticPOI.Name) {
+				if strings.EqualFold(existingPOI.Name, existingPOI.Name) {
 					alreadyExists = true
 					break
 				}
@@ -1849,8 +1839,8 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 				"message": "All semantic matches already in itinerary",
 				"alternatives": func() []string {
 					var names []string
-					for i, poi := range semanticPOIs[:min(3, len(semanticPOIs))] {
-						names = append(names, poi.Name)
+					for i, p := range semanticPOIs[:min(3, len(semanticPOIs))] {
+						names = append(names, p.Name)
 						if i >= 2 {
 							break
 						}
@@ -1863,8 +1853,8 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 		return fmt.Sprintf("I found some great options matching your request, but they're already in your itinerary. Here are some suggestions: %s",
 			strings.Join(func() []string {
 				var names []string
-				for i, poi := range semanticPOIs[:min(3, len(semanticPOIs))] {
-					names = append(names, poi.Name)
+				for i, p := range semanticPOIs[:min(3, len(semanticPOIs))] {
+					names = append(names, p.Name)
 					if i >= 2 {
 						break
 					}
@@ -1885,8 +1875,8 @@ func (l *ServiceImpl) handleSemanticAddPOIStreamed(ctx context.Context, message 
 	}
 
 	// Check if already exists
-	for _, poi := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
-		if strings.EqualFold(poi.Name, poiName) {
+	for _, p := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
+		if strings.EqualFold(p.Name, poiName) {
 			return fmt.Sprintf("%s is already in your itinerary.", poiName), nil
 		}
 	}
@@ -2153,14 +2143,10 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 		})
 	}()
 
-	// Step 8: Save interaction and process structured data asynchronously after completion
 	go func() {
-		wg.Wait() // Wait for all workers to complete
-
-		// Save interaction with complete response
+		//wg.Wait() // Wait for all workers to complete
 		asyncCtx := context.Background()
 
-		// Combine all responses into a single response text
 		var fullResponseBuilder strings.Builder
 		responsesMutex.Lock()
 		cityDataContent := ""
