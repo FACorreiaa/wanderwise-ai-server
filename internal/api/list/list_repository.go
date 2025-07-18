@@ -45,10 +45,10 @@ type Repository interface {
 	SearchLists(ctx context.Context, searchTerm, category, contentType, theme string, cityID *uuid.UUID) ([]*types.List, error)
 
 	// Legacy POI-specific methods (for backward compatibility)
-	GetListItem(ctx context.Context, listID, poiID uuid.UUID) (types.ListItem, error)
+	GetListItem(ctx context.Context, listID, itemID uuid.UUID, contentType string) (types.ListItem, error)
 	AddListItem(ctx context.Context, item types.ListItem) error
 	UpdateListItem(ctx context.Context, item types.ListItem) error
-	DeleteListItem(ctx context.Context, listID, poiID uuid.UUID) error // Adjusted signature
+	DeleteListItem(ctx context.Context, listID, itemID uuid.UUID, contentType string) error
 	DeleteList(ctx context.Context, listID uuid.UUID) error
 	GetUserLists(ctx context.Context, userID uuid.UUID, isItinerary bool) ([]*types.List, error)
 }
@@ -143,7 +143,8 @@ func (r *RepositoryImpl) GetSubLists(ctx context.Context, parentListID uuid.UUID
 // GetListItems retrieves all items associated with a specific list, ordered by position
 func (r *RepositoryImpl) GetListItems(ctx context.Context, listID uuid.UUID) ([]*types.ListItem, error) {
 	query := `
-        SELECT list_id, poi_id, position, notes, day_number, time_slot, duration, created_at, updated_at
+        SELECT list_id, item_id, content_type, position, notes, day_number, time_slot, duration, 
+               source_llm_interaction_id, item_ai_description, created_at, updated_at
         FROM list_items
         WHERE list_id = $1
         ORDER BY position
@@ -161,9 +162,12 @@ func (r *RepositoryImpl) GetListItems(ctx context.Context, listID uuid.UUID) ([]
 		var dayNumber sql.NullInt32
 		var timeSlot sql.NullTime
 		var duration sql.NullInt32
+		var sourceLlmInteractionID sql.NullString
+		var itemAIDescription sql.NullString
 		err := rows.Scan(
-			&item.ListID, &item.ItemID, &item.Position, &item.Notes,
-			&dayNumber, &timeSlot, &duration, &item.CreatedAt, &item.UpdatedAt,
+			&item.ListID, &item.ItemID, &item.ContentType, &item.Position, &item.Notes,
+			&dayNumber, &timeSlot, &duration, &sourceLlmInteractionID, &itemAIDescription, 
+			&item.CreatedAt, &item.UpdatedAt,
 		)
 		if err != nil {
 			r.logger.ErrorContext(ctx, "Failed to scan list item", slog.Any("error", err))
@@ -179,6 +183,15 @@ func (r *RepositoryImpl) GetListItems(ctx context.Context, listID uuid.UUID) ([]
 		if duration.Valid {
 			dur := int(duration.Int32)
 			item.Duration = &dur
+		}
+		if sourceLlmInteractionID.Valid {
+			id, err := uuid.Parse(sourceLlmInteractionID.String)
+			if err == nil {
+				item.SourceLlmInteractionID = &id
+			}
+		}
+		if itemAIDescription.Valid {
+			item.ItemAIDescription = itemAIDescription.String
 		}
 		items = append(items, &item)
 	}
@@ -211,16 +224,16 @@ func (r *RepositoryImpl) AddListItem(ctx context.Context, item types.ListItem) e
 	return nil
 }
 
-// DeleteListItem deletes a specific item from the list_items table using list_id and poi_id
-func (r *RepositoryImpl) DeleteListItem(ctx context.Context, listID, poiID uuid.UUID) error {
-	query := `DELETE FROM list_items WHERE list_id = $1 AND poi_id = $2`
-	result, err := r.pgpool.Exec(ctx, query, listID, poiID)
+// DeleteListItem deletes a specific item from the list_items table using list_id, item_id, and content_type
+func (r *RepositoryImpl) DeleteListItem(ctx context.Context, listID, itemID uuid.UUID, contentType string) error {
+	query := `DELETE FROM list_items WHERE list_id = $1 AND item_id = $2 AND content_type = $3`
+	result, err := r.pgpool.Exec(ctx, query, listID, itemID, contentType)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "Failed to delete list item", slog.Any("error", err))
 		return fmt.Errorf("failed to delete list item: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("no list item found for list_id %s and poi_id %s", listID, poiID)
+		return fmt.Errorf("no list item found for list_id %s, item_id %s, and content_type %s", listID, itemID, contentType)
 	}
 	return nil
 }
@@ -261,21 +274,25 @@ func (r *RepositoryImpl) UpdateList(ctx context.Context, list types.List) error 
 	return nil
 }
 
-// GetListItem retrieves a specific item from the list_items table using list_id and poi_id
-func (r *RepositoryImpl) GetListItem(ctx context.Context, listID, poiID uuid.UUID) (types.ListItem, error) {
+// GetListItem retrieves a specific item from the list_items table using list_id, item_id, and content_type
+func (r *RepositoryImpl) GetListItem(ctx context.Context, listID, itemID uuid.UUID, contentType string) (types.ListItem, error) {
 	query := `
-        SELECT list_id, poi_id, position, notes, day_number, time_slot, duration, created_at, updated_at
+        SELECT list_id, item_id, content_type, position, notes, day_number, time_slot, duration, 
+               source_llm_interaction_id, item_ai_description, created_at, updated_at
         FROM list_items
-        WHERE list_id = $1 AND poi_id = $2
+        WHERE list_id = $1 AND item_id = $2 AND content_type = $3
     `
-	row := r.pgpool.QueryRow(ctx, query, listID, poiID)
+	row := r.pgpool.QueryRow(ctx, query, listID, itemID, contentType)
 	var item types.ListItem
 	var dayNumber sql.NullInt32
 	var timeSlot sql.NullTime
 	var duration sql.NullInt32
+	var sourceLlmInteractionID sql.NullString
+	var itemAIDescription sql.NullString
 	err := row.Scan(
-		&item.ListID, &item.ItemID, &item.Position, &item.Notes,
-		&dayNumber, &timeSlot, &duration, &item.CreatedAt, &item.UpdatedAt,
+		&item.ListID, &item.ItemID, &item.ContentType, &item.Position, &item.Notes,
+		&dayNumber, &timeSlot, &duration, &sourceLlmInteractionID, &itemAIDescription,
+		&item.CreatedAt, &item.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -294,6 +311,15 @@ func (r *RepositoryImpl) GetListItem(ctx context.Context, listID, poiID uuid.UUI
 	if duration.Valid {
 		dur := int(duration.Int32)
 		item.Duration = &dur
+	}
+	if sourceLlmInteractionID.Valid {
+		id, err := uuid.Parse(sourceLlmInteractionID.String)
+		if err == nil {
+			item.SourceLlmInteractionID = &id
+		}
+	}
+	if itemAIDescription.Valid {
+		item.ItemAIDescription = itemAIDescription.String
 	}
 	return item, nil
 }

@@ -89,8 +89,12 @@ BEGIN
             RAISE EXCEPTION 'Referenced hotel with id % does not exist', NEW.item_id;
         END IF;
     ELSIF NEW.content_type = 'itinerary' THEN
+        -- Check if it's a user-created itinerary in lists table
         IF NOT EXISTS (SELECT 1 FROM lists WHERE id = NEW.item_id AND is_itinerary = true) THEN
-            RAISE EXCEPTION 'Referenced itinerary with id % does not exist', NEW.item_id;
+            -- If not found in lists, check if it's a bookmarked itinerary in user_saved_itineraries
+            IF NOT EXISTS (SELECT 1 FROM user_saved_itineraries WHERE id = NEW.item_id) THEN
+                RAISE EXCEPTION 'Referenced itinerary with id % does not exist', NEW.item_id;
+            END IF;
         END IF;
     END IF;
     

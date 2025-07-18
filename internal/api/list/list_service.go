@@ -619,7 +619,7 @@ func (s *ServiceImpl) UpdatePOIListItem(ctx context.Context, userID, listID, poi
 
 	// Fetch the current item
 	// Note: We need to add a GetListItem method to the repository
-	item, err := s.listRepository.GetListItem(ctx, listID, poiID)
+	item, err := s.listRepository.GetListItem(ctx, listID, poiID, "poi")
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to fetch list item", slog.Any("error", err))
 		span.RecordError(err)
@@ -693,7 +693,7 @@ func (s *ServiceImpl) RemovePOIListItem(ctx context.Context, userID, listID, poi
 	}
 
 	// Delete the item
-	err = s.listRepository.DeleteListItem(ctx, listID, poiID)
+	err = s.listRepository.DeleteListItem(ctx, listID, poiID, "poi")
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to delete list item", slog.Any("error", err))
 		span.RecordError(err)

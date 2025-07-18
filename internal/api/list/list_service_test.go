@@ -57,8 +57,8 @@ func (m *MockListRepository) AddListItem(ctx context.Context, item types.ListIte
 	return args.Error(0)
 }
 
-func (m *MockListRepository) GetListItem(ctx context.Context, listID, poiID uuid.UUID) (types.ListItem, error) {
-	args := m.Called(ctx, listID, poiID)
+func (m *MockListRepository) GetListItem(ctx context.Context, listID, itemID uuid.UUID, contentType string) (types.ListItem, error) {
+	args := m.Called(ctx, listID, itemID, contentType)
 	if args.Get(0) == nil {
 		return types.ListItem{}, args.Error(1)
 	}
@@ -70,8 +70,8 @@ func (m *MockListRepository) UpdateListItem(ctx context.Context, item types.List
 	return args.Error(0)
 }
 
-func (m *MockListRepository) DeleteListItem(ctx context.Context, listID, poiID uuid.UUID) error {
-	args := m.Called(ctx, listID, poiID)
+func (m *MockListRepository) DeleteListItem(ctx context.Context, listID, itemID uuid.UUID, contentType string) error {
+	args := m.Called(ctx, listID, itemID, contentType)
 	return args.Error(0)
 }
 

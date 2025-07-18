@@ -21,13 +21,27 @@ func (l *ServiceImpl) enrichAndFilterLLMResponse(rawPOIs []types.POIDetailedInfo
 				poiID = uuid.New()
 			}
 			detailedPOI := types.POIDetailedInfo{
-				ID:          poiID,
-				Name:        p.Name,
-				Latitude:    p.Latitude,
-				Longitude:   p.Longitude,
-				Category:    p.Category,
-				Description: p.DescriptionPOI,
-				Distance:    distanceKm * 1000,
+				ID:                poiID,
+				Name:              p.Name,
+				Latitude:          p.Latitude,
+				Longitude:         p.Longitude,
+				Category:          p.Category,
+				Description:       p.DescriptionPOI,
+				Distance:          distanceKm * 1000,
+				City:              p.City,
+				CityID:            p.CityID,
+				Address:           p.Address,
+				PhoneNumber:       p.PhoneNumber,
+				Website:           p.Website,
+				OpeningHours:      p.OpeningHours,
+				Rating:            p.Rating,
+				PriceRange:        p.PriceRange,
+				PriceLevel:        p.PriceLevel,
+				Reviews:           p.Reviews,
+				LlmInteractionID:  p.LlmInteractionID,
+				CreatedAt:         p.CreatedAt,
+				Amenities:         p.Amenities,
+				Source:            p.Source,
 			}
 			processedPOIs = append(processedPOIs, detailedPOI)
 		}
