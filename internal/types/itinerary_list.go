@@ -69,7 +69,8 @@ const (
 
 type ListItem struct {
 	ListID      uuid.UUID   `json:"list_id"`
-	ItemID      uuid.UUID   `json:"item_id"`      // Generic ID that could reference POI, Restaurant, Hotel, or Itinerary
+	ItemID      uuid.UUID   `json:"item_id"` // Generic ID that could reference POI, Restaurant, Hotel, or Itinerary
+	PoiID       uuid.UUID   `json:"poi_id"`
 	ContentType ContentType `json:"content_type"` // Type of content this item represents
 	Position    int         `json:"position"`
 	Notes       string      `json:"notes"`

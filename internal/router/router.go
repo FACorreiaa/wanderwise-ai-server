@@ -127,7 +127,7 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Use(authMiddleware.RequirePlanStatus(
 				cfg.Logger,
 				[]string{"premium_monthly", "premium_annual"}, // List of allowed plans
-				"active",                                      // Required status
+				"active", // Required status
 			))
 
 			// Add routes specific to premium users

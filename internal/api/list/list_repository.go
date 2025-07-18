@@ -37,10 +37,10 @@ type Repository interface {
 	SaveList(ctx context.Context, userID, listID uuid.UUID) error
 	UnsaveList(ctx context.Context, userID, listID uuid.UUID) error
 	GetUserSavedLists(ctx context.Context, userID uuid.UUID) ([]*types.List, error)
-	
+
 	// Content type specific methods
 	GetListItemsByContentType(ctx context.Context, listID uuid.UUID, contentType types.ContentType) ([]*types.ListItem, error)
-	
+
 	// Search and filtering
 	SearchLists(ctx context.Context, searchTerm, category, contentType, theme string, cityID *uuid.UUID) ([]*types.List, error)
 
@@ -166,7 +166,7 @@ func (r *RepositoryImpl) GetListItems(ctx context.Context, listID uuid.UUID) ([]
 		var itemAIDescription sql.NullString
 		err := rows.Scan(
 			&item.ListID, &item.ItemID, &item.ContentType, &item.Position, &item.Notes,
-			&dayNumber, &timeSlot, &duration, &sourceLlmInteractionID, &itemAIDescription, 
+			&dayNumber, &timeSlot, &duration, &sourceLlmInteractionID, &itemAIDescription,
 			&item.CreatedAt, &item.UpdatedAt,
 		)
 		if err != nil {
@@ -205,17 +205,14 @@ func (r *RepositoryImpl) GetListItems(ctx context.Context, listID uuid.UUID) ([]
 // AddListItem inserts a new item into the list_items table
 func (r *RepositoryImpl) AddListItem(ctx context.Context, item types.ListItem) error {
 	query := `
-        INSERT INTO list_items (
-            list_id, item_id, content_type, position, notes, day_number, time_slot, 
-            duration, source_llm_interaction_id, item_ai_description, created_at, updated_at
-        ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-        )
+        INSERT INTO list_items (list_id, item_id, content_type, position, notes, day_number, time_slot, 
+            duration, source_llm_interaction_id, item_ai_description, created_at, updated_at, poi_id) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     `
 	_, err := r.pgpool.Exec(ctx, query,
 		item.ListID, item.ItemID, item.ContentType, item.Position, item.Notes,
 		item.DayNumber, item.TimeSlot, item.Duration, item.SourceLlmInteractionID,
-		item.ItemAIDescription, item.CreatedAt, item.UpdatedAt,
+		item.ItemAIDescription, item.CreatedAt, item.UpdatedAt, item.PoiID,
 	)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "Failed to add list item", slog.Any("error", err))
@@ -538,30 +535,30 @@ func (r *RepositoryImpl) SearchLists(ctx context.Context, searchTerm, category, 
 		LEFT JOIN list_items li ON l.id = li.list_id
 		WHERE l.is_public = true
 	`
-	
+
 	var args []interface{}
 	argIndex := 1
-	
+
 	if searchTerm != "" {
 		query += fmt.Sprintf(" AND (l.name ILIKE $%d OR l.description ILIKE $%d)", argIndex, argIndex+1)
 		args = append(args, "%"+searchTerm+"%", "%"+searchTerm+"%")
 		argIndex += 2
 	}
-	
+
 	if cityID != nil {
 		query += fmt.Sprintf(" AND l.city_id = $%d", argIndex)
 		args = append(args, *cityID)
 		argIndex++
 	}
-	
+
 	if contentType != "" {
 		query += fmt.Sprintf(" AND li.content_type = $%d", argIndex)
 		args = append(args, contentType)
 		argIndex++
 	}
-	
+
 	query += " ORDER BY l.save_count DESC, l.created_at DESC"
-	
+
 	rows, err := r.pgpool.Query(ctx, query, args...)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "Failed to search lists", slog.Any("error", err))

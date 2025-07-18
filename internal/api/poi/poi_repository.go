@@ -40,12 +40,9 @@ type Repository interface {
 	RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID) error
 
 	RemoveLLMPoiFromFavourite(ctx context.Context, userID, llmPoiID uuid.UUID) error
-	RemoveLLMPoiFromFavouriteByName(ctx context.Context, userID uuid.UUID, poiName string) error
 	CheckPoiExists(ctx context.Context, poiID uuid.UUID) (bool, error)
-	CheckLlmPoiExists(ctx context.Context, llmPoiID uuid.UUID) (bool, error)
 	FindLLMPOIByNameAndCity(ctx context.Context, name, city string) (uuid.UUID, error)
 	FindLLMPOIByName(ctx context.Context, name string) (uuid.UUID, error)
-	CreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error)
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetFavouritePOIsByUserIDPaginated(ctx context.Context, userID uuid.UUID, limit, offset int) ([]types.POIDetailedInfo, int, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
@@ -176,49 +173,6 @@ func (r *RepositoryImpl) FindPoiByNameAndCity(ctx context.Context, name string, 
 	return &poi, nil
 }
 
-// func (r *RepositoryImpl) GetPOIsByNamesAndCitySortedByDistance(ctx context.Context, names []string, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error) {
-// 	// Construct the user's location as a PostGIS POINT
-// 	userPoint := fmt.Sprintf("SRID=4326;POINT(%f %f)", userLocation.UserLon, userLocation.UserLat)
-
-// 	// SQL query using ST_Distance for sorting
-// 	query := `
-//         SELECT
-//             id,
-//             name,
-//             ST_X(location::geometry) AS longitude,
-//             ST_Y(location::geometry) AS latitude,
-//             poi_type AS category,
-//             ai_summary AS description_poi,
-//             ST_Distance(location::geography, ST_GeomFromText($1, 4326)::geography) AS distance
-//         FROM points_of_interest
-//         WHERE name = ANY($2) AND city_id = $3
-//         ORDER BY distance ASC
-//     `
-
-// 	rows, err := r.pgpool.Query(ctx, query, userPoint, names, cityID)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed to query POIs: %w", err)
-// 	}
-// 	defer rows.Close()
-
-// 	var pois []types.POIDetailedInfo
-// 	for rows.Next() {
-// 		var poi types.POIDetailedInfo
-// 		err := rows.Scan(&poi.ID, &poi.Name, &poi.Longitude,
-// 			&poi.Latitude, &poi.Category, &poi.DescriptionPOI, &poi.Distance)
-// 		if err != nil {
-// 			return nil, fmt.Errorf("failed to scan POI row: %w", err)
-// 		}
-// 		pois = append(pois, poi)
-// 	}
-
-// 	if err = rows.Err(); err != nil {
-// 		return nil, fmt.Errorf("error iterating POI rows: %w", err)
-// 	}
-
-// 	return pois, nil
-// }
-
 func (r *RepositoryImpl) GetPOIsByCityAndDistance(ctx context.Context, cityID uuid.UUID, userLocation types.UserLocation) ([]types.POIDetailedInfo, error) {
 	userPoint := fmt.Sprintf("SRID=4326;POINT(%f %f)", userLocation.UserLon, userLocation.UserLat)
 	query := `
@@ -263,16 +217,6 @@ func (r *RepositoryImpl) CheckPoiExists(ctx context.Context, poiID uuid.UUID) (b
 	err := r.pgpool.QueryRow(ctx, query, poiID).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("failed to query points_of_interest: %w", err)
-	}
-	return exists, nil
-}
-
-func (r *RepositoryImpl) CheckLlmPoiExists(ctx context.Context, llmPoiID uuid.UUID) (bool, error) {
-	var exists bool
-	query := `SELECT EXISTS(SELECT 1 FROM llm_poi WHERE id = $1)`
-	err := r.pgpool.QueryRow(ctx, query, llmPoiID).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("failed to query llm_poi: %w", err)
 	}
 	return exists, nil
 }
@@ -342,30 +286,6 @@ func (r *RepositoryImpl) RemoveLLMPoiFromFavourite(ctx context.Context, userID, 
 	return nil
 }
 
-// RemoveLLMPoiFromFavouriteByName removes a favorite LLM POI by matching the POI name
-func (r *RepositoryImpl) RemoveLLMPoiFromFavouriteByName(ctx context.Context, userID uuid.UUID, poiName string) error {
-	query := `
-		DELETE FROM user_favorite_llm_pois
-		WHERE user_id = $1 AND llm_poi_id IN (
-			SELECT id FROM llm_pois WHERE name = $2
-		)
-	`
-	result, err := r.pgpool.Exec(ctx, query, userID, poiName)
-	if err != nil {
-		return fmt.Errorf("failed to remove LLM POI from favourites by name: %w", err)
-	}
-
-	rowsAffected := result.RowsAffected()
-	r.logger.InfoContext(ctx, "Delete by name query result",
-		slog.String("poiName", poiName),
-		slog.Int64("rows_affected", rowsAffected))
-
-	if rowsAffected == 0 {
-		return fmt.Errorf("no favourite LLM POI found to remove with name: %s", poiName)
-	}
-	return nil
-}
-
 func (r *RepositoryImpl) GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error) {
 	query := `
 		SELECT
@@ -415,21 +335,21 @@ FROM (
              uflp.id as favorite_id,
              uflp.notes,
              uflp.added_at,
-             llm_poi.id,
-             llm_poi.name,
-             llm_poi.longitude,
-             llm_poi.latitude,
-             llm_poi.category,
-             llm_poi.description AS description_poi,
-             llm_poi.address,
-             llm_poi.website,
-             llm_poi.phone_number,
-             llm_poi.opening_hours,
-             llm_poi.rating,
-             llm_poi.price_level,
+             llmsp.id,
+             llmsp.name,
+             llmsp.longitude,
+             llmsp.latitude,
+             llmsp.category,
+             llmsp.description AS description_poi,
+             llmsp.address,
+             llmsp.website,
+             llmsp.phone_number,
+             llmsp.opening_hours,
+             llmsp.rating,
+             llmsp.price_level,
              'llm' as poi_source
          FROM user_favorite_llm_pois uflp
-                  INNER JOIN llm_poi ON uflp.llm_poi_id = llm_poi.id
+                  INNER JOIN llm_suggested_pois as llmsp ON uflp.llm_poi_id = llm_suggested_pois.id
          WHERE uflp.user_id = $1
      ) combined_favorites
 ORDER BY added_at DESC;
@@ -513,11 +433,11 @@ func (r *RepositoryImpl) GetFavouritePOIsByUserIDPaginated(ctx context.Context, 
 			UNION ALL
 
 			SELECT 1 FROM user_favorite_llm_pois uflp
-			INNER JOIN llm_poi ON uflp.llm_poi_id = llm_poi.id
+			INNER JOIN llm_suggested_pois ON uflp.llm_poi_id = llm_suggested_pois.id
 			WHERE uflp.user_id = $1
 		) combined_count
 	`
-	
+
 	var totalCount int
 	err := r.pgpool.QueryRow(ctx, countQuery, userID).Scan(&totalCount)
 	if err != nil {
@@ -573,68 +493,72 @@ FROM (
              uflp.id as favorite_id,
              uflp.notes,
              uflp.added_at,
-             llm_poi.id,
-             llm_poi.name,
-             llm_poi.longitude,
-             llm_poi.latitude,
-             llm_poi.category,
-             llm_poi.description AS description_poi,
-             llm_poi.address,
-             llm_poi.website,
-             llm_poi.phone_number,
-             llm_poi.opening_hours,
-             llm_poi.rating,
-             llm_poi.price_level,
+             llmsp.id,
+             llmsp.name,
+             llmsp.longitude,
+             llmsp.latitude,
+             llmsp.category,
+             llmsp.description AS description_poi,
+             llmsp.address,
+             llmsp.website,
+             llmsp.phone_number,
+             llmsp.opening_hours,
+             llmsp.rating,
+             llmsp.price_level,
              'llm' as poi_source
          FROM user_favorite_llm_pois uflp
-                  INNER JOIN llm_poi ON uflp.llm_poi_id = llm_poi.id
+                  INNER JOIN llm_suggested_pois llmsp ON uflp.llm_poi_id = llmsp.id
          WHERE uflp.user_id = $1
      ) combined_favorites
 ORDER BY added_at DESC
 LIMIT $2 OFFSET $3;
 	`
-	
+
 	rows, err := r.pgpool.Query(ctx, query, userID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query favourite POIs: %w", err)
 	}
 	defer rows.Close()
-	
+
 	var pois []types.POIDetailedInfo
 	for rows.Next() {
 		var poi types.POIDetailedInfo
 		var favoriteID uuid.UUID
 		var notes *string
 		var addedAt time.Time
-		var address, website, phoneNumber *string
+		var descriptionPOI, address, website, phoneNumber *string
 		var openingHours *string
 		var rating *float64
 		var priceLevel *string
 		var poiSource string
 
 		err := rows.Scan(
-			&favoriteID,         // favorite_id
-			&notes,              // notes
-			&addedAt,            // added_at
-			&poi.ID,             // id
-			&poi.Name,           // name
-			&poi.Longitude,      // longitude
-			&poi.Latitude,       // latitude
-			&poi.Category,       // category
-			&poi.DescriptionPOI, // description_poi
-			&address,            // address
-			&website,            // website
-			&phoneNumber,        // phone_number
-			&openingHours,       // opening_hours
-			&rating,             // rating
-			&priceLevel,         // price_level
-			&poiSource,          // poi_source
+			&favoriteID,     // favorite_id
+			&notes,          // notes
+			&addedAt,        // added_at
+			&poi.ID,         // id
+			&poi.Name,       // name
+			&poi.Longitude,  // longitude
+			&poi.Latitude,   // latitude
+			&poi.Category,   // category
+			&descriptionPOI, // description_poi
+			&address,        // address
+			&website,        // website
+			&phoneNumber,    // phone_number
+			&openingHours,   // opening_hours
+			&rating,         // rating
+			&priceLevel,     // price_level
+			&poiSource,      // poi_source
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan favourite POI row: %w", err)
 		}
 
 		// Set optional fields
+		if descriptionPOI != nil {
+			poi.DescriptionPOI = *descriptionPOI
+		}
+
 		if address != nil {
 			poi.Address = *address
 		}
@@ -656,9 +580,9 @@ LIMIT $2 OFFSET $3;
 	if err = rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("error iterating favourite POI rows: %w", err)
 	}
-	
-	r.logger.Info("Paginated favourite POIs retrieved successfully", 
-		slog.String("userID", userID.String()), 
+
+	r.logger.Info("Paginated favourite POIs retrieved successfully",
+		slog.String("userID", userID.String()),
 		slog.Int("count", len(pois)),
 		slog.Int("total", totalCount),
 		slog.Int("limit", limit),
@@ -2726,8 +2650,8 @@ func (r *RepositoryImpl) FindLLMPOIByNameAndCity(ctx context.Context, name, city
 
 	query := `
 		SELECT id
-		FROM llm_poi
-		WHERE LOWER(name) = LOWER($1) AND LOWER(city) = LOWER($2)
+		FROM llm_suggested_pois
+		WHERE LOWER(name) = LOWER($1) AND LOWER(city_name) = LOWER($2)
 		LIMIT 1
 	`
 
@@ -2751,7 +2675,7 @@ func (r *RepositoryImpl) FindLLMPOIByName(ctx context.Context, name string) (uui
 
 	query := `
 		SELECT id
-		FROM llm_poi
+		FROM llm_suggested_pois
 		WHERE LOWER(name) = LOWER($1)
 		LIMIT 1
 	`
@@ -2767,78 +2691,4 @@ func (r *RepositoryImpl) FindLLMPOIByName(ctx context.Context, name string) (uui
 
 	span.SetAttributes(attribute.String("poi.name", name))
 	return id, nil
-}
-
-// CreateLLMPOI creates a new LLM POI in the database
-func (r *RepositoryImpl) CreateLLMPOI(ctx context.Context, poiData *types.POIDetailedInfo) (uuid.UUID, error) {
-	ctx, span := otel.Tracer("POIRepository").Start(ctx, "CreateLLMPOI")
-	defer span.End()
-
-	newID := uuid.New()
-
-	query := `
-		INSERT INTO llm_poi (
-			id, llm_interaction_id, city, name, latitude, longitude,
-			category, description, address, website, phone_number,
-			opening_hours, price_level, tags, images, rating,
-			created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
-		)
-	`
-
-	// Convert slices to JSON for storage
-	tagsJSON, err := json.Marshal(poiData.Tags)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("failed to marshal tags: %w", err)
-	}
-	imagesJSON, err := json.Marshal(poiData.Images)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("failed to marshal images: %w", err)
-	}
-	openingHoursJSON, err := json.Marshal(poiData.OpeningHours)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("failed to marshal opening hours: %w", err)
-	}
-
-	// Use LLM interaction ID directly, but handle invalid UUIDs
-	var llmInteractionID *uuid.UUID
-	if poiData.LlmInteractionID != uuid.Nil {
-		llmInteractionID = &poiData.LlmInteractionID
-	}
-
-	now := time.Now()
-	_, err = r.pgpool.Exec(ctx, query,
-		newID,
-		llmInteractionID,
-		poiData.City,
-		poiData.Name,
-		poiData.Latitude,
-		poiData.Longitude,
-		poiData.Category,
-		poiData.Description,
-		poiData.Address,
-		poiData.Website,
-		poiData.PhoneNumber,
-		openingHoursJSON,
-		poiData.PriceLevel,
-		tagsJSON,
-		imagesJSON,
-		poiData.Rating,
-		now,
-		now,
-	)
-
-	if err != nil {
-		span.RecordError(err)
-		return uuid.Nil, fmt.Errorf("failed to create LLM POI: %w", err)
-	}
-
-	span.SetAttributes(
-		attribute.String("poi.id", newID.String()),
-		attribute.String("poi.name", poiData.Name),
-		attribute.String("poi.city", poiData.City),
-	)
-
-	return newID, nil
 }

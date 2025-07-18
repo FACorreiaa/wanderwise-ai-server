@@ -34,9 +34,14 @@ CREATE TABLE llm_suggested_pois (
     search_profile_id UUID, -- The specific search profile used (if applicable)
     llm_interaction_id UUID NOT NULL REFERENCES llm_interactions(id) ON DELETE CASCADE, -- Links to the LLM request/response log
     city_id UUID REFERENCES cities(id) ON DELETE SET NULL, -- The city context for this POI
+    city_name TEXT,
     latitude DOUBLE PRECISION, -- LLM provided latitude
     longitude DOUBLE PRECISION, -- LLM provided longitude
     distance DOUBLE PRECISION, -- Distance from the user's current location (if applicable)
+    phone_number TEXT,
+    opening_hours JSONB,
+    rating DOUBLE PRECISION,
+    price_level TEXT,
     location GEOMETRY(Point, 4326) NOT NULL, -- PostGIS geometry type for spatial queries
     name TEXT NOT NULL,
     description TEXT, -- LLM-generated description

@@ -31,7 +31,6 @@ var _ Service = (*ServiceImpl)(nil)
 type Service interface {
 	AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) (uuid.UUID, error)
 	RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) error
-	RemovePoiFromFavouritesByName(ctx context.Context, userID uuid.UUID, poiName string) error
 	GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error)
 	GetFavouritePOIsByUserIDPaginated(ctx context.Context, userID uuid.UUID, limit, offset int) ([]types.POIDetailedInfo, int, error)
 	GetPOIsByCityID(ctx context.Context, cityID uuid.UUID) ([]types.POIDetailedInfo, error)
@@ -97,36 +96,23 @@ func NewServiceImpl(poiRepository Repository,
 func (s *ServiceImpl) AddPoiToFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) (uuid.UUID, error) {
 	var id uuid.UUID
 	if !isLLMGenerated {
-		exists, err := s.poiRepository.CheckPoiExists(ctx, poiID)
-		if err != nil {
-			return uuid.Nil, fmt.Errorf("failed to check if POI exists: %w", err)
-		}
-		if !exists {
-			return uuid.Nil, fmt.Errorf("POI with ID %s does not exist", poiID)
-		}
 
-		id, err = s.poiRepository.AddPoiToFavourites(ctx, userID, poiID)
+		id, err := s.poiRepository.AddPoiToFavourites(ctx, userID, poiID)
 		if err != nil {
 			s.logger.Error("failed to add POI to favourites", "error", err)
 			return uuid.Nil, err
 		}
-	} else {
-		exists, err := s.poiRepository.CheckLlmPoiExists(ctx, poiID)
-		if err != nil {
-			return uuid.Nil, fmt.Errorf("failed to check if LLM POI exists: %w", err)
-		}
-		if !exists {
-			return uuid.Nil, fmt.Errorf("LLM POI with ID %s does not exist", poiID)
-		}
-		// Insert into user_favorite_llm_pois
-		id, err = s.poiRepository.AddLLMPoiToFavourite(ctx, userID, poiID)
-		if err != nil {
-			return uuid.Nil, fmt.Errorf("failed to insert favorite LLM POI: %w", err)
-		}
+		return id, nil
+	}
+
+	id, err := s.poiRepository.AddLLMPoiToFavourite(ctx, userID, poiID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to insert favorite LLM POI: %w", err)
 	}
 
 	return id, nil
 }
+
 func (s *ServiceImpl) RemovePoiFromFavourites(ctx context.Context, userID, poiID uuid.UUID, isLLMGenerated bool) error {
 	if isLLMGenerated {
 		err := s.poiRepository.RemoveLLMPoiFromFavourite(ctx, userID, poiID)
@@ -144,15 +130,6 @@ func (s *ServiceImpl) RemovePoiFromFavourites(ctx context.Context, userID, poiID
 	return nil
 }
 
-// RemovePoiFromFavouritesByName removes a favorite LLM POI by name as a fallback
-func (s *ServiceImpl) RemovePoiFromFavouritesByName(ctx context.Context, userID uuid.UUID, poiName string) error {
-	err := s.poiRepository.RemoveLLMPoiFromFavouriteByName(ctx, userID, poiName)
-	if err != nil {
-		s.logger.Error("failed to remove LLM POI from favourites by name", "error", err)
-		return err
-	}
-	return nil
-}
 func (s *ServiceImpl) GetFavouritePOIsByUserID(ctx context.Context, userID uuid.UUID) ([]types.POIDetailedInfo, error) {
 	pois, err := s.poiRepository.GetFavouritePOIsByUserID(ctx, userID)
 	if err != nil {
@@ -769,24 +746,16 @@ func (s *ServiceImpl) FindOrCreateLLMPOI(ctx context.Context, poiData *types.POI
 	}
 
 	// First, try to find existing POI by name and city
-	existingID, err := s.poiRepository.FindLLMPOIByNameAndCity(ctx, poiData.Name, poiData.City)
-	if err == nil && existingID != uuid.Nil {
-		s.logger.InfoContext(ctx, "Found existing LLM POI", "name", poiData.Name, "id", existingID)
+	id, err := s.poiRepository.FindLLMPOIByNameAndCity(ctx, poiData.Name, poiData.City)
+	if err == nil && id != uuid.Nil {
+		s.logger.InfoContext(ctx, "Found existing LLM POI", "name", poiData.Name, "id", id)
 		span.SetAttributes(attribute.String("operation", "found_existing"))
-		return existingID, nil
+		return id, nil
 	}
 
-	// If not found, create new LLM POI
-	newID, err := s.poiRepository.CreateLLMPOI(ctx, poiData)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "Failed to create LLM POI", "error", err, "name", poiData.Name)
-		span.RecordError(err)
-		return uuid.Nil, fmt.Errorf("failed to create LLM POI: %w", err)
-	}
-
-	s.logger.InfoContext(ctx, "Created new LLM POI", "name", poiData.Name, "id", newID)
+	s.logger.InfoContext(ctx, "Created new LLM POI", "name", poiData.Name, "id", id)
 	span.SetAttributes(attribute.String("operation", "created_new"))
-	return newID, nil
+	return id, nil
 }
 
 // FindLLMPOIByName finds an LLM POI by name, searching across all cities
