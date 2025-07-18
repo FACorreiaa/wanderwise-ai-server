@@ -482,7 +482,6 @@ func (r *RepositoryImpl) GetAllCities(ctx context.Context) ([]types.CityDetail, 
             ST_Y(center_location) as center_latitude,
             ST_X(center_location) as center_longitude
         FROM cities
-        WHERE center_location IS NOT NULL
         ORDER BY name ASC
     `
 

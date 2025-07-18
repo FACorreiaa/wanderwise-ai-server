@@ -2,5 +2,6 @@
 <project version="4">
   <component name="SqlDialectMappings">
     <file url="file://$PROJECT_DIR$/app/db/migrations/0013_itenerary.up.sql" dialect="PostgreSQL" />
+    <file url="file://$PROJECT_DIR$/app/db/migrations/0031_fix_list_items_validation.down.sql" dialect="PostgreSQL" />
   </component>
 </project>

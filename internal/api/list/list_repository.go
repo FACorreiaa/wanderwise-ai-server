@@ -189,7 +189,7 @@ func (r *RepositoryImpl) GetListItems(ctx context.Context, listID uuid.UUID) ([]
 	return items, nil
 }
 
-// AddListItem inserts a new item into the list_items table (supports both legacy and new structure)
+// AddListItem inserts a new item into the list_items table
 func (r *RepositoryImpl) AddListItem(ctx context.Context, item types.ListItem) error {
 	query := `
         INSERT INTO list_items (

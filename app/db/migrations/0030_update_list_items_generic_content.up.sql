@@ -78,19 +78,20 @@ BEGIN
         IF NOT EXISTS (SELECT 1 FROM points_of_interest WHERE id = NEW.item_id) THEN
             RAISE EXCEPTION 'Referenced POI with id % does not exist', NEW.item_id;
         END IF;
+    ELSIF NEW.content_type = 'restaurant' THEN
+        -- Restaurants are stored as POIs with category 'restaurant' or similar
+        IF NOT EXISTS (SELECT 1 FROM points_of_interest WHERE id = NEW.item_id) THEN
+            RAISE EXCEPTION 'Referenced restaurant with id % does not exist', NEW.item_id;
+        END IF;
+    ELSIF NEW.content_type = 'hotel' THEN
+        -- Hotels are stored as POIs with category 'hotel' or similar
+        IF NOT EXISTS (SELECT 1 FROM points_of_interest WHERE id = NEW.item_id) THEN
+            RAISE EXCEPTION 'Referenced hotel with id % does not exist', NEW.item_id;
+        END IF;
     ELSIF NEW.content_type = 'itinerary' THEN
         IF NOT EXISTS (SELECT 1 FROM lists WHERE id = NEW.item_id AND is_itinerary = true) THEN
             RAISE EXCEPTION 'Referenced itinerary with id % does not exist', NEW.item_id;
         END IF;
-    -- Note: Add restaurant and hotel validation when those tables exist
-    -- ELSIF NEW.content_type = 'restaurant' THEN
-    --     IF NOT EXISTS (SELECT 1 FROM restaurants WHERE id = NEW.item_id) THEN
-    --         RAISE EXCEPTION 'Referenced restaurant with id % does not exist', NEW.item_id;
-    --     END IF;
-    -- ELSIF NEW.content_type = 'hotel' THEN
-    --     IF NOT EXISTS (SELECT 1 FROM hotels WHERE id = NEW.item_id) THEN
-    --         RAISE EXCEPTION 'Referenced hotel with id % does not exist', NEW.item_id;
-    --     END IF;
     END IF;
     
     RETURN NEW;

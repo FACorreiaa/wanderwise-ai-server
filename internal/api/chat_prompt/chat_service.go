@@ -527,6 +527,51 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 
 	// Prepare primaryCityID - handle both PrimaryCityID and PrimaryCityName
 	var primaryCityID pgtype.UUID
+	
+	// Handle city resolution
+	if req.PrimaryCityID != nil {
+		// Use provided city ID
+		primaryCityID = pgtype.UUID{
+			Bytes: *req.PrimaryCityID,
+			Valid: true,
+		}
+	} else if req.PrimaryCityName != "" {
+		// Look up or create city by name
+		city, err := l.cityRepo.FindCityByNameAndCountry(ctx, req.PrimaryCityName, "")
+		if err != nil {
+			l.logger.ErrorContext(ctx, "Failed to find city", slog.Any("error", err))
+			span.RecordError(err)
+			return uuid.Nil, fmt.Errorf("failed to find city: %w", err)
+		}
+		
+		if city == nil {
+			// City doesn't exist, create it
+			cityDetail := types.CityDetail{
+				Name:      req.PrimaryCityName,
+				Country:   "Unknown", // Could be extracted from LLM interaction context
+				AiSummary: "",
+			}
+			cityID, err := l.cityRepo.SaveCity(ctx, cityDetail)
+			if err != nil {
+				l.logger.ErrorContext(ctx, "Failed to save city", slog.Any("error", err))
+				span.RecordError(err)
+				return uuid.Nil, fmt.Errorf("failed to save city: %w", err)
+			}
+			primaryCityID = pgtype.UUID{
+				Bytes: cityID,
+				Valid: true,
+			}
+			l.logger.InfoContext(ctx, "Created new city", slog.String("cityName", req.PrimaryCityName), slog.String("cityID", cityID.String()))
+		} else {
+			primaryCityID = pgtype.UUID{
+				Bytes: city.ID,
+				Valid: true,
+			}
+			l.logger.InfoContext(ctx, "Found existing city", slog.String("cityName", req.PrimaryCityName), slog.String("cityID", city.ID.String()))
+		}
+	} else {
+		primaryCityID = pgtype.UUID{Valid: false}
+	}
 
 	// Fetch original interaction only if LlmInteractionID is provided
 	var originalInteraction *types.LlmInteraction

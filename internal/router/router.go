@@ -127,7 +127,7 @@ func SetupRouter(cfg *Config) chi.Router {
 			r.Use(authMiddleware.RequirePlanStatus(
 				cfg.Logger,
 				[]string{"premium_monthly", "premium_annual"}, // List of allowed plans
-				"active", // Required status
+				"active",                                      // Required status
 			))
 
 			// Add routes specific to premium users
@@ -268,17 +268,18 @@ func ItineraryListRoutes(h *itineraryList.HandlerImpl) http.Handler {
 	r.Delete("/lists/{listID}", h.DeleteListHandler)                             // Delete a specific list
 	r.Post("/lists/{parentListID}/itineraries", h.CreateItineraryForListHandler) // Create an itinerary within a parent list
 
+	//Unused for now
 	// Saved lists functionality
-	r.Get("/lists/saved", h.GetUserSavedListsHandler)           // Get user's saved lists
-	r.Post("/lists/{listID}/save", h.SaveListHandler)           // Save a public list
-	r.Delete("/lists/{listID}/save", h.UnsaveListHandler)       // Unsave a list
-	
+	r.Get("/lists/saved", h.GetUserSavedListsHandler)     // Get user's saved lists
+	r.Post("/lists/{listID}/save", h.SaveListHandler)     // Save a public list
+	r.Delete("/lists/{listID}/save", h.UnsaveListHandler) // Unsave a list
+
 	// Search and filtering
-	r.Get("/lists/search", h.SearchListsHandler)                // Search public lists
-	
+	r.Get("/lists/search", h.SearchListsHandler) // Search public lists
+
 	// Content type specific endpoints
-	r.Get("/lists/{listID}/items/restaurants", h.GetListRestaurantsHandler)  // Get restaurant items from a list
-	r.Get("/lists/{listID}/items/hotels", h.GetListHotelsHandler)            // Get hotel items from a list
+	r.Get("/lists/{listID}/items/restaurants", h.GetListRestaurantsHandler) // Get restaurant items from a list
+	r.Get("/lists/{listID}/items/hotels", h.GetListHotelsHandler)           // Get hotel items from a list
 	r.Get("/lists/{listID}/items/itineraries", h.GetListItinerariesHandler) // Get itinerary items from a list
 
 	// Generic list item endpoints (support all content types)
