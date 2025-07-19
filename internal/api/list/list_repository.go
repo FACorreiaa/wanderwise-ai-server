@@ -204,6 +204,12 @@ func (r *RepositoryImpl) GetListItems(ctx context.Context, listID uuid.UUID) ([]
 
 // AddListItem inserts a new item into the list_items table
 func (r *RepositoryImpl) AddListItem(ctx context.Context, item types.ListItem) error {
+	var poiID *uuid.UUID
+	// Only set poi_id for POI content type to avoid foreign key constraint violations
+	if item.ContentType == types.ContentTypePOI {
+		poiID = &item.ItemID
+	}
+	
 	query := `
         INSERT INTO list_items (list_id, item_id, content_type, position, notes, day_number, time_slot, 
             duration, source_llm_interaction_id, item_ai_description, created_at, updated_at, poi_id) 
@@ -212,7 +218,7 @@ func (r *RepositoryImpl) AddListItem(ctx context.Context, item types.ListItem) e
 	_, err := r.pgpool.Exec(ctx, query,
 		item.ListID, item.ItemID, item.ContentType, item.Position, item.Notes,
 		item.DayNumber, item.TimeSlot, item.Duration, item.SourceLlmInteractionID,
-		item.ItemAIDescription, item.CreatedAt, item.UpdatedAt, item.PoiID,
+		item.ItemAIDescription, item.CreatedAt, item.UpdatedAt, poiID,
 	)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "Failed to add list item", slog.Any("error", err))
