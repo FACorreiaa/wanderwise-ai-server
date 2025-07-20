@@ -1,0 +1,31 @@
+# Example: Auth Service using shared base image
+# This approach reduces duplication and ensures consistency
+
+# Use shared base image (build this first: docker build -f Dockerfile.base -t loci-base:latest .)
+FROM loci-base:dev AS dev
+COPY go.mod go.sum* ./
+COPY . .
+EXPOSE 8001
+CMD ["air", "-c", ".air.toml"]
+
+# Debug stage using shared base
+FROM loci-base:debug AS debug  
+COPY go.mod go.sum* ./
+COPY . .
+EXPOSE 8001
+CMD ["dlv", "debug", "--headless", "--listen=:2345", "--api-version=2", "--accept-multiclient", "--log", "./cmd/main.go"]
+
+# Build stage using shared base
+FROM loci-base:base AS builder
+COPY go.mod go.sum* ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o auth-service -ldflags="-w -s" ./cmd/main.go
+
+# Production stage using shared prod base
+FROM loci-base:prod-base AS prod
+COPY --from=builder /app/auth-service /usr/bin/auth-service
+EXPOSE 8001
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8001/health || exit 1
+CMD ["auth-service"]

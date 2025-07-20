@@ -1,143 +1,639 @@
+version: '3.8'
+
 services:
-  # Your Go Application
-  # loci-api-dev:
-  #   container_name: loci-api-dev
-  #   build:
-  #     context: . # Assuming Dockerfile is in the root
-  #     dockerfile: Dockerfile # Your Go app's Dockerfile
-  #     target: dev
-  #   env_file:
-  #     - .env # Load .env for the Go app container
-  #   ports:
-  #     - "${HTTP_PORT}:${HTTP_PORT}"   # Expose API port (e.g., 8000:8000)
-  #     - "${METRICS_PORT}:${METRICS_PORT}" # Expose metrics port (e.g., 9090:9090)
-  #     - "40000:40000"
-  #   volumes:
-  #     - .:/app # Mount current directory to /app in container
-  #     - ./scripts:/scripts # Mount scripts directory for init scripts
-  #   depends_on:
-  #     - postgres-loci
-  #     - otel-collector # Wait for collector to be available
-  #   networks:
-  #     - observability-net
-  #     - loci-net # Connect to DB network
+  # === Core Microservices ===
+  
+  # Auth Service
+  auth-service:
+    container_name: auth-service
+    build:
+      context: ./internal/domain/auth
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=auth-service
+      - SERVICE_PORT=8001
+      - GRPC_PORT=9001
+    ports:
+      - "8001:8001"   # HTTP API
+      - "9001:9001"   # gRPC
+      - "2345:2345"   # Delve debug
+      - "6060:6060"   # pprof
+    volumes:
+      - ./internal/domain/auth:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # PostgreSQL Database (with PostGIS & pgvector)
+  # POI Service
+  poi-service:
+    container_name: poi-service
+    build:
+      context: ./internal/domain/poi
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=poi-service
+      - SERVICE_PORT=8002
+      - GRPC_PORT=9002
+    ports:
+      - "8002:8002"   # HTTP API
+      - "9002:9002"   # gRPC
+      - "2346:2345"   # Delve debug
+      - "6061:6060"   # pprof
+    volumes:
+      - ./internal/domain/poi:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  postgres-loci:
+  # Chat Prompt Service
+  chat-service:
+    container_name: chat-service
+    build:
+      context: ./internal/domain/chat_prompt
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=chat-service
+      - SERVICE_PORT=8003
+      - GRPC_PORT=9003
+    ports:
+      - "8003:8003"   # HTTP API
+      - "9003:9003"   # gRPC
+      - "2347:2345"   # Delve debug
+      - "6062:6060"   # pprof
+    volumes:
+      - ./internal/domain/chat_prompt:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Lists Service
+  lists-service:
+    container_name: lists-service
+    build:
+      context: ./internal/domain/lists
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=lists-service
+      - SERVICE_PORT=8004
+      - GRPC_PORT=9004
+    ports:
+      - "8004:8004"   # HTTP API
+      - "9004:9004"   # gRPC
+      - "2348:2345"   # Delve debug
+      - "6063:6060"   # pprof
+    volumes:
+      - ./internal/domain/lists:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Users Service
+  users-service:
+    container_name: users-service
+    build:
+      context: ./internal/domain/users
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=users-service
+      - SERVICE_PORT=8005
+      - GRPC_PORT=9005
+    ports:
+      - "8005:8005"   # HTTP API
+      - "9005:9005"   # gRPC
+      - "2349:2345"   # Delve debug
+      - "6064:6060"   # pprof
+    volumes:
+      - ./internal/domain/users:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Admin Service
+  admin-service:
+    container_name: admin-service
+    build:
+      context: ./internal/domain/admin
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=admin-service
+      - SERVICE_PORT=8006
+      - GRPC_PORT=9006
+    ports:
+      - "8006:8006"   # HTTP API
+      - "9006:9006"   # gRPC
+      - "2350:2345"   # Delve debug
+      - "6065:6060"   # pprof
+    volumes:
+      - ./internal/domain/admin:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # City Service
+  city-service:
+    container_name: city-service
+    build:
+      context: ./internal/domain/city
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=city-service
+      - SERVICE_PORT=8007
+      - GRPC_PORT=9007
+    ports:
+      - "8007:8007"   # HTTP API
+      - "9007:9007"   # gRPC
+      - "2351:2345"   # Delve debug
+      - "6066:6060"   # pprof
+    volumes:
+      - ./internal/domain/city:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Interests Service
+  interests-service:
+    container_name: interests-service
+    build:
+      context: ./internal/domain/interests
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=interests-service
+      - SERVICE_PORT=8008
+      - GRPC_PORT=9008
+    ports:
+      - "8008:8008"   # HTTP API
+      - "9008:9008"   # gRPC
+      - "2352:2345"   # Delve debug
+      - "6067:6060"   # pprof
+    volumes:
+      - ./internal/domain/interests:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Profiles Service
+  profiles-service:
+    container_name: profiles-service
+    build:
+      context: ./internal/domain/profiles
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=profiles-service
+      - SERVICE_PORT=8009
+      - GRPC_PORT=9009
+    ports:
+      - "8009:8009"   # HTTP API
+      - "9009:9009"   # gRPC
+      - "2353:2345"   # Delve debug
+      - "6068:6060"   # pprof
+    volumes:
+      - ./internal/domain/profiles:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      users-service:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Recents Service
+  recents-service:
+    container_name: recents-service
+    build:
+      context: ./internal/domain/recents
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=recents-service
+      - SERVICE_PORT=8010
+      - GRPC_PORT=9010
+    ports:
+      - "8010:8010"   # HTTP API
+      - "9010:9010"   # gRPC
+      - "2354:2345"   # Delve debug
+      - "6069:6060"   # pprof
+    volumes:
+      - ./internal/domain/recents:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Reviews Service
+  reviews-service:
+    container_name: reviews-service
+    build:
+      context: ./internal/domain/reviews
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=reviews-service
+      - SERVICE_PORT=8011
+      - GRPC_PORT=9011
+    ports:
+      - "8011:8011"   # HTTP API
+      - "9011:9011"   # gRPC
+      - "2355:2345"   # Delve debug
+      - "6070:6060"   # pprof
+    volumes:
+      - ./internal/domain/reviews:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      poi-service:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8011/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Statistics Service
+  statistics-service:
+    container_name: statistics-service
+    build:
+      context: ./internal/domain/statistics
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=statistics-service
+      - SERVICE_PORT=8012
+      - GRPC_PORT=9012
+    ports:
+      - "8012:8012"   # HTTP API
+      - "9012:9012"   # gRPC
+      - "2356:2345"   # Delve debug
+      - "6071:6060"   # pprof
+    volumes:
+      - ./internal/domain/statistics:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8012/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Tags Service
+  tags-service:
+    container_name: tags-service
+    build:
+      context: ./internal/domain/tags
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=tags-service
+      - SERVICE_PORT=8013
+      - GRPC_PORT=9013
+    ports:
+      - "8013:8013"   # HTTP API
+      - "9013:9013"   # gRPC
+      - "2357:2345"   # Delve debug
+      - "6072:6060"   # pprof
+    volumes:
+      - ./internal/domain/tags:/app
+      - go-mod-cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8013/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # === Infrastructure Services ===
+
+  # PostgreSQL Database
+  postgres:
     platform: linux/amd64
-    container_name: postgres-loci
+    container_name: postgres
     build:
       context: . 
       dockerfile: postgres.Dockerfile
     env_file:
-      - .env # Load .env for postgres container setup (POSTGRES_DB etc)
+      - .env
     environment:
-      # Override or add specific PG settings if needed, otherwise defaults are used
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-loci}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-loci123}
+      POSTGRES_DB: ${POSTGRES_DB:-loci}
     ports:
-      # Optional: Expose DB port to host *only* for local development/debugging
-      # Be careful exposing DB ports directly
-      - "5454:5432" # Map host 5454 -> container 5432
+      - "5454:5432"
     volumes:
-      - postgres-loci-data:/var/lib/postgresql/data
-      - ./scripts/postgres/init:/docker-entrypoint-initdb.d # Your extensions script
-    restart: unless-stopped
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/postgres/init:/docker-entrypoint-initdb.d
     networks:
-      - loci-net # Separate network for DB?
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-loci} -d ${POSTGRES_DB:-loci}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # --- Grafana Stack ---
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
-  # OpenTelemetry Collector (Receives OTLP, exports to Tempo/Loki/Prometheus)
-#  otel-collector:
-#    image: otel/opentelemetry-collector-contrib:latest # Use contrib for more receivers/exporters
-#    container_name: otel-collector
-#    command: ["--config=/etc/otelcol-contrib/config.yaml"]
-#    volumes:
-#      - ./app/observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml
-#    ports:
-#      - "4317:4317" # OTLP gRPC receiver
-#      - "4318:4318" # OTLP HTTP receiver (optional)
-#      # - "1888:1888" # pprof extension
-#      # - "8888:8888" # Prometheus exporter for collector's own metrics
-#      # - "13133:13133" # health_check extension
-#    depends_on:
-#      - tempo
-#      - loki # Add if exporting logs via OTLP
-#      - prometheus # Add if exporting metrics via OTLP -> remote_write
-#    networks:
-#      - observability-net
+  # === Observability Stack ===
 
-  # Tempo (Traces)
-#  tempo:
-#    image: grafana/tempo:latest
-#    container_name: tempo
-#    command: ["-config.file=/etc/tempo.yaml"]
-#    volumes:
-#      - ./app/observability/tempo-config.yaml:/etc/tempo.yaml
-#      - tempo-data:/var/tempo # Persist trace data (optional for local dev)
-#    ports:
-#      # - "14268:14268" # Jaeger grpc
-#      - "3200:3200"   # Tempo grpc
-#      # - "4317" # OTLP gRPC, often handled by collector
-#    networks:
-#      - observability-net
-#
-#  # Prometheus (Metrics Scraper & Storage)
-#  prometheus:
-#    image: prom/prometheus:latest
-#    container_name: prometheus
-#    command: ["--config.file=/etc/prometheus/prometheus.yml", "--web.enable-lifecycle"]
-#    volumes:
-#      - ./app/observability/prometheus.yml:/etc/prometheus/prometheus.yml
-#      - prometheus-data:/prometheus
-#    ports:
-#      - "9091:9090" # Prometheus UI on host:9091
-#    networks:
-#      - observability-net
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./app/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - microservices-net
+    restart: unless-stopped
 
-  # Loki
-#  loki:
-#    image: grafana/loki:latest
-#    container_name: loki
-#    command: ["-config.file=/etc/loki/local-config.yaml"]
-#    volumes:
-#      - ./app/observability/loki-config.yaml:/etc/loki/local-config.yaml
-#    ports:
-#      - "3100:3100" # Loki API port
-#    networks:
-#      - observability-net
+  # Tempo for distributed tracing
+  tempo:
+    image: grafana/tempo:latest
+    container_name: tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP API
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+    volumes:
+      - ./app/observability/tempo-config.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    command:
+      - '-config.file=/etc/tempo/tempo.yaml'
+    networks:
+      - microservices-net
+    restart: unless-stopped
 
-  # Grafana (Visualization)
-#  grafana:
-#    image: grafana/grafana-oss:latest
-#    container_name: grafana
-#    volumes:
-#      - grafana-data:/var/lib/grafana
-#      - ./app/observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
-#    ports:
-#      - "3001:3000" # Grafana UI on host:3001
-#    environment:
-#      - GF_SECURITY_ADMIN_USER=admin
-#      - GF_SECURITY_ADMIN_PASSWORD=admin # Change in production!
-#    depends_on:
-#      - prometheus
-#      - tempo
-#      # - loki
-#    networks:
-#      - observability-net
+  # Loki for log aggregation
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./app/observability/loki-config.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/var/loki
+    command:
+      - '-config.file=/etc/loki/loki.yaml'
+    networks:
+      - microservices-net
+    restart: unless-stopped
 
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    networks:
+      - microservices-net
+    restart: unless-stopped
+
+  # Promtail for log collection (optional - for log shipping to Loki)
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./observability/promtail.yml:/etc/promtail/promtail.yml:ro
+    command:
+      - '-config.file=/etc/promtail/promtail.yml'
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    depends_on:
+      - loki
 
 volumes:
-  postgres-loci-data:
-  #tempo-data:
-  #prometheus-data:
-  #grafana-data:
+  postgres-data:
+  redis-data:
+  go-mod-cache:
+  prometheus-data:
+  grafana-data:
+  tempo-data:
+  loki-data:
 
 networks:
-  loci-net: # Network for App <-> DB
+  microservices-net:
     driver: bridge
-  # observability-net: # Network for Observability Stack + App connection
-    # driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
