@@ -41,6 +41,11 @@ repositories:
     db: "loci-dev"
     SSLMODE: "verify-full"
     MAXCONWAITINGTIME: 10
+  redis:
+    host: "localhost"
+    port: "6379"
+    password: ""
+    db: 0
 jwt:
   secret: ${JWT_SECRET_KEY}
   issuer: ${JWT_ISSUER}
@@ -72,16 +77,22 @@ rateLimit:
 #change later
 server:
   HTTPPort: "8000"
+  GrpcPort: "9000"
   HTTPTimeout: 15s
-# UpstreamServices:
-#   Customer: "http://customer-service:8000"
-#   Auth: "http://auth-service:8000"
-#   Activity: "http://activity-service:8000"
-#   Calculator: "http://calculator-service:8000"
-#   Workout: "http://workout-service:8000"
-#   Measurement: "http://measurement-service:8000"
-#   Ingredients: "http://ingredients-service:8000"
-#   Meals: "http://meals-service:8000"
+upstreamServices:
+  auth: "http://auth-service:8001"
+  poi: "http://poi-service:8002"
+  chat: "http://chat-service:8003"
+  lists: "http://lists-service:8004"
+  users: "http://users-service:8005"
+  admin: "http://admin-service:8006"
+  city: "http://city-service:8007"
+  interests: "http://interests-service:8008"
+  profiles: "http://profiles-service:8009"
+  recents: "http://recents-service:8010"
+  reviews: "http://reviews-service:8011"
+  statistics: "http://statistics-service:8012"
+  tags: "http://tags-service:8013"
 
 otel:
   serviceName: ${OTEL_SERVICE_NAME}

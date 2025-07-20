@@ -92,11 +92,34 @@ type Config struct {
 			SSLMODE           string `mapstructure:"SSLMODE"`
 			MAXCONWAITINGTIME int    `mapstructure:"MAXCONWAITINGTIME"`
 		} `mapstructure:"postgres"`
+		Redis struct {
+			Host     string `mapstructure:"host"`
+			Port     string `mapstructure:"port"`
+			Password string `mapstructure:"password"`
+			DB       int    `mapstructure:"db"`
+		} `mapstructure:"redis"`
 	}
 	Server struct {
 		HTTPPort string        `mapstructure:"HTTPPort"`
+		GrpcPort string        `mapstructure:"GrpcPort"`
 		Timeout  time.Duration `mapstructure:"HTTPTimeout"`
 	} `mapstructure:"server"`
+	
+	UpstreamServices struct {
+		Auth       string `mapstructure:"auth"`
+		POI        string `mapstructure:"poi"`
+		Chat       string `mapstructure:"chat"`
+		Lists      string `mapstructure:"lists"`
+		Users      string `mapstructure:"users"`
+		Admin      string `mapstructure:"admin"`
+		City       string `mapstructure:"city"`
+		Interests  string `mapstructure:"interests"`
+		Profiles   string `mapstructure:"profiles"`
+		Recents    string `mapstructure:"recents"`
+		Reviews    string `mapstructure:"reviews"`
+		Statistics string `mapstructure:"statistics"`
+		Tags       string `mapstructure:"tags"`
+	} `mapstructure:"upstreamServices"`
 }
 
 func InitConfig() (*Config, error) {
