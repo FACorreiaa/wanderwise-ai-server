@@ -1,0 +1,372 @@
+syntax = "proto3";
+
+package ai_poi.statistics.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/facorreiaa/go-ai-poi-server/proto/statistics/v1";
+
+// StatisticsService provides analytics and statistics functionality
+service StatisticsService {
+  // Get main page statistics (public)
+  rpc GetMainPageStatistics(GetMainPageStatisticsRequest) returns (GetMainPageStatisticsResponse);
+  
+  // Stream real-time statistics updates (public)
+  rpc StreamMainPageStatistics(StreamMainPageStatisticsRequest) returns (stream StatisticsEvent);
+  
+  // Get detailed POI statistics (authenticated)
+  rpc GetDetailedPOIStatistics(GetDetailedPOIStatisticsRequest) returns (GetDetailedPOIStatisticsResponse);
+  
+  // Get user landing page statistics (authenticated)
+  rpc GetLandingPageStatistics(GetLandingPageStatisticsRequest) returns (GetLandingPageStatisticsResponse);
+  
+  // Get user activity analytics (authenticated)
+  rpc GetUserActivityAnalytics(GetUserActivityAnalyticsRequest) returns (GetUserActivityAnalyticsResponse);
+  
+  // Get system-wide analytics (admin)
+  rpc GetSystemAnalytics(GetSystemAnalyticsRequest) returns (GetSystemAnalyticsResponse);
+}
+
+// Main page statistics (public facing)
+message MainPageStatistics {
+  int64 total_pois = 1;
+  int64 total_cities = 2;
+  int64 total_users = 3;
+  int64 total_itineraries = 4;
+  int64 total_searches_today = 5;
+  int64 active_users_today = 6;
+  RecentActivity recent_activity = 7;
+  repeated PopularDestination popular_destinations = 8;
+  TrendingCategories trending_categories = 9;
+  google.protobuf.Timestamp last_updated = 10;
+}
+
+// Recent activity summary
+message RecentActivity {
+  int32 searches_last_hour = 1;
+  int32 new_users_today = 2;
+  int32 itineraries_created_today = 3;
+  int32 pois_favorited_today = 4;
+}
+
+// Popular destinations
+message PopularDestination {
+  string city_id = 1;
+  string city_name = 2;
+  string country = 3;
+  int32 search_count = 4;
+  int32 user_count = 5;
+  double growth_percentage = 6;
+}
+
+// Trending categories
+message TrendingCategories {
+  repeated CategoryTrend categories = 1;
+  string time_period = 2; // "24h", "7d", "30d"
+}
+
+message CategoryTrend {
+  string category = 1;
+  int32 search_count = 2;
+  double growth_percentage = 3;
+  int32 rank = 4;
+}
+
+// Detailed POI statistics
+message DetailedPOIStatistics {
+  string user_id = 1;
+  int32 total_poi_searches = 2;
+  int32 favorite_pois_count = 3;
+  int32 visited_cities_count = 4;
+  repeated string top_categories = 5;
+  repeated CityInteractionStats city_interactions = 6;
+  SearchPatterns search_patterns = 7;
+  TimeBasedAnalytics time_analytics = 8;
+  google.protobuf.Timestamp generated_at = 9;
+}
+
+// City interaction statistics
+message CityInteractionStats {
+  string city_id = 1;
+  string city_name = 2;
+  int32 search_count = 3;
+  int32 pois_favorited = 4;
+  int32 itineraries_created = 5;
+  google.protobuf.Timestamp last_interaction = 6;
+}
+
+// Search patterns analysis
+message SearchPatterns {
+  repeated string frequent_keywords = 1;
+  repeated string preferred_categories = 2;
+  string preferred_price_range = 3;
+  double average_search_radius = 4;
+  string most_active_time_of_day = 5;
+  string most_active_day_of_week = 6;
+}
+
+// Time-based analytics
+message TimeBasedAnalytics {
+  repeated HourlyActivity hourly_activity = 1;
+  repeated DailyActivity daily_activity = 2;
+  repeated MonthlyActivity monthly_activity = 3;
+}
+
+message HourlyActivity {
+  int32 hour = 1; // 0-23
+  int32 activity_count = 2;
+}
+
+message DailyActivity {
+  google.protobuf.Timestamp date = 1;
+  int32 searches = 2;
+  int32 favorites_added = 3;
+  int32 itineraries_created = 4;
+}
+
+message MonthlyActivity {
+  int32 year = 1;
+  int32 month = 2;
+  int32 total_activity = 3;
+  double growth_percentage = 4;
+}
+
+// Landing page user statistics
+message LandingPageUserStats {
+  string user_id = 1;
+  int32 searches_this_week = 2;
+  int32 new_favorites_this_week = 3;
+  int32 itineraries_created_this_month = 4;
+  repeated string recently_searched_cities = 5;
+  repeated RecentInteraction recent_interactions = 6;
+  PersonalizedRecommendations recommendations = 7;
+  AchievementBadges badges = 8;
+}
+
+// Recent user interactions
+message RecentInteraction {
+  string type = 1; // "search", "favorite", "itinerary"
+  string description = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string city_name = 4;
+  map<string, string> metadata = 5;
+}
+
+// Personalized recommendations
+message PersonalizedRecommendations {
+  repeated string suggested_cities = 1;
+  repeated string suggested_categories = 2;
+  string recommendation_reason = 3;
+}
+
+// Achievement badges
+message AchievementBadges {
+  repeated Badge earned_badges = 1;
+  repeated Badge available_badges = 2;
+}
+
+message Badge {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string icon_url = 4;
+  google.protobuf.Timestamp earned_at = 5;
+  int32 progress = 6; // 0-100 for progress towards earning
+  int32 target = 7; // Target value to earn the badge
+}
+
+// System-wide analytics (admin only)
+message SystemAnalytics {
+  UserGrowthMetrics user_growth = 1;
+  UsageMetrics usage_metrics = 2;
+  PerformanceMetrics performance_metrics = 3;
+  ErrorMetrics error_metrics = 4;
+  GeographicDistribution geographic_distribution = 5;
+  FeatureUsage feature_usage = 6;
+  google.protobuf.Timestamp generated_at = 7;
+}
+
+message UserGrowthMetrics {
+  int64 total_users = 1;
+  int32 new_users_today = 2;
+  int32 new_users_this_week = 3;
+  int32 new_users_this_month = 4;
+  double growth_rate_weekly = 5;
+  double growth_rate_monthly = 6;
+  int32 active_users_today = 7;
+  int32 active_users_this_week = 8;
+  double retention_rate_weekly = 9;
+  double retention_rate_monthly = 10;
+}
+
+message UsageMetrics {
+  int64 total_searches = 1;
+  int32 searches_today = 2;
+  int32 searches_this_week = 3;
+  double average_searches_per_user = 4;
+  int64 total_api_calls = 5;
+  double average_response_time_ms = 6;
+  int32 peak_concurrent_users = 7;
+}
+
+message PerformanceMetrics {
+  double cpu_usage_percentage = 1;
+  double memory_usage_percentage = 2;
+  double disk_usage_percentage = 3;
+  int32 active_database_connections = 4;
+  double average_db_query_time_ms = 5;
+  int32 cache_hit_rate_percentage = 6;
+}
+
+message ErrorMetrics {
+  int32 total_errors_today = 1;
+  int32 total_errors_this_week = 2;
+  double error_rate_percentage = 3;
+  repeated ErrorBreakdown error_breakdown = 4;
+}
+
+message ErrorBreakdown {
+  string error_type = 1;
+  int32 count = 2;
+  double percentage = 3;
+}
+
+message GeographicDistribution {
+  repeated CountryStats country_stats = 1;
+  repeated CityStats city_stats = 2;
+}
+
+message CountryStats {
+  string country_code = 1;
+  string country_name = 2;
+  int32 user_count = 3;
+  int32 search_count = 4;
+  double percentage_of_total = 5;
+}
+
+message CityStats {
+  string city_id = 1;
+  string city_name = 2;
+  int32 search_count = 3;
+  int32 poi_count = 4;
+  double popularity_score = 5;
+}
+
+message FeatureUsage {
+  int32 semantic_searches = 1;
+  int32 favorites_added = 2;
+  int32 itineraries_created = 3;
+  int32 lists_created = 4;
+  int32 chat_sessions = 5;
+  repeated FeatureMetric feature_metrics = 6;
+}
+
+message FeatureMetric {
+  string feature_name = 1;
+  int32 usage_count = 2;
+  double adoption_rate = 3;
+}
+
+// Streaming statistics event
+message StatisticsEvent {
+  string event_type = 1; // "update", "metric", "alert"
+  google.protobuf.Timestamp timestamp = 2;
+  
+  oneof payload {
+    MainPageStatistics main_stats = 3;
+    MetricUpdate metric_update = 4;
+    SystemAlert system_alert = 5;
+  }
+}
+
+message MetricUpdate {
+  string metric_name = 1;
+  double value = 2;
+  string change_type = 3; // "increase", "decrease", "stable"
+  double previous_value = 4;
+}
+
+message SystemAlert {
+  string alert_type = 1; // "high_load", "error_spike", "low_performance"
+  string message = 2;
+  string severity = 3; // "low", "medium", "high", "critical"
+  map<string, string> details = 4;
+}
+
+// Request/Response messages
+message GetMainPageStatisticsRequest {
+  bool include_trends = 1;
+  string time_range = 2; // "24h", "7d", "30d"
+}
+
+message GetMainPageStatisticsResponse {
+  MainPageStatistics statistics = 1;
+}
+
+message StreamMainPageStatisticsRequest {
+  int32 update_interval_seconds = 1; // Default: 30 seconds
+  repeated string metric_filters = 2; // Which metrics to include
+}
+
+message GetDetailedPOIStatisticsRequest {
+  string user_id = 1;
+  string time_range = 2; // "7d", "30d", "90d", "1y"
+  bool include_predictions = 3;
+}
+
+message GetDetailedPOIStatisticsResponse {
+  DetailedPOIStatistics statistics = 1;
+  repeated Prediction predictions = 2;
+}
+
+message Prediction {
+  string metric = 1;
+  double predicted_value = 2;
+  string confidence_level = 3;
+  string time_horizon = 4;
+}
+
+message GetLandingPageStatisticsRequest {
+  string user_id = 1;
+}
+
+message GetLandingPageStatisticsResponse {
+  LandingPageUserStats statistics = 1;
+}
+
+message GetUserActivityAnalyticsRequest {
+  string user_id = 1;
+  google.protobuf.Timestamp start_date = 2;
+  google.protobuf.Timestamp end_date = 3;
+  string granularity = 4; // "hour", "day", "week", "month"
+}
+
+message GetUserActivityAnalyticsResponse {
+  repeated ActivityDataPoint activity_data = 1;
+  ActivitySummary summary = 2;
+}
+
+message ActivityDataPoint {
+  google.protobuf.Timestamp timestamp = 1;
+  int32 searches = 2;
+  int32 favorites = 3;
+  int32 itinerary_actions = 4;
+  int32 chat_messages = 5;
+}
+
+message ActivitySummary {
+  int32 total_searches = 1;
+  int32 total_favorites = 2;
+  int32 total_itinerary_actions = 3;
+  int32 most_active_hour = 4;
+  string most_active_day = 5;
+}
+
+message GetSystemAnalyticsRequest {
+  string time_range = 1; // "24h", "7d", "30d"
+  repeated string metric_categories = 2; // "users", "performance", "errors", etc.
+}
+
+message GetSystemAnalyticsResponse {
+  SystemAnalytics analytics = 1;
+}

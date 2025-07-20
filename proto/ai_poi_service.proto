@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package ai_poi.v1;
+
+import "auth.proto";
+import "chat.proto";
+import "poi.proto";
+import "user.proto";
+import "list.proto";
+import "city.proto";
+import "statistics.proto";
+import "recents.proto";
+import "review.proto";
+import "common.proto";
+
+option go_package = "github.com/facorreiaa/go-ai-poi-server/proto/v1";
+
+// Main AI POI API Gateway Service
+// This service can act as a unified entry point to all sub-services
+service AiPoiService {
+  // Health check
+  rpc HealthCheck(ai_poi.common.v1.HealthCheckRequest) returns (ai_poi.common.v1.HealthCheckResponse);
+  
+  // Get service information
+  rpc GetServiceInfo(GetServiceInfoRequest) returns (GetServiceInfoResponse);
+  
+  // Get feature flags for the user
+  rpc GetFeatureFlags(GetFeatureFlagsRequest) returns (GetFeatureFlagsResponse);
+}
+
+// Health check request
+message HealthCheckRequest {
+  string service = 1; // Specific service to check, empty for all
+}
+
+// Service information
+message GetServiceInfoRequest {
+  bool include_endpoints = 1;
+  bool include_version_info = 2;
+}
+
+message GetServiceInfoResponse {
+  ServiceInfo service_info = 1;
+  repeated ServiceEndpoint endpoints = 2;
+  repeated ai_poi.common.v1.ApiVersion versions = 3;
+}
+
+message ServiceInfo {
+  string name = 1;
+  string version = 2;
+  string description = 3;
+  string build_time = 4;
+  string git_commit = 5;
+  string environment = 6; // "development", "staging", "production"
+  map<string, string> configuration = 7;
+}
+
+message ServiceEndpoint {
+  string name = 1;
+  string path = 2;
+  string method = 3; // HTTP method for REST endpoints
+  string description = 4;
+  bool requires_auth = 5;
+  repeated string required_permissions = 6;
+  ai_poi.common.v1.RateLimitInfo rate_limit = 7;
+}
+
+// Feature flags
+message GetFeatureFlagsRequest {
+  string user_id = 1;
+  string client_version = 2;
+  string platform = 3; // "web", "ios", "android"
+  map<string, string> user_attributes = 4;
+}
+
+message GetFeatureFlagsResponse {
+  repeated ai_poi.common.v1.FeatureFlag flags = 1;
+  map<string, string> experiments = 2; // A/B test assignments
+}
+
+// Service dependencies and their health status
+message ServiceDependencies {
+  ComponentHealth database = 1;
+  ComponentHealth redis_cache = 2;
+  ComponentHealth ai_service = 3;
+  ComponentHealth external_apis = 4;
+  ComponentHealth file_storage = 5;
+}
+
+message ComponentHealth {
+  string name = 1;
+  string status = 2; // "healthy", "degraded", "unhealthy"
+  string message = 3;
+  double response_time_ms = 4;
+  map<string, string> metrics = 5;
+}

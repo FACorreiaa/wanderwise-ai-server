@@ -1,0 +1,273 @@
+syntax = "proto3";
+
+package ai_poi.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/facorreiaa/go-ai-poi-server/proto/common/v1";
+
+// Common response wrapper for all services
+message Response {
+  bool success = 1;
+  string message = 2;
+  ErrorDetails error = 3;
+  map<string, string> metadata = 4;
+}
+
+// Standard error details
+message ErrorDetails {
+  string code = 1;
+  string message = 2;
+  repeated FieldError field_errors = 3;
+  string trace_id = 4;
+  map<string, string> details = 5;
+}
+
+// Field-specific validation errors
+message FieldError {
+  string field = 1;
+  string message = 2;
+  string code = 3;
+}
+
+// Pagination request
+message PaginationRequest {
+  int32 page = 1; // 1-based page number
+  int32 page_size = 2; // Number of items per page (default: 20, max: 100)
+  int32 offset = 3; // Alternative to page-based pagination
+  int32 limit = 4; // Alternative to page_size
+}
+
+// Pagination response metadata
+message PaginationResponse {
+  int32 current_page = 1;
+  int32 page_size = 2;
+  int32 total_items = 3;
+  int32 total_pages = 4;
+  bool has_next_page = 5;
+  bool has_previous_page = 6;
+  string next_cursor = 7; // For cursor-based pagination
+  string previous_cursor = 8;
+}
+
+// Geographic coordinates
+message Coordinates {
+  double latitude = 1;
+  double longitude = 2;
+  double altitude = 3; // Optional, in meters
+  double accuracy = 4; // Optional, in meters
+}
+
+// Geographic bounds/bbox
+message GeoBounds {
+  Coordinates southwest = 1;
+  Coordinates northeast = 2;
+}
+
+// Address information
+message Address {
+  string street = 1;
+  string city = 2;
+  string state = 3;
+  string postal_code = 4;
+  string country = 5;
+  string country_code = 6; // ISO 3166-1 alpha-2
+  string formatted_address = 7;
+}
+
+// Contact information
+message ContactInfo {
+  string phone = 1;
+  string email = 2;
+  string website = 3;
+  repeated SocialMedia social_media = 4;
+}
+
+// Social media links
+message SocialMedia {
+  string platform = 1; // "facebook", "instagram", "twitter", etc.
+  string url = 2;
+  string handle = 3;
+}
+
+// Opening hours
+message OpeningHours {
+  repeated DaySchedule schedule = 1;
+  string timezone = 2;
+  repeated SpecialHours special_hours = 3; // Holidays, special events
+  bool is_24_7 = 4;
+  bool is_closed = 5;
+}
+
+message DaySchedule {
+  DayOfWeek day = 1;
+  repeated TimeSlot time_slots = 2;
+  bool is_closed = 3;
+}
+
+enum DayOfWeek {
+  DAY_OF_WEEK_UNSPECIFIED = 0;
+  DAY_OF_WEEK_MONDAY = 1;
+  DAY_OF_WEEK_TUESDAY = 2;
+  DAY_OF_WEEK_WEDNESDAY = 3;
+  DAY_OF_WEEK_THURSDAY = 4;
+  DAY_OF_WEEK_FRIDAY = 5;
+  DAY_OF_WEEK_SATURDAY = 6;
+  DAY_OF_WEEK_SUNDAY = 7;
+}
+
+message TimeSlot {
+  string open_time = 1; // HH:MM format
+  string close_time = 2; // HH:MM format
+}
+
+message SpecialHours {
+  google.protobuf.Timestamp date = 1;
+  string description = 2; // "Holiday", "Special Event", etc.
+  repeated TimeSlot time_slots = 3;
+  bool is_closed = 4;
+}
+
+// Price range
+enum PriceRange {
+  PRICE_RANGE_UNSPECIFIED = 0;
+  PRICE_RANGE_FREE = 1;
+  PRICE_RANGE_BUDGET = 2; // €
+  PRICE_RANGE_MODERATE = 3; // €€
+  PRICE_RANGE_EXPENSIVE = 4; // €€€
+  PRICE_RANGE_LUXURY = 5; // €€€€
+}
+
+// Rating information
+message Rating {
+  double average = 1; // 0.0 - 5.0
+  int32 count = 2; // Number of reviews
+  RatingBreakdown breakdown = 3;
+}
+
+message RatingBreakdown {
+  int32 five_star = 1;
+  int32 four_star = 2;
+  int32 three_star = 3;
+  int32 two_star = 4;
+  int32 one_star = 5;
+}
+
+// Media content
+message Media {
+  repeated Photo photos = 1;
+  repeated Video videos = 2;
+  repeated VirtualTour virtual_tours = 3;
+}
+
+message Photo {
+  string id = 1;
+  string url = 2;
+  string thumbnail_url = 3;
+  string caption = 4;
+  string alt_text = 5;
+  int32 width = 6;
+  int32 height = 7;
+  string photographer = 8;
+  google.protobuf.Timestamp taken_at = 9;
+}
+
+message Video {
+  string id = 1;
+  string url = 2;
+  string thumbnail_url = 3;
+  string title = 4;
+  string description = 5;
+  int32 duration_seconds = 6;
+  string provider = 7; // "youtube", "vimeo", etc.
+}
+
+message VirtualTour {
+  string id = 1;
+  string url = 2;
+  string title = 3;
+  string provider = 4;
+  string preview_image_url = 5;
+}
+
+// Sort options
+message SortOptions {
+  string field = 1;
+  SortDirection direction = 2;
+}
+
+enum SortDirection {
+  SORT_DIRECTION_UNSPECIFIED = 0;
+  SORT_DIRECTION_ASC = 1;
+  SORT_DIRECTION_DESC = 2;
+}
+
+// Filter options for various searches
+message FilterOptions {
+  repeated string categories = 1;
+  repeated PriceRange price_ranges = 2;
+  double min_rating = 3;
+  double max_distance_meters = 4;
+  bool open_now = 5;
+  repeated string amenities = 6;
+  map<string, string> custom_filters = 7;
+}
+
+// Localization
+message LocalizedString {
+  string language_code = 1; // ISO 639-1
+  string text = 2;
+}
+
+message MultilingualText {
+  repeated LocalizedString translations = 1;
+  string default_language = 2;
+}
+
+// Audit information
+message AuditInfo {
+  google.protobuf.Timestamp created_at = 1;
+  google.protobuf.Timestamp updated_at = 2;
+  string created_by = 3;
+  string updated_by = 4;
+  int32 version = 5;
+}
+
+// Health check response
+message HealthCheckResponse {
+  string status = 1; // "healthy", "unhealthy", "degraded"
+  string version = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  map<string, ComponentHealth> components = 4;
+}
+
+message ComponentHealth {
+  string status = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}
+
+// Feature flags
+message FeatureFlag {
+  string name = 1;
+  bool enabled = 2;
+  string description = 3;
+  map<string, string> parameters = 4;
+  repeated string user_segments = 5; // Which user segments this applies to
+}
+
+// API versioning
+message ApiVersion {
+  string version = 1; // e.g., "v1", "v2"
+  bool deprecated = 2;
+  google.protobuf.Timestamp sunset_date = 3;
+  string migration_guide_url = 4;
+}
+
+// Rate limiting information
+message RateLimitInfo {
+  int32 requests_remaining = 1;
+  int32 requests_limit = 2;
+  google.protobuf.Timestamp reset_time = 3;
+  int32 retry_after_seconds = 4;
+}

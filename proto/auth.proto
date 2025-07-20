@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package ai_poi.auth.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/facorreiaa/go-ai-poi-server/proto/auth/v1";
+
+// AuthService provides authentication and authorization functionality
+service AuthService {
+  // User registration
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  
+  // User login with credentials
+  rpc Login(LoginRequest) returns (LoginResponse);
+  
+  // Refresh access token using refresh token
+  rpc RefreshToken(RefreshTokenRequest) returns (TokenResponse);
+  
+  // Logout user (invalidate tokens)
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+  
+  // Validate JWT session
+  rpc ValidateSession(ValidateSessionRequest) returns (ValidateSessionResponse);
+  
+  // Update user password
+  rpc UpdatePassword(UpdatePasswordRequest) returns (UpdatePasswordResponse);
+  
+  // Google OAuth login (returns redirect URL)
+  rpc GoogleLogin(GoogleLoginRequest) returns (GoogleLoginResponse);
+  
+  // Handle Google OAuth callback
+  rpc GoogleCallback(GoogleCallbackRequest) returns (LoginResponse);
+}
+
+// User authentication entity
+message UserAuth {
+  string id = 1;
+  string username = 2;
+  string email = 3;
+  string role = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+// Registration request
+message RegisterRequest {
+  string username = 1;
+  string email = 2;
+  string password = 3;
+  string confirm_password = 4;
+}
+
+message RegisterResponse {
+  bool success = 1;
+  string message = 2;
+  UserAuth user = 3;
+}
+
+// Login request and response
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  bool success = 1;
+  string message = 2;
+  string access_token = 3;
+  string refresh_token = 4;
+  int64 expires_in = 5;
+  UserAuth user = 6;
+}
+
+// Token refresh
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message TokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+}
+
+// Logout request
+message LogoutRequest {
+  string user_id = 1;
+}
+
+message LogoutResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Session validation
+message ValidateSessionRequest {
+  string access_token = 1;
+}
+
+message ValidateSessionResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string email = 3;
+  string role = 4;
+  int64 expires_at = 5;
+}
+
+// Password update
+message UpdatePasswordRequest {
+  string user_id = 1;
+  string current_password = 2;
+  string new_password = 3;
+}
+
+message UpdatePasswordResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Google OAuth
+message GoogleLoginRequest {
+  string redirect_uri = 1;
+}
+
+message GoogleLoginResponse {
+  string auth_url = 1;
+}
+
+message GoogleCallbackRequest {
+  string code = 1;
+  string state = 2;
+}
+
+// JWT Claims structure for reference
+message Claims {
+  string user_id = 1;
+  string email = 2;
+  string role = 3;
+  int64 exp = 4;
+  int64 iat = 5;
+  string iss = 6;
+}

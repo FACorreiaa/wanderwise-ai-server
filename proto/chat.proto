@@ -1,0 +1,293 @@
+syntax = "proto3";
+
+package ai_poi.chat.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/facorreiaa/go-ai-poi-server/proto/chat/v1";
+
+// ChatService provides AI-powered chat functionality with streaming support
+service ChatService {
+  // Start a new chat session with streaming responses
+  rpc StartChatStream(StartChatRequest) returns (stream ChatEvent);
+  
+  // Continue an existing chat session with streaming responses  
+  rpc ContinueChatStream(ContinueChatRequest) returns (stream ChatEvent);
+  
+  // Free chat without authentication (streaming)
+  rpc FreeChatStream(FreeChatRequest) returns (stream ChatEvent);
+  
+  // Get user's chat sessions (non-streaming)
+  rpc GetChatSessions(GetChatSessionsRequest) returns (GetChatSessionsResponse);
+  
+  // Save itinerary from chat
+  rpc SaveItinerary(SaveItineraryRequest) returns (SaveItineraryResponse);
+  
+  // Get saved itineraries 
+  rpc GetSavedItineraries(GetSavedItinerariesRequest) returns (GetSavedItinerariesResponse);
+  
+  // Remove saved itinerary
+  rpc RemoveItinerary(RemoveItineraryRequest) returns (RemoveItineraryResponse);
+  
+  // Get POI details for chat context
+  rpc GetPOIDetails(GetPOIDetailsRequest) returns (GetPOIDetailsResponse);
+}
+
+// Streaming event for chat responses
+message ChatEvent {
+  string event_type = 1; // "message", "thinking", "complete", "error"
+  string data = 2;
+  string session_id = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  
+  oneof payload {
+    ChatMessage message = 5;
+    ThinkingEvent thinking = 6;
+    ErrorEvent error = 7;
+    CompleteEvent complete = 8;
+    CityResponse city_response = 9;
+    ItineraryResponse itinerary_response = 10;
+  }
+}
+
+// Chat message
+message ChatMessage {
+  string id = 1;
+  string session_id = 2;
+  string content = 3;
+  string role = 4; // "user", "assistant", "system"
+  google.protobuf.Timestamp created_at = 5;
+  ChatContextType context_type = 6;
+}
+
+// Context type for chat
+enum ChatContextType {
+  CHAT_CONTEXT_TYPE_UNSPECIFIED = 0;
+  CHAT_CONTEXT_TYPE_GENERAL = 1;
+  CHAT_CONTEXT_TYPE_CITY_EXPLORATION = 2;
+  CHAT_CONTEXT_TYPE_ITINERARY_PLANNING = 3;
+  CHAT_CONTEXT_TYPE_RESTAURANT_RECOMMENDATION = 4;
+  CHAT_CONTEXT_TYPE_ACTIVITY_SUGGESTION = 5;
+}
+
+// Thinking event for AI processing indication
+message ThinkingEvent {
+  string message = 1;
+  int32 progress = 2;
+}
+
+// Error event
+message ErrorEvent {
+  string code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}
+
+// Complete event
+message CompleteEvent {
+  string session_id = 1;
+  int32 total_messages = 2;
+  google.protobuf.Timestamp completed_at = 3;
+}
+
+// AI City response
+message CityResponse {
+  string name = 1;
+  string country = 2;
+  string description = 3;
+  repeated string highlights = 4;
+  repeated POIReference pois = 5;
+  WeatherInfo weather = 6;
+  CulturalInfo cultural_info = 7;
+}
+
+// AI Itinerary response
+message ItineraryResponse {
+  string title = 1;
+  string description = 2;
+  int32 duration_days = 3;
+  repeated ItineraryDay days = 4;
+  repeated POIReference featured_pois = 5;
+  EstimatedCosts estimated_costs = 6;
+}
+
+// Itinerary day
+message ItineraryDay {
+  int32 day_number = 1;
+  string title = 2;
+  string description = 3;
+  repeated ItineraryActivity activities = 4;
+}
+
+// Itinerary activity
+message ItineraryActivity {
+  string time_slot = 1;
+  string title = 2;
+  string description = 3;
+  string location = 4;
+  int32 duration_minutes = 5;
+  string category = 6;
+  POIReference poi_reference = 7;
+}
+
+// POI reference in responses
+message POIReference {
+  string id = 1;
+  string name = 2;
+  string category = 3;
+  double latitude = 4;
+  double longitude = 5;
+  string description = 6;
+}
+
+// Weather information
+message WeatherInfo {
+  string current_condition = 1;
+  int32 temperature_celsius = 2;
+  string description = 3;
+}
+
+// Cultural information
+message CulturalInfo {
+  string language = 1;
+  string currency = 2;
+  repeated string customs = 3;
+  repeated string festivals = 4;
+}
+
+// Estimated costs
+message EstimatedCosts {
+  string currency = 1;
+  double budget_low = 2;
+  double budget_medium = 3;
+  double budget_high = 4;
+  repeated CostBreakdown breakdown = 5;
+}
+
+// Cost breakdown
+message CostBreakdown {
+  string category = 1;
+  double amount = 2;
+  string description = 3;
+}
+
+// Request messages
+message StartChatRequest {
+  string user_id = 1;
+  string profile_id = 2;
+  string initial_message = 3;
+  ChatContextType context_type = 4;
+  map<string, string> metadata = 5;
+}
+
+message ContinueChatRequest {
+  string session_id = 1;
+  string user_id = 2;
+  string message = 3;
+  ChatContextType context_type = 4;
+}
+
+message FreeChatRequest {
+  string message = 1;
+  string session_token = 2; // For session continuity without auth
+  ChatContextType context_type = 3;
+}
+
+message GetChatSessionsRequest {
+  string user_id = 1;
+  string profile_id = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+message GetChatSessionsResponse {
+  repeated ChatSession sessions = 1;
+  int32 total_count = 2;
+}
+
+message ChatSession {
+  string id = 1;
+  string user_id = 2;
+  string profile_id = 3;
+  string title = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  int32 message_count = 7;
+  ChatContextType context_type = 8;
+}
+
+// Itinerary management
+message SaveItineraryRequest {
+  string user_id = 1;
+  string session_id = 2;
+  string title = 3;
+  string description = 4;
+  ItineraryResponse itinerary_data = 5;
+}
+
+message SaveItineraryResponse {
+  string itinerary_id = 1;
+  bool success = 2;
+  string message = 3;
+}
+
+message GetSavedItinerariesRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message GetSavedItinerariesResponse {
+  repeated UserSavedItinerary itineraries = 1;
+  int32 total_count = 2;
+}
+
+message UserSavedItinerary {
+  string id = 1;
+  string user_id = 2;
+  string session_id = 3;
+  string title = 4;
+  string description = 5;
+  string itinerary_data = 6; // JSON string
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message RemoveItineraryRequest {
+  string user_id = 1;
+  string itinerary_id = 2;
+}
+
+message RemoveItineraryResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// POI details request
+message GetPOIDetailsRequest {
+  string poi_id = 1;
+  bool include_reviews = 2;
+  bool include_photos = 3;
+}
+
+message GetPOIDetailsResponse {
+  POIDetailedInfo poi = 1;
+}
+
+// POI detailed information (reference to poi.proto)
+message POIDetailedInfo {
+  string id = 1;
+  string name = 2;
+  double latitude = 3;
+  double longitude = 4;
+  string category = 5;
+  string description = 6;
+  double rating = 7;
+  int32 review_count = 8;
+  string price_range = 9;
+  string address = 10;
+  string phone = 11;
+  string website = 12;
+  repeated string photos = 13;
+  map<string, string> metadata = 14;
+}

@@ -1,0 +1,372 @@
+syntax = "proto3";
+
+package ai_poi.poi.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/facorreiaa/go-ai-poi-server/proto/poi/v1";
+
+// POIService provides points of interest discovery and management
+service POIService {
+  // Get POIs by city
+  rpc GetPOIsByCity(GetPOIsByCityRequest) returns (GetPOIsByCityResponse);
+  
+  // Traditional POI search with filters
+  rpc SearchPOIs(SearchPOIsRequest) returns (SearchPOIsResponse);
+  
+  // Semantic search using AI embeddings
+  rpc SearchPOIsSemantic(SearchPOIsSemanticRequest) returns (SearchPOIsSemanticResponse);
+  
+  // Semantic search by city
+  rpc SearchPOIsSemanticByCity(SearchPOIsSemanticByCityRequest) returns (SearchPOIsSemanticResponse);
+  
+  // Hybrid spatial + semantic search
+  rpc SearchPOIsHybrid(SearchPOIsHybridRequest) returns (SearchPOIsHybridResponse);
+  
+  // Get nearby recommendations
+  rpc GetNearbyRecommendations(GetNearbyRecommendationsRequest) returns (GetNearbyRecommendationsResponse);
+  
+  // Domain-specific discovery endpoints
+  rpc DiscoverRestaurants(DiscoverRestaurantsRequest) returns (DiscoverRestaurantsResponse);
+  rpc DiscoverActivities(DiscoverActivitiesRequest) returns (DiscoverActivitiesResponse);
+  rpc DiscoverHotels(DiscoverHotelsRequest) returns (DiscoverHotelsResponse);
+  rpc DiscoverAttractions(DiscoverAttractionsRequest) returns (DiscoverAttractionsResponse);
+  
+  // Favorites management
+  rpc AddToFavorites(AddToFavoritesRequest) returns (AddToFavoritesResponse);
+  rpc RemoveFromFavorites(RemoveFromFavoritesRequest) returns (RemoveFromFavoritesResponse);
+  rpc GetFavorites(GetFavoritesRequest) returns (GetFavoritesResponse);
+  
+  // Itinerary management
+  rpc GetItineraries(GetItinerariesRequest) returns (GetItinerariesResponse);
+  rpc GetItinerary(GetItineraryRequest) returns (GetItineraryResponse);
+  rpc UpdateItinerary(UpdateItineraryRequest) returns (UpdateItineraryResponse);
+  
+  // Generate embeddings for POIs (admin)
+  rpc GenerateEmbeddings(GenerateEmbeddingsRequest) returns (GenerateEmbeddingsResponse);
+}
+
+// Core POI entity
+message POIDetailedInfo {
+  string id = 1;
+  string name = 2;
+  double latitude = 3;
+  double longitude = 4;
+  string category = 5;
+  string subcategory = 6;
+  string description = 7;
+  double rating = 8;
+  int32 review_count = 9;
+  string price_range = 10; // Free, €, €€, €€€
+  string address = 11;
+  string phone = 12;
+  string email = 13;
+  string website = 14;
+  repeated string opening_hours = 15;
+  repeated string photos = 16;
+  repeated string amenities = 17;
+  string distance = 18; // Distance from search point
+  string city_id = 19;
+  string city_name = 20;
+  string country = 21;
+  bool is_verified = 22;
+  map<string, string> metadata = 23;
+  google.protobuf.Timestamp created_at = 24;
+  google.protobuf.Timestamp updated_at = 25;
+}
+
+// Restaurant-specific information
+message RestaurantDetailedInfo {
+  POIDetailedInfo poi = 1;
+  string cuisine_type = 2;
+  repeated string dietary_options = 3;
+  string dress_code = 4;
+  bool reservations_required = 5;
+  string average_meal_duration = 6;
+  repeated string specialties = 7;
+}
+
+// Hotel-specific information  
+message HotelDetailedInfo {
+  POIDetailedInfo poi = 1;
+  int32 star_rating = 2;
+  repeated string room_types = 3;
+  repeated string amenities = 4;
+  string check_in_time = 5;
+  string check_out_time = 6;
+  bool pet_friendly = 7;
+  bool parking_available = 8;
+  string property_type = 9; // Hotel, B&B, Hostel, etc.
+}
+
+// Geographic point
+message GeoPoint {
+  double latitude = 1;
+  double longitude = 2;
+}
+
+// Search filters
+message POIFilter {
+  string query = 1;
+  GeoPoint location = 2;
+  double radius_meters = 3;
+  repeated string categories = 4;
+  repeated string price_ranges = 5;
+  double min_rating = 6;
+  string sort_by = 7; // "rating", "distance", "popularity", "price"
+  string sort_order = 8; // "asc", "desc"
+  int32 limit = 9;
+  int32 offset = 10;
+  string city_id = 11;
+}
+
+// Request/Response messages
+message GetPOIsByCityRequest {
+  string city_id = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message GetPOIsByCityResponse {
+  repeated POIDetailedInfo pois = 1;
+  int32 total_count = 2;
+}
+
+message SearchPOIsRequest {
+  POIFilter filter = 1;
+}
+
+message SearchPOIsResponse {
+  repeated POIDetailedInfo pois = 1;
+  int32 total_count = 2;
+  SearchMetadata metadata = 3;
+}
+
+message SearchPOIsSemanticRequest {
+  string query = 1;
+  GeoPoint location = 2;
+  int32 limit = 3;
+  double semantic_threshold = 4;
+}
+
+message SearchPOIsSemanticByCityRequest {
+  string query = 1;
+  string city_id = 2;
+  int32 limit = 3;
+  double semantic_threshold = 4;
+}
+
+message SearchPOIsSemanticResponse {
+  repeated POISemanticMatch pois = 1;
+  int32 total_count = 2;
+  SearchMetadata metadata = 3;
+}
+
+message POISemanticMatch {
+  POIDetailedInfo poi = 1;
+  double similarity_score = 2;
+  string match_reason = 3;
+}
+
+message SearchPOIsHybridRequest {
+  POIFilter filter = 1;
+  string semantic_query = 2;
+  double semantic_weight = 3; // 0.0-1.0, weight between spatial and semantic
+}
+
+message SearchPOIsHybridResponse {
+  repeated POIHybridMatch pois = 1;
+  int32 total_count = 2;
+  SearchMetadata metadata = 3;
+}
+
+message POIHybridMatch {
+  POIDetailedInfo poi = 1;
+  double spatial_score = 2;
+  double semantic_score = 3;
+  double combined_score = 4;
+}
+
+message SearchMetadata {
+  double query_time_ms = 1;
+  string search_method = 2;
+  map<string, string> debug_info = 3;
+}
+
+// Nearby recommendations
+message GetNearbyRecommendationsRequest {
+  GeoPoint location = 1;
+  double radius_meters = 2;
+  string user_id = 3; // For personalized recommendations
+  repeated string preferred_categories = 4;
+  int32 limit = 5;
+}
+
+message GetNearbyRecommendationsResponse {
+  repeated POIRecommendation recommendations = 1;
+  RecommendationMetadata metadata = 2;
+}
+
+message POIRecommendation {
+  POIDetailedInfo poi = 1;
+  double recommendation_score = 2;
+  string recommendation_reason = 3;
+  repeated string tags = 4;
+}
+
+message RecommendationMetadata {
+  string personalization_level = 1;
+  repeated string applied_filters = 2;
+}
+
+// Domain-specific discovery
+message DiscoverRestaurantsRequest {
+  GeoPoint location = 1;
+  double radius_meters = 2;
+  repeated string cuisine_types = 3;
+  repeated string price_ranges = 4;
+  double min_rating = 5;
+  int32 limit = 6;
+}
+
+message DiscoverRestaurantsResponse {
+  repeated RestaurantDetailedInfo restaurants = 1;
+  int32 total_count = 2;
+}
+
+message DiscoverActivitiesRequest {
+  GeoPoint location = 1;
+  double radius_meters = 2;
+  repeated string activity_types = 3;
+  int32 limit = 4;
+}
+
+message DiscoverActivitiesResponse {
+  repeated POIDetailedInfo activities = 1;
+  int32 total_count = 2;
+}
+
+message DiscoverHotelsRequest {
+  GeoPoint location = 1;
+  double radius_meters = 2;
+  repeated string property_types = 3;
+  repeated int32 star_ratings = 4;
+  repeated string price_ranges = 5;
+  int32 limit = 6;
+}
+
+message DiscoverHotelsResponse {
+  repeated HotelDetailedInfo hotels = 1;
+  int32 total_count = 2;
+}
+
+message DiscoverAttractionsRequest {
+  GeoPoint location = 1;
+  double radius_meters = 2;
+  repeated string attraction_types = 3;
+  int32 limit = 4;
+}
+
+message DiscoverAttractionsResponse {
+  repeated POIDetailedInfo attractions = 1;
+  int32 total_count = 2;
+}
+
+// Favorites management
+message AddToFavoritesRequest {
+  string user_id = 1;
+  string poi_id = 2;
+  bool is_llm_poi = 3;
+  POIDetailedInfo poi_data = 4; // For LLM-generated POIs
+}
+
+message AddToFavoritesResponse {
+  bool success = 1;
+  string message = 2;
+  string poi_id = 3; // Actual POI ID after processing
+}
+
+message RemoveFromFavoritesRequest {
+  string user_id = 1;
+  string poi_id = 2;
+  bool is_llm_poi = 3;
+  POIDetailedInfo poi_data = 4;
+}
+
+message RemoveFromFavoritesResponse {
+  bool success = 1;
+  string message = 2;
+  string poi_id = 3;
+}
+
+message GetFavoritesRequest {
+  string user_id = 1;
+  int32 page = 2;
+  int32 page_size = 3;
+}
+
+message GetFavoritesResponse {
+  repeated POIDetailedInfo favorites = 1;
+  int32 total_count = 2;
+  int32 current_page = 3;
+  int32 total_pages = 4;
+}
+
+// Itinerary management
+message GetItinerariesRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message GetItinerariesResponse {
+  repeated UserItinerary itineraries = 1;
+  int32 total_count = 2;
+}
+
+message GetItineraryRequest {
+  string user_id = 1;
+  string itinerary_id = 2;
+}
+
+message GetItineraryResponse {
+  UserItinerary itinerary = 1;
+}
+
+message UpdateItineraryRequest {
+  string user_id = 1;
+  string itinerary_id = 2;
+  string title = 3;
+  string description = 4;
+  string markdown_content = 5;
+}
+
+message UpdateItineraryResponse {
+  bool success = 1;
+  string message = 2;
+  UserItinerary itinerary = 3;
+}
+
+message UserItinerary {
+  string id = 1;
+  string user_id = 2;
+  string session_id = 3;
+  string title = 4;
+  string description = 5;
+  string markdown_content = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// Embeddings generation (admin)
+message GenerateEmbeddingsRequest {
+  int32 batch_size = 1;
+  bool force_regenerate = 2;
+}
+
+message GenerateEmbeddingsResponse {
+  int32 processed_count = 1;
+  int32 updated_count = 2;
+  string status = 3;
+  repeated string errors = 4;
+}
