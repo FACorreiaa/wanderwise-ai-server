@@ -30,7 +30,6 @@ type Container struct {
 	Logger                    *slog.Logger
 	Pool                      *pgxpool.Pool
 	RateLimiter               *middleware.RateLimiter
-	AuthHandler               *auth.HandlerImpl
 	UserHandler               *user.HandlerImpl
 	InterestHandler           *interests.HandlerImpl
 	TagsHandler               *tags.HandlerImpl
@@ -135,7 +134,6 @@ func NewContainer(cfg *config.Config, logger *slog.Logger) (*Container, error) {
 		Logger:                    logger,
 		Pool:                      pool,
 		RateLimiter:               rateLimiter,
-		AuthHandler:               authHandlerImpl,
 		UserHandler:               userHandlerImpl,
 		InterestHandler:           HandlerImpl,
 		TagsHandler:               tagsHandler,

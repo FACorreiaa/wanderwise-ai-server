@@ -42,11 +42,10 @@ exporters:
   # Loki logging
   loki:
     endpoint: http://loki:3100/loki/api/v1/push
-    tenant_id: ""
-  
+
   # Debug logging
-  logging:
-    loglevel: debug
+  debug:
+    verbosity: detailed
 
 service:
   pipelines:
@@ -54,19 +53,19 @@ service:
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, resourcedetection, batch]
-      exporters: [prometheus, prometheusremotewrite, logging]
+      exporters: [prometheus, prometheusremotewrite, debug]
     
     # Traces pipeline
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resourcedetection, batch]
-      exporters: [otlp/tempo, logging]
+      exporters: [otlp/tempo, debug]
     
     # Logs pipeline
     logs:
       receivers: [otlp]
       processors: [memory_limiter, resourcedetection, batch]
-      exporters: [loki, logging]
+      exporters: [loki, debug]
   
   extensions: []
   
@@ -74,4 +73,4 @@ service:
     logs:
       level: "debug"
     metrics:
-      address: 0.0.0.0:8889
+      level: detailed

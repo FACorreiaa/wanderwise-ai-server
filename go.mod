@@ -51,7 +51,7 @@ require (
 	cloud.google.com/go v0.121.4 // indirect
 	cloud.google.com/go/auth v0.16.3 // indirect
 	cloud.google.com/go/compute/metadata v0.7.0 // indirect
-	github.com/FACorreiaa/loci-proto v0.0.0-20250720214914-c3db2c4f146e // indirect
+	github.com/FACorreiaa/loci-proto v0.0.0-20250720221747-2fdf5da5b196 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.2 // indirect

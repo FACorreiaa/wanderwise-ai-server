@@ -18,6 +18,8 @@ github.com/FACorreiaa/go-genai-sdk v0.0.0-20250706223405-305ce589dd50 h1:bvp6FBr
 github.com/FACorreiaa/go-genai-sdk v0.0.0-20250706223405-305ce589dd50/go.mod h1:eaObK1lcECuDzsF3JibPI494QYEAtkOXHfRObGBV9kw=
 github.com/FACorreiaa/loci-proto v0.0.0-20250720214914-c3db2c4f146e h1:0YeUWRGHqfCObw846WY1jp3xqZZ4CyXhB/BGvNE/Mqw=
 github.com/FACorreiaa/loci-proto v0.0.0-20250720214914-c3db2c4f146e/go.mod h1:oyaLDBK+7G01nNb/1kHmhVuKL0+a4qFMfWnJVk5/sFM=
+github.com/FACorreiaa/loci-proto v0.0.0-20250720221747-2fdf5da5b196 h1:cLeik3yaEabWxQ5PZCm/ZUxziXD5xD5G8NuQL2B28xE=
+github.com/FACorreiaa/loci-proto v0.0.0-20250720221747-2fdf5da5b196/go.mod h1:pf3Ku59nXZbvoKqQdmI7xue4YPmPJ/CyUILsvO4BNzk=
 github.com/KyleBanks/depth v1.2.1 h1:5h8fQADFrWtarTdtDudMmGsC7GPbOAu6RVB3ffsVFHc=
 github.com/KyleBanks/depth v1.2.1/go.mod h1:jzSb9d0L43HxTQfT+oSA1EEp2q+ne2uh6XgeJcm8brE=
 github.com/Masterminds/squirrel v1.5.4 h1:uUcX/aBc8O7Fg9kaISIUsHXdKuqehiXAMQTYX8afzqM=

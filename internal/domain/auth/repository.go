@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
@@ -25,9 +26,9 @@ var _ AuthRepo = (*PostgresAuthRepo)(nil)
 
 type AuthRepo interface {
 	// GetUserByEmail fetches user details needed for validation/token generation.
-	GetUserByEmail(ctx context.Context, email string) (*types.UserAuth, error)
+	GetUserByEmail(ctx context.Context, email string) (*domain.UserAuth, error)
 	// GetUserByID fetches user details by ID.
-	GetUserByID(ctx context.Context, userID string) (*types.UserAuth, error)
+	GetUserByID(ctx context.Context, userID string) (*domain.UserAuth, error)
 	// Register stores a new user with a HASHED password. Returns new user ID.
 	Register(ctx context.Context, username, email, hashedPassword string) (string, error)
 	// VerifyPassword checks if the given password matches the hash for the userID.
@@ -36,7 +37,7 @@ type AuthRepo interface {
 	UpdatePassword(ctx context.Context, userID, newHashedPassword string) error
 
 	// provider specific methods for user management
-	CreateUser(ctx context.Context, user *types.UserAuth) error
+	CreateUser(ctx context.Context, user *domain.UserAuth) error
 	CreateUserProvider(ctx context.Context, userID, provider, providerUserID string) error
 	GetUserIDByProvider(ctx context.Context, provider, providerUserID string) (string, error)
 
@@ -64,8 +65,8 @@ func NewPostgresAuthRepo(pgxpool *pgxpool.Pool, logger *slog.Logger) *PostgresAu
 }
 
 // GetUserByEmail implements auth.AuthRepo.
-func (r *PostgresAuthRepo) GetUserByEmail(ctx context.Context, email string) (*types.UserAuth, error) {
-	var user types.UserAuth
+func (r *PostgresAuthRepo) GetUserByEmail(ctx context.Context, email string) (*domain.UserAuth, error) {
+	var user domain.UserAuth
 	query := `SELECT id, username, email, password_hash FROM users WHERE email = $1 AND is_active = TRUE`
 	err := r.pgpool.QueryRow(ctx, query, email).Scan(&user.ID, &user.Username, &user.Email, &user.Password)
 	if err != nil {
@@ -79,8 +80,8 @@ func (r *PostgresAuthRepo) GetUserByEmail(ctx context.Context, email string) (*t
 }
 
 // GetUserByID implements auth.AuthRepo.
-func (r *PostgresAuthRepo) GetUserByID(ctx context.Context, userID string) (*types.UserAuth, error) {
-	var user types.UserAuth
+func (r *PostgresAuthRepo) GetUserByID(ctx context.Context, userID string) (*domain.UserAuth, error) {
+	var user domain.UserAuth
 	// Select fields needed by token generation or other logic
 	query := `SELECT id, username, email FROM users WHERE id = $1 AND is_active = TRUE`
 	err := r.pgpool.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Username, &user.Email)
@@ -272,7 +273,7 @@ func (r *PostgresAuthRepo) GetUserIDByProvider(ctx context.Context, provider, pr
 }
 
 // CreateUser creates a new user in the database
-func (r *PostgresAuthRepo) CreateUser(ctx context.Context, user *types.UserAuth) error {
+func (r *PostgresAuthRepo) CreateUser(ctx context.Context, user *domain.UserAuth) error {
 	ctx, span := otel.Tracer("UserRepository").Start(ctx, "CreateUser",
 		trace.WithAttributes(
 			attribute.String("email", user.Email),

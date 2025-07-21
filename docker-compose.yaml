@@ -142,8 +142,8 @@ services:
 
 volumes:
   postgres-data:
-  redis-data:
-  go-mod-cache:
+  #redis-data:
+  #go-mod-cache:
   prometheus-data:
   grafana-data:
   tempo-data:
