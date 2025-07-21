@@ -31,6 +31,26 @@ services:
       retries: 5
 
   # === Observability Stack ===
+  # OpenTelemetry Collector
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8889:8889"   # Prometheus metrics endpoint
+    volumes:
+      - ./app/observability/otel-collector-config.yaml:/etc/otelcol-contrib/otel-collector-config.yaml:ro
+    command:
+      - '--config=/etc/otelcol-contrib/otel-collector-config.yaml'
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+
   # Prometheus for metrics collection
   prometheus:
     image: prom/prometheus:latest
@@ -57,8 +77,8 @@ services:
     container_name: tempo
     ports:
       - "3200:3200"   # Tempo HTTP API
-      - "4317:4317"   # OTLP gRPC receiver
-      - "4318:4318"   # OTLP HTTP receiver
+      - "4317"        # OTLP gRPC receiver (internal)
+      - "4318"        # OTLP HTTP receiver (internal)
     volumes:
       - ./app/observability/tempo-config.yaml:/etc/tempo/tempo.yaml:ro
       - tempo-data:/var/tempo
@@ -94,8 +114,8 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./app/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./app/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
       - loki
@@ -104,14 +124,14 @@ services:
       - microservices-net
     restart: unless-stopped
 
-  # Promtail for log collection (optional - for log shipping to Loki)
+  # Promtail for log collection
   promtail:
     image: grafana/promtail:latest
     container_name: promtail
     volumes:
       - /var/log:/var/log:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - ./observability/promtail.yml:/etc/promtail/promtail.yml:ro
+      - ./app/observability/promtail.yml:/etc/promtail/promtail.yml:ro
     command:
       - '-config.file=/etc/promtail/promtail.yml'
     networks:

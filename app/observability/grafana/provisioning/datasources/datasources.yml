@@ -8,6 +8,7 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     editable: true
+    uid: prometheus-uid
     jsonData:
       timeInterval: "5s"
       queryTimeout: "60s"
@@ -19,6 +20,7 @@ datasources:
     access: proxy
     url: http://tempo:3200
     editable: true
+    uid: tempo-uid
     jsonData:
       httpMethod: GET
       serviceMap:
@@ -53,6 +55,7 @@ datasources:
     access: proxy
     url: http://loki:3100
     editable: true
+    uid: loki-uid
     jsonData:
       maxLines: 1000
       derivedFields:
@@ -64,10 +67,3 @@ datasources:
           matcherRegex: "traceID=(\\w+)"
           name: TraceID
           url: "$${__value.raw}"
-
-  # Jaeger (Alternative tracing UI)
-  - name: Jaeger
-    type: jaeger
-    access: proxy
-    url: http://jaeger:16686
-    editable: true

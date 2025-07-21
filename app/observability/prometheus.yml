@@ -1,24 +1,34 @@
-# observability/prometheus.yml
 global:
-  scrape_interval: 15s # How often to scrape targets
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
 
 scrape_configs:
-  # Scrape metrics from your Go application's /metrics endpoint
-  # - job_name: "loci-api"
-  #   static_configs:
-  #     - targets: ["loci-api:9090"] # Service name and port defined in docker-compose
-  - job_name: "loci-api"
+  # Go AI POI API metrics (running locally via air)
+  - job_name: 'go-ai-poi-api'
     static_configs:
-      # Use host.docker.internal and the port exposed by Go app on the host
-      - targets: ["host.docker.internal:9090"] # <<< CHANGE HERE
+      - targets: ['host.docker.internal:9090']
+    scrape_interval: 5s
+    metrics_path: /metrics
+    scrape_timeout: 10s
 
+  # OpenTelemetry Collector metrics
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']
+    scrape_interval: 15s
 
-  # Scrape metrics from the OTel Collector itself (optional)
-  # - job_name: 'otel-collector'
-  #   static_configs:
-  #     - targets: ['otel-collector:8888']
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
 
-  # Scrape Prometheus itself (optional)
-  # - job_name: 'prometheus'
-  #   static_configs:
-  #     - targets: ['localhost:9090'] # Prometheus runs on 9090 inside its container
+  # Grafana metrics
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+    metrics_path: /metrics
+    scrape_interval: 30s

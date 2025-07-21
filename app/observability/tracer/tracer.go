@@ -3,12 +3,13 @@ package tracer
 import (
 	"context"
 	"errors"
-	"fmt" // Added fmt
+	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -33,26 +34,26 @@ func InitOtelProviders(serviceName string, metricsAddr string) (func(context.Con
 	}
 
 	// --- Tracer Provider Setup ---
-	// Configure OTLP exporter for traces (example assumes gRPC endpoint)
-	// Adjust endpoint and options (WithInsecure() for dev only!) as needed.
-	/*
-	   traceExporter, err := otlptracegrpc.New(context.Background(),
-	       otlptracegrpc.WithEndpoint("otel-collector:4317"), // Your OTLP endpoint for Tempo/Jaeger
-	       otlptracegrpc.WithInsecure(), // ONLY for local testing without TLS
-	   )
-	   if err != nil {
-	       return nil, fmt.Errorf("failed to create OTLP trace exporter: %w", err)
-	   }
-	   bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
-	   tp := sdktrace.NewTracerProvider(
-	       sdktrace.WithResource(res),
-	       sdktrace.WithSpanProcessor(bsp),
-	   )
-	   log.Println("Set up OpenTelemetry Tracer Provider with OTLP Exporter")
-	*/
-	// Using NoOp Tracer Provider if no trace backend is configured yet
-	tp := sdktrace.NewTracerProvider(sdktrace.WithResource(res))
-	log.Println("Set up OpenTelemetry Tracer Provider (NoOp Exporter)")
+	var tp *sdktrace.TracerProvider
+	
+	// Configure OTLP exporter for traces to send to collector
+	traceExporter, err := otlptracegrpc.New(context.Background(),
+		otlptracegrpc.WithEndpoint("otel-collector:4317"), // Send to OTel Collector
+		otlptracegrpc.WithInsecure(),                       // OK for local docker network
+	)
+	if err != nil {
+		// Fallback to NoOp if OTLP export fails (for local development)
+		log.Printf("Warning: Failed to create OTLP trace exporter, using NoOp: %v", err)
+		tp = sdktrace.NewTracerProvider(sdktrace.WithResource(res))
+		log.Println("Set up OpenTelemetry Tracer Provider (NoOp Exporter)")
+	} else {
+		bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
+		tp = sdktrace.NewTracerProvider(
+			sdktrace.WithResource(res),
+			sdktrace.WithSpanProcessor(bsp),
+		)
+		log.Println("Set up OpenTelemetry Tracer Provider with OTLP Exporter")
+	}
 
 	otel.SetTracerProvider(tp)
 	// otel.SetTextMapPropagator(...) // Setup propagator if needed

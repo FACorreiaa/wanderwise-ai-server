@@ -1,43 +1,77 @@
-# observability/otel-collector-config.yaml
 receivers:
   otlp:
     protocols:
-      grpc: # Port 4317
-      http: # Port 4318 (optional)
-
-exporters:
-  debug: # Useful for seeing data flow through the collector
-    verbosity: detailed
-
-  otlp: # Export traces to Tempo
-    endpoint: tempo:4317 # Send traces to Tempo service via gRPC
-    tls:
-      insecure: true # OK for local docker network
-
-  prometheusremotewrite: # Optional: Send metrics to Prometheus/Mimir via remote write
-    endpoint: http://prometheus:9090/api/v1/write
-
-  loki: # Optional: Export logs to Loki
-    endpoint: http://loki:3100/loki/api/v1/push
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
 
 processors:
-  batch: # Batches spans/metrics/logs before exporting
-  memory_limiter: # Prevents collector from OOMing
-    check_interval: 1s
-    limit_percentage: 75
-    spike_limit_percentage: 25
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+  
+  memory_limiter:
+    limit_mib: 512
+  
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 2s
+    override: false
+
+exporters:
+  # Prometheus metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: otel
+    const_labels:
+      service: go-ai-poi
+  
+  # Prometheus remote write
+  prometheusremotewrite:
+    endpoint: http://prometheus:9090/api/v1/write
+    tls:
+      insecure: true
+  
+  # Tempo tracing
+  otlp/tempo:
+    endpoint: http://tempo:4317
+    tls:
+      insecure: true
+  
+  # Loki logging
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    tenant_id: ""
+  
+  # Debug logging
+  logging:
+    loglevel: debug
 
 service:
   pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [prometheus, prometheusremotewrite, logging]
+    
+    # Traces pipeline
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
-      exporters: [otlp, debug] # Send traces to Tempo & debug console
-    metrics:
-      receivers: [otlp] # If sending metrics via OTLP instead of scraping
-      processors: [memory_limiter, batch]
-      exporters: [prometheusremotewrite, debug] # Example sending to Prometheus via PRW
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlp/tempo, logging]
+    
+    # Logs pipeline
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
-      exporters: [loki, debug]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [loki, logging]
+  
+  extensions: []
+  
+  telemetry:
+    logs:
+      level: "debug"
+    metrics:
+      address: 0.0.0.0:8889

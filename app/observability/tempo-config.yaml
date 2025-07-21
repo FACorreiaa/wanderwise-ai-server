@@ -1,19 +1,49 @@
-# observability/tempo-config.yaml (Minimal Example)
 server:
-  http_listen_port: 3200 # Port Tempo listens on for its own API/UI
+  http_listen_port: 3200
+  grpc_listen_port: 9095
 
 distributor:
   receivers:
+    jaeger:
+      protocols:
+        thrift_http:
+        grpc:
+        thrift_binary:
+        thrift_compact:
+    zipkin:
     otlp:
       protocols:
-        grpc: # Port Tempo receives OTLP traces on (often handled by collector)
-        # http:
+        http:
+        grpc:
+    opencensus:
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 24h
+
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+      cluster: docker-compose
+  storage:
+    path: /tmp/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
 
 storage:
   trace:
-    backend: local # Use local filesystem for storage
+    backend: local
+    wal:
+      path: /tmp/tempo/wal
     local:
-      path: /var/tempo/traces
+      path: /tmp/tempo/blocks
 
-ingester:
-  trace_idle_period: 10s # How long to keep traces in memory
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [service-graphs, span-metrics]

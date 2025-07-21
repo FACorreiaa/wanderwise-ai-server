@@ -1,69 +1,61 @@
-# observability/loki-config.yaml
-auth_enabled: false # Disable authentication for local testing
+auth_enabled: false
 
 server:
-  http_listen_port: 3100 # Port Loki listens on for API/Push requests
-  grpc_listen_port: 9096 # Optional gRPC port
+  http_listen_port: 3100
+  grpc_listen_port: 9096
 
 common:
-  instance_addr: 127.0.0.1
-  path_prefix: /var/loki # Directory inside the container for Loki data
+  path_prefix: /loki
   storage:
     filesystem:
-      chunks_directory: /var/loki/chunks
-      rules_directory: /var/loki/rules
-  replication_factor: 1 # No replication needed for single instance
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
   ring:
     kvstore:
-      store: inmemory # Use in-memory ring for single instance
+      store: inmemory
 
-# Configures how Loki receives logs
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  boltdb_shipper:
+    active_index_directory: /loki/boltdb-shipper-active
+    cache_location: /loki/boltdb-shipper-cache
+    cache_ttl: 24h
+    shared_store: filesystem
+  filesystem:
+    directory: /loki/chunks
+
 ingester:
   lifecycler:
     ring:
       kvstore:
         store: inmemory
       replication_factor: 1
-  # How long chunks stay in memory before being flushed
   chunk_idle_period: 5m
-  chunk_target_size: 1048576 # 1MB
+  chunk_target_size: 1048576
   max_chunk_age: 1h
-  # Where WAL (Write Ahead Log) is stored for durability before flushing
   wal:
     enabled: true
-    dir: /var/loki/wal
+    dir: /loki/wal
 
-# Configures how data is stored long-term (local filesystem here)
-schema_config:
-  configs:
-    - from: 2020-10-24 # Use a date from the past
-      store: boltdb-shipper # Efficient index store
-      object_store: filesystem # Store chunks on local filesystem
-      schema: v11
-      index:
-        prefix: index_
-        period: 24h # How often to create new index tables
+limits_config:
+  retention_period: 168h  # 7 days for local dev
 
-storage_config:
-  boltdb_shipper:
-    active_index_directory: /var/loki/boltdb-shipper-active
-    cache_location: /var/loki/boltdb-shipper-cache
-    cache_ttl: 24h
-    shared_store: filesystem
-  filesystem:
-    directory: /var/loki/chunks
-# Optional: Set retention policies
-# limits_config:
-#   retention_period: 720h # e.g., 30 days
-
-# Optional: Configure query limits
-# query_range:
-#   align_queries_with_step: true
-#   max_query_length: 0 # No limit
-#   max_query_parallelism: 32
-
-# Optional: Enable specific compactor settings
-# compactor:
-#   working_directory: /var/loki/compactor
-#   compaction_interval: 10m
-#   retention_enabled: true # Use limits_config retention
+ruler:
+  alertmanager_url: http://localhost:9093

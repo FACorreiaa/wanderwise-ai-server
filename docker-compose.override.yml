@@ -1,0 +1,26 @@
+# docker-compose.override.yml
+# This file extends docker-compose.yml with development-specific configurations
+# It's automatically loaded by docker-compose
+
+version: '3.8'
+
+services:
+  # Make sure the OTel Collector can reach the locally running Go app
+  otel-collector:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  
+  # Make sure Prometheus can reach the locally running Go app
+  prometheus:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  
+  # Development volume mounts for hot reloading configs (optional)
+  grafana:
+    environment:
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    # Uncomment for config hot reloading during development
+    # volumes:
+    #   - grafana-data:/var/lib/grafana
+    #   - ./app/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    #   - ./app/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
