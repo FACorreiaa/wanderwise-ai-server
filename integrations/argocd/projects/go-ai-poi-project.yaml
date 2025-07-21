@@ -1,26 +1,26 @@
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
-  name: loci-server-project
+  name: go-ai-poi-project
   namespace: argocd
   labels:
-    app.kubernetes.io/name: loci-server-project
-    app.kubernetes.io/part-of: loci-server-platform
+    app.kubernetes.io/name: go-ai-poi-project
+    app.kubernetes.io/part-of: go-ai-poi-platform
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  description: Project for Go AI POI application and its observability stack
+  description: Project for Go AI POI monorepo application and its observability stack
   
   # Source repositories
   sourceRepos:
-    - 'https://github.com/your-org/loci-server.git'  # Update with your repo URL
+    - 'https://github.com/FACorreiaa/go-ai-poi-server.git'
     - 'https://charts.bitnami.com/bitnami'
     - 'https://prometheus-community.github.io/helm-charts'
     - 'https://grafana.github.io/helm-charts'
   
   # Destination clusters and namespaces
   destinations:
-    - namespace: 'loci-server'
+    - namespace: 'go-ai-poi'
       server: https://kubernetes.default.svc
     - namespace: 'observability'
       server: https://kubernetes.default.svc
@@ -72,29 +72,29 @@ spec:
   roles:
     # Admin role - full access
     - name: admin
-      description: Admin access to loci-server project
+      description: Admin access to go-ai-poi project
       policies:
-        - p, proj:loci-server-project:admin, applications, *, loci-server-project/*, allow
-        - p, proj:loci-server-project:admin, logs, get, loci-server-project/*, allow
-        - p, proj:loci-server-project:admin, exec, create, loci-server-project/*, allow
+        - p, proj:go-ai-poi-project:admin, applications, *, go-ai-poi-project/*, allow
+        - p, proj:go-ai-poi-project:admin, logs, get, go-ai-poi-project/*, allow
+        - p, proj:go-ai-poi-project:admin, exec, create, go-ai-poi-project/*, allow
       groups:
-        - loci-server:admin
+        - go-ai-poi:admin
     
     # Developer role - limited access
     - name: developer
-      description: Developer access to loci-server project
+      description: Developer access to go-ai-poi project
       policies:
-        - p, proj:loci-server-project:developer, applications, get, loci-server-project/*, allow
-        - p, proj:loci-server-project:developer, applications, sync, loci-server-project/*, allow
-        - p, proj:loci-server-project:developer, logs, get, loci-server-project/*, allow
+        - p, proj:go-ai-poi-project:developer, applications, get, go-ai-poi-project/*, allow
+        - p, proj:go-ai-poi-project:developer, applications, sync, go-ai-poi-project/*, allow
+        - p, proj:go-ai-poi-project:developer, logs, get, go-ai-poi-project/*, allow
       groups:
-        - loci-server:developer
+        - go-ai-poi:developer
     
     # Read-only role
     - name: readonly
-      description: Read-only access to loci-server project
+      description: Read-only access to go-ai-poi project
       policies:
-        - p, proj:loci-server-project:readonly, applications, get, loci-server-project/*, allow
-        - p, proj:loci-server-project:readonly, logs, get, loci-server-project/*, allow
+        - p, proj:go-ai-poi-project:readonly, applications, get, go-ai-poi-project/*, allow
+        - p, proj:go-ai-poi-project:readonly, logs, get, go-ai-poi-project/*, allow
       groups:
-        - loci-server:readonly
+        - go-ai-poi:readonly

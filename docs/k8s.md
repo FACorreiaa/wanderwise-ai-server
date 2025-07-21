@@ -1,25 +1,26 @@
-# Kubernetes Deployment Guide for Go AI POI Microservices
+# Kubernetes Deployment Guide for Go AI POI Monorepo
 
 ## Overview
 
-This guide explains how to deploy the Go AI POI microservices architecture on Kubernetes. The new gRPC-based microservices architecture consists of 12 domain services plus supporting infrastructure and observability components.
+This guide explains how to deploy the Go AI POI application on Kubernetes. The current architecture is a gRPC-enabled monorepo with a single Go module, providing a consolidated deployment approach with integrated observability.
 
 ## Architecture
 
-### Core Microservices (gRPC)
-- **Auth Service** (8001/9001) - Authentication and authorization
-- **POI Service** (8002/9002) - Points of interest management
-- **Chat Service** (8003/9003) - Chat prompt handling
-- **Lists Service** (8004/9004) - User lists management
-- **Users Service** (8005/9005) - User management
-- **Admin Service** (8006/9006) - Administrative functions
-- **City Service** (8007/9007) - City data management
-- **Interests Service** (8008/9008) - User interests
-- **Profiles Service** (8009/9009) - User profiles
-- **Recents Service** (8010/9010) - Recent activities
-- **Reviews Service** (8011/9011) - Reviews and ratings
-- **Statistics Service** (8012/9012) - Analytics and statistics
-- **Tags Service** (8013/9013) - Tagging system
+### Monorepo Application Structure
+- **Single Go Application** with gRPC and HTTP endpoints
+- **HTTP Port**: 8080 (metrics, health checks, service registry endpoints)
+- **gRPC Port**: 9000 (internal service communication)
+- **Metrics Port**: Prometheus metrics on `/metrics`
+- **Health Endpoints**: `/health`, `/services`, `/services/stats`, `/services/healthy`
+
+### Core Features
+- **Authentication & Authorization** - JWT-based auth system
+- **POI Management** - Points of interest with AI-powered recommendations
+- **Chat Service** - AI-powered chat interactions
+- **User Management** - Profile, preferences, and lists
+- **Reviews & Ratings** - Community-driven content
+- **Analytics** - Usage statistics and insights
+- **AI Integration** - OpenAI GPT integration for recommendations
 
 ### Infrastructure Components
 - **PostgreSQL** with PostGIS and pgvector extensions
@@ -62,6 +63,16 @@ data:
   POSTGRES_USER: bG9jaQ==  # base64: loci
   POSTGRES_PASSWORD: bG9jaTE2NHJyaQ==  # base64: loci123
   POSTGRES_DB: bG9jaQ==  # base64: loci
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: go-ai-poi-secrets
+  namespace: go-ai-poi
+type: Opaque
+data:
+  JWT_SECRET: eW91ci1qd3Qtc2VjcmV0LWtleS1oZXJl  # base64: your-jwt-secret-key-here
+  OPENAI_API_KEY: eW91ci1vcGVuYWktYXBpLWtleS1oZXJl  # base64: your-openai-api-key-here
 ```
 
 #### Application Configuration
@@ -69,13 +80,17 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: app-config
+  name: go-ai-poi-config
   namespace: go-ai-poi
 data:
   POSTGRES_HOST: postgres-service
   POSTGRES_PORT: "5432"
   REDIS_HOST: redis-service
   REDIS_PORT: "6379"
+  HTTP_PORT: "8080"
+  GRPC_PORT: "9000"
+  LOG_LEVEL: "info"
+  OPENAI_MODEL: "gpt-4"
 ```
 
 ### 3. Persistent Volumes
@@ -242,83 +257,89 @@ spec:
   type: ClusterIP
 ```
 
-### 6. Microservices Deployment Pattern
+### 6. Go AI POI Application Deployment
 
-Each microservice follows this pattern (example for Auth Service):
+Single application deployment with both HTTP and gRPC endpoints:
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: auth-service
+  name: go-ai-poi-app
   namespace: go-ai-poi
+  labels:
+    app: go-ai-poi-app
+    version: v1.0.0
 spec:
   replicas: 3  # Adjust based on load requirements
   selector:
     matchLabels:
-      app: auth-service
+      app: go-ai-poi-app
   template:
     metadata:
       labels:
-        app: auth-service
+        app: go-ai-poi-app
+        version: v1.0.0
     spec:
       containers:
-      - name: auth-service
-        image: your-registry/auth-service:latest
+      - name: go-ai-poi-app
+        image: your-registry/go-ai-poi:latest
         env:
         - name: SERVICE_NAME
-          value: "auth-service"
-        - name: SERVICE_PORT
-          value: "8001"
-        - name: GRPC_PORT
-          value: "9001"
+          value: "go-ai-poi-app"
         envFrom:
         - configMapRef:
-            name: app-config
+            name: go-ai-poi-config
         - secretRef:
             name: postgres-secret
+        - secretRef:
+            name: go-ai-poi-secrets  # For JWT secret, OpenAI API key, etc.
         ports:
-        - containerPort: 8001
+        - containerPort: 8080
           name: http
-        - containerPort: 9001
+        - containerPort: 9000
           name: grpc
         - containerPort: 6060
           name: pprof
         livenessProbe:
           httpGet:
             path: /health
-            port: 8001
+            port: 8080
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /ready
-            port: 8001
+            path: /health
+            port: 8080
           initialDelaySeconds: 5
           periodSeconds: 5
         resources:
           requests:
-            memory: "256Mi"
-            cpu: "100m"
-          limits:
             memory: "512Mi"
-            cpu: "500m"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: auth-service
+  name: go-ai-poi-service
   namespace: go-ai-poi
+  labels:
+    app: go-ai-poi-app
 spec:
   selector:
-    app: auth-service
+    app: go-ai-poi-app
   ports:
-  - port: 8001
-    targetPort: 8001
+  - port: 8080
+    targetPort: 8080
     name: http
-  - port: 9001
-    targetPort: 9001
+    protocol: TCP
+  - port: 9000
+    targetPort: 9000
     name: grpc
+    protocol: TCP
   type: ClusterIP
 ```
 
@@ -482,31 +503,27 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
 spec:
   ingressClassName: nginx
   tls:
   - hosts:
     - api.your-domain.com
-    secretName: tls-secret
+    secretName: go-ai-poi-tls
   rules:
   - host: api.your-domain.com
     http:
       paths:
-      - path: /auth
+      - path: /
         pathType: Prefix
         backend:
           service:
-            name: auth-service
+            name: go-ai-poi-service
             port:
-              number: 8001
-      - path: /poi
-        pathType: Prefix
-        backend:
-          service:
-            name: poi-service
-            port:
-              number: 8002
-      # Add other service paths as needed
+              number: 8080
 ```
 
 ### 10. Horizontal Pod Autoscaling
@@ -515,13 +532,13 @@ spec:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: auth-service-hpa
+  name: go-ai-poi-hpa
   namespace: go-ai-poi
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: auth-service
+    name: go-ai-poi-app
   minReplicas: 2
   maxReplicas: 10
   metrics:
@@ -543,16 +560,15 @@ spec:
 
 #### Production Resource Limits
 
-| Service | CPU Request | CPU Limit | Memory Request | Memory Limit |
-|---------|-------------|-----------|----------------|--------------|
-| Auth Service | 100m | 500m | 256Mi | 512Mi |
-| POI Service | 200m | 1000m | 512Mi | 1Gi |
-| Chat Service | 300m | 1500m | 512Mi | 1Gi |
-| Other Services | 100m | 500m | 256Mi | 512Mi |
+| Component | CPU Request | CPU Limit | Memory Request | Memory Limit |
+|-----------|-------------|-----------|----------------|--------------|
+| Go AI POI App | 200m | 1000m | 512Mi | 1Gi |
 | PostgreSQL | 500m | 2000m | 1Gi | 4Gi |
 | Redis | 100m | 200m | 256Mi | 512Mi |
 | Prometheus | 200m | 1000m | 512Mi | 2Gi |
 | Grafana | 100m | 200m | 256Mi | 512Mi |
+| Loki | 100m | 200m | 256Mi | 512Mi |
+| Tempo | 100m | 200m | 256Mi | 512Mi |
 
 ### 12. Security Best Practices
 
@@ -610,11 +626,8 @@ kubectl apply -f pvcs.yaml
 kubectl apply -f postgres.yaml
 kubectl apply -f redis.yaml
 
-# Deploy microservices
-kubectl apply -f auth-service.yaml
-kubectl apply -f poi-service.yaml
-kubectl apply -f chat-service.yaml
-# ... other services
+# Deploy main application
+kubectl apply -f go-ai-poi-app.yaml
 
 # Deploy observability stack
 kubectl apply -f prometheus.yaml
@@ -625,6 +638,11 @@ kubectl apply -f loki.yaml
 # Apply ingress and HPA
 kubectl apply -f ingress.yaml
 kubectl apply -f hpa.yaml
+
+# Verify deployment
+kubectl get pods -n go-ai-poi
+kubectl get services -n go-ai-poi
+kubectl get ingress -n go-ai-poi
 ```
 
 ### 15. Infrastructure as Code with Terraform

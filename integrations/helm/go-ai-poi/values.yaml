@@ -1,8 +1,8 @@
-# Default values for loci-server
+# Default values for go-ai-poi
 replicaCount: 2
 
 image:
-  repository: loci-server
+  repository: go-ai-poi
   pullPolicy: IfNotPresent
   tag: "latest"
 
@@ -24,34 +24,42 @@ securityContext:
   capabilities:
     drop:
     - ALL
-  readOnlyRootFilesystem: true
+  readOnlyRootFilesystem: false  # Changed to false as the app may need to write temp files
   runAsNonRoot: true
   runAsUser: 1000
 
 service:
   type: ClusterIP
-  port: 8000
-  targetPort: 8000
+  httpPort: 8080
+  grpcPort: 9000
+  pprofPort: 6060
 
 ingress:
   enabled: true
   className: "nginx"
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
   hosts:
-    - host: loci-server.local
+    - host: go-ai-poi.local
       paths:
         - path: /
           pathType: Prefix
-  tls: []
+  tls: 
+    - secretName: go-ai-poi-tls
+      hosts:
+        - go-ai-poi.local
 
 resources:
   limits:
-    cpu: 500m
-    memory: 512Mi
+    cpu: 1000m
+    memory: 1Gi
   requests:
-    cpu: 250m
-    memory: 256Mi
+    cpu: 200m
+    memory: 512Mi
 
 autoscaling:
   enabled: false
@@ -68,40 +76,45 @@ affinity: {}
 
 # Application specific configuration
 config:
-  port: 8000
+  httpPort: 8080
+  grpcPort: 9000
   logLevel: "info"
   database:
     host: "postgresql"
     port: 5432
-    name: "go_ai_poi"
-    username: "postgres"
+    name: "loci"
+    username: "loci"
     sslMode: "disable"
   jwt:
     expiration: "24h"
   openai:
     model: "gpt-4"
+  redis:
+    host: "redis"
+    port: 6379
+    db: 0
 
 # Secrets (override in production)
 secrets:
   database:
-    password: "postgres123"
+    password: "loci123"
   jwt:
-    secret: "your-jwt-secret-key"
+    secret: "your-jwt-secret-key-here"
   openai:
-    apiKey: "your-openai-api-key"
+    apiKey: "your-openai-api-key-here"
 
 # Health checks
 livenessProbe:
   httpGet:
     path: /health
-    port: http
+    port: 8080
   initialDelaySeconds: 30
   periodSeconds: 10
 
 readinessProbe:
   httpGet:
-    path: /ready
-    port: http
+    path: /health
+    port: 8080
   initialDelaySeconds: 5
   periodSeconds: 5
 
@@ -109,19 +122,50 @@ readinessProbe:
 postgresql:
   enabled: true
   auth:
-    postgresPassword: "postgres123"
-    database: "go_ai_poi"
+    postgresPassword: "loci123"
+    username: "loci"
+    password: "loci123"
+    database: "loci"
   primary:
     persistence:
       enabled: true
-      size: 10Gi
+      size: 20Gi
+    resources:
+      requests:
+        memory: 1Gi
+        cpu: 500m
+      limits:
+        memory: 4Gi
+        cpu: 2000m
+    extendedConfiguration: |
+      # Enable PostGIS and pgvector extensions
+      shared_preload_libraries = 'postgis-3,vector'
+      max_connections = 200
+      shared_buffers = 256MB
+      effective_cache_size = 1GB
+      maintenance_work_mem = 64MB
+      checkpoint_completion_target = 0.9
+      wal_buffers = 16MB
+      default_statistics_target = 100
+      random_page_cost = 1.1
+      effective_io_concurrency = 200
+
+# Redis configuration
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
     resources:
       requests:
         memory: 256Mi
-        cpu: 250m
+        cpu: 100m
       limits:
         memory: 512Mi
-        cpu: 500m
+        cpu: 200m
 
 # Observability stack
 prometheus:
@@ -180,4 +224,4 @@ grafana:
     enabled: true
     className: "nginx"
     hosts:
-      - grafana.loci-server.local
+      - grafana.go-ai-poi.local

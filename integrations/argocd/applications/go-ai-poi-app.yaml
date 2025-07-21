@@ -1,21 +1,21 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: loci-server
+  name: go-ai-poi-app
   namespace: argocd
   labels:
-    app.kubernetes.io/name: loci-server
-    app.kubernetes.io/part-of: loci-server-platform
+    app.kubernetes.io/name: go-ai-poi
+    app.kubernetes.io/part-of: go-ai-poi-platform
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
-    repoURL: https://github.com/your-org/loci-server.git  # Update with your repo URL
+    repoURL: https://github.com/FACorreiaa/go-ai-poi-server.git
     targetRevision: HEAD
-    path: helm/loci-server
+    path: integrations/helm/go-ai-poi
     helm:
-      releaseName: loci-server
+      releaseName: go-ai-poi
       valueFiles:
         - values.yaml
       values: |
@@ -23,11 +23,13 @@ spec:
           tag: "latest"
         ingress:
           hosts:
-            - host: loci-server.local
+            - host: go-ai-poi.local
               paths:
                 - path: /
                   pathType: Prefix
         postgresql:
+          enabled: true
+        redis:
           enabled: true
         prometheus:
           enabled: true
@@ -39,7 +41,7 @@ spec:
           enabled: true
   destination:
     server: https://kubernetes.default.svc
-    namespace: loci-server
+    namespace: go-ai-poi
   syncPolicy:
     automated:
       prune: true

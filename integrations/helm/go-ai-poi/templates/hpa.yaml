@@ -2,14 +2,14 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "loci-server.fullname" . }}
+  name: {{ include "go-ai-poi.fullname" . }}
   labels:
-    {{- include "loci-server.labels" . | nindent 4 }}
+    {{- include "go-ai-poi.labels" . | nindent 4 }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "loci-server.fullname" . }}
+    name: {{ include "go-ai-poi.fullname" . }}
   minReplicas: {{ .Values.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.autoscaling.maxReplicas }}
   metrics:
