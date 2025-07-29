@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/models"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
@@ -75,13 +74,13 @@ func createTestPOIForReview(t *testing.T) uuid.UUID {
 	t.Helper()
 	poiID := uuid.New()
 	cityID := uuid.New()
-	
+
 	// Create city first
 	_, err := testReviewDB.Exec(context.Background(),
 		"INSERT INTO cities (id, name, country) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
 		cityID, "Test City", "Test Country")
 	require.NoError(t, err)
-	
+
 	// Create POI
 	_, err = testReviewDB.Exec(context.Background(),
 		"INSERT INTO pois (id, city_id, name, latitude, longitude, location, category) VALUES ($1, $2, $3, $4, $5, ST_SetSRID(ST_MakePoint($6, $7), 4326), $8) ON CONFLICT (id) DO NOTHING",
@@ -140,7 +139,7 @@ func TestReviewModels_Integration(t *testing.T) {
 
 		// Create another user to mark the review as helpful
 		otherUserID := createTestUserForReview(t)
-		
+
 		reviewHelpful := models.NewReviewHelpful(otherUserID, review.ID, true)
 
 		// Insert review helpful record
@@ -154,7 +153,7 @@ func TestReviewModels_Integration(t *testing.T) {
 
 		// Verify review helpful was saved
 		var dbIsHelpful bool
-		err = testReviewDB.QueryRow(ctx, "SELECT is_helpful FROM review_helpful WHERE user_id = $1 AND review_id = $2", 
+		err = testReviewDB.QueryRow(ctx, "SELECT is_helpful FROM review_helpful WHERE user_id = $1 AND review_id = $2",
 			reviewHelpful.UserID, reviewHelpful.ReviewID).Scan(&dbIsHelpful)
 		require.NoError(t, err)
 
@@ -292,11 +291,11 @@ func TestReviewConstraints_Integration(t *testing.T) {
 
 		// Test invalid rating (if constraints exist in DB schema)
 		invalidReview := models.NewReview(userID, poiID, 10, "Invalid rating", "Content") // Assuming rating should be 1-5
-		invalidReview.ID = uuid.New() // Different ID
+		invalidReview.ID = uuid.New()                                                     // Different ID
 		_, err = testReviewDB.Exec(ctx, query,
 			invalidReview.ID, invalidReview.UserID, invalidReview.POIID, invalidReview.Rating, invalidReview.Title, invalidReview.Content,
 			invalidReview.Helpful, invalidReview.Unhelpful, invalidReview.IsVerified, invalidReview.IsPublished, invalidReview.CreatedAt, invalidReview.UpdatedAt)
-		
+
 		// This should succeed if no constraints, or fail if there are rating constraints
 		// Adjust assertion based on your database schema constraints
 		if err != nil {

@@ -32,10 +32,10 @@ type AuthService interface {
 	UpdatePassword(ctx context.Context, userID, oldPassword, newPassword string) error
 	InvalidateAllUserRefreshTokens(ctx context.Context, userID string) error
 	ValidateRefreshToken(ctx context.Context, refreshToken string) (string, error)
-	GetUserByID(ctx context.Context, userID string) (*types.UserAuth, error)
+	GetUserByID(ctx context.Context, userID string) (*UserAuth, error)
 	VerifyPassword(ctx context.Context, userID, password string) error
-	GenerateTokens(ctx context.Context, user *types.UserAuth, sub *types.Subscription) (accessToken string, refreshToken string, err error)
-	GetOrCreateUserFromProvider(ctx context.Context, provider string, providerUser goth.User) (*types.UserAuth, error)
+	GenerateTokens(ctx context.Context, user *UserAuth, sub *types.Subscription) (accessToken string, refreshToken string, err error)
+	GetOrCreateUserFromProvider(ctx context.Context, provider string, providerUser goth.User) (*UserAuth, error)
 }
 
 // AuthServiceImpl provides the implementation for AuthService.
@@ -253,7 +253,7 @@ func (s *AuthServiceImpl) InvalidateAllUserRefreshTokens(ctx context.Context, us
 	return nil
 }
 
-func (s *AuthServiceImpl) GetUserByID(ctx context.Context, userID string) (*types.UserAuth, error) {
+func (s *AuthServiceImpl) GetUserByID(ctx context.Context, userID string) (*UserAuth, error) {
 	l := s.logger.With(slog.String("method", "GetUserByID"), slog.String("userID", userID))
 	l.DebugContext(ctx, "Fetching user by ID")
 	user, err := s.repo.GetUserByID(ctx, userID)
@@ -266,7 +266,7 @@ func (s *AuthServiceImpl) GetUserByID(ctx context.Context, userID string) (*type
 }
 
 // --- Internal Helper: generateTokens ---
-func (s *AuthServiceImpl) GenerateTokens(ctx context.Context, user *types.UserAuth, _ *types.Subscription) (accessToken string, refreshToken string, err error) {
+func (s *AuthServiceImpl) GenerateTokens(ctx context.Context, user *UserAuth, _ *types.Subscription) (accessToken string, refreshToken string, err error) {
 	l := s.logger.With(slog.String("method", "generateTokens"), slog.String("userID", user.ID))
 
 	// --- Access Token ---
@@ -275,7 +275,7 @@ func (s *AuthServiceImpl) GenerateTokens(ctx context.Context, user *types.UserAu
 	audience := s.getAudience()
 	secretKeyBytes := []byte(s.getSecretKey())
 
-	accessClaims := &types.Claims{ // Use your Claims struct
+	accessClaims := &Claims{ // Use your Claims struct
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(accessTTL)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -363,7 +363,7 @@ func (d *dummySubsRepo) CreateDefaultSubscription(_ context.Context, _ string) e
 func NewDummySubsRepo() types.SubscriptionRepository { return &dummySubsRepo{} }
 
 // provider
-func (s *AuthServiceImpl) GetOrCreateUserFromProvider(ctx context.Context, provider string, providerUser goth.User) (*types.UserAuth, error) {
+func (s *AuthServiceImpl) GetOrCreateUserFromProvider(ctx context.Context, provider string, providerUser goth.User) (*UserAuth, error) {
 	// Check if the user exists based on provider and provider_user_id
 	userID, err := s.repo.GetUserIDByProvider(ctx, provider, providerUser.UserID)
 	if err == nil {
@@ -378,7 +378,7 @@ func (s *AuthServiceImpl) GetOrCreateUserFromProvider(ctx context.Context, provi
 	}
 
 	// Create a new user
-	newUser := &types.UserAuth{
+	newUser := &UserAuth{
 		Username: providerUser.Name,
 		Email:    providerUser.Email,
 		Role:     "user", // Default role

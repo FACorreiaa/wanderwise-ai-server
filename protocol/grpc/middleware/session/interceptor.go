@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -12,12 +11,13 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	grpcCodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/auth"
 )
 
 // SessionType represents different user session types
@@ -42,7 +42,7 @@ type SessionContext struct {
 }
 
 // InterceptorSession creates a gRPC unary server interceptor for session management
-func InterceptorSession(logger *slog.Logger) grpc.UnaryServerInterceptor {
+func InterceptorSession(logger *zap.Logger) grpc.UnaryServerInterceptor {
 	tracer := otel.Tracer("AuthInterceptor")
 
 	return func(
@@ -57,19 +57,14 @@ func InterceptorSession(logger *slog.Logger) grpc.UnaryServerInterceptor {
 		defer span.End()
 
 		logger := logger.With(
-			slog.String("method", info.FullMethod),
-			slog.String("interceptor", "session"),
+			zap.String("method", info.FullMethod),
+			zap.String("interceptor", "session"),
 		)
 
 		// Define unauthenticated methods that don't require tokens
 		unauthenticatedMethods := map[string]bool{
-			"/fitSphere.auth.Auth/Register":         true,
-			"/fitSphere.auth.Auth/Login":            true,
-			"/fitSphere.auth.Auth/GetAllUsers":      true, // Public endpoint
-			"/calculator.Calculator/GetUsersMacros": true, // Public with limits
-			"/CalculatorService/GetUserMacros":      true,
-			"/CalculatorService/GetUserMacrosAll":   true,
-			"/health/check":                         true, // Health check
+			"/ai_poi.auth.v1.AuthService/Login":    true,
+			"/ai_poi.auth.v1.AuthService/Register": true,
 		}
 
 		// Check if method requires authentication
@@ -89,7 +84,7 @@ func InterceptorSession(logger *slog.Logger) grpc.UnaryServerInterceptor {
 				attribute.Int("session.rate_limit", sessionCtx.RateLimit),
 			)
 			span.SetStatus(codes.Ok, "Anonymous session created")
-			logger.InfoContext(ctx, "Anonymous session created for public endpoint")
+			logger.Info("Anonymous session created for public endpoint")
 
 			return handler(ctx, req)
 		}
@@ -99,7 +94,7 @@ func InterceptorSession(logger *slog.Logger) grpc.UnaryServerInterceptor {
 		if !ok {
 			span.RecordError(fmt.Errorf("missing metadata"))
 			span.SetStatus(codes.Error, "Missing metadata")
-			logger.WarnContext(ctx, "Request missing metadata")
+			logger.Warn("Request missing metadata")
 			return nil, status.Error(grpcCodes.Unauthenticated, "missing context metadata")
 		}
 
@@ -121,7 +116,7 @@ func InterceptorSession(logger *slog.Logger) grpc.UnaryServerInterceptor {
 				attribute.Int("session.rate_limit", sessionCtx.RateLimit),
 			)
 			span.SetStatus(codes.Ok, "Limited anonymous session created")
-			logger.InfoContext(ctx, "Limited anonymous session created - no auth token")
+			logger.Info("Limited anonymous session created - no auth token")
 
 			return handler(ctx, req)
 		}
@@ -133,19 +128,19 @@ func InterceptorSession(logger *slog.Logger) grpc.UnaryServerInterceptor {
 		}
 
 		// Parse and validate JWT token
-		claims := &domain.Claims{}
+		claims := &auth.Claims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			// Validate signing method
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
-			return domain.JwtSecretKey, nil
+			return auth.JwtSecretKey, nil
 		})
 
 		if err != nil || !token.Valid {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "Invalid token")
-			logger.WarnContext(ctx, "Invalid or expired token", slog.Any("error", err))
+			logger.Warn("Invalid or expired token", zap.Error(err))
 
 			// Token invalid - treat as anonymous with very limited access
 			sessionCtx := &SessionContext{
@@ -167,7 +162,7 @@ func InterceptorSession(logger *slog.Logger) grpc.UnaryServerInterceptor {
 				return nil, status.Error(grpcCodes.Unauthenticated, "invalid or expired token")
 			}
 
-			logger.InfoContext(ctx, "Invalid token - proceeding with restricted anonymous session")
+			logger.Info("Invalid token - proceeding with restricted anonymous session")
 			return handler(ctx, req)
 		}
 
@@ -189,11 +184,11 @@ func InterceptorSession(logger *slog.Logger) grpc.UnaryServerInterceptor {
 		)
 		span.SetStatus(codes.Ok, "Authenticated session created")
 
-		logger.InfoContext(ctx, "Authenticated session created",
-			slog.String("user_id", claims.UserID),
-			slog.String("role", claims.Role),
-			slog.String("session_type", string(sessionType)),
-			slog.Int("rate_limit", sessionCtx.RateLimit))
+		logger.Info("Authenticated session created",
+			zap.String("user_id", claims.UserID),
+			zap.String("role", claims.Role),
+			zap.String("session_type", string(sessionType)),
+			zap.Int("rate_limit", sessionCtx.RateLimit))
 
 		return handler(ctx, req)
 	}
@@ -218,7 +213,7 @@ func determineSessionType(role, scope string) SessionType {
 }
 
 // createSessionContext creates a session context based on claims and session type
-func createSessionContext(claims *domain.Claims, sessionType SessionType) *SessionContext {
+func createSessionContext(claims *auth.Claims, sessionType SessionType) *SessionContext {
 	sessionCtx := &SessionContext{
 		UserID:      claims.UserID,
 		Role:        claims.Role,

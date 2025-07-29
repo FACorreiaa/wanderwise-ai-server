@@ -9,11 +9,10 @@ import (
 	"strings"
 	"time" // For validating exp claim
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/FACorreiaa/go-poi-au-suggestions/config"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api"
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // Define typed context keys
@@ -66,7 +65,7 @@ func Authenticate(logger *slog.Logger, jwtCfg config.JWTConfig) func(next http.H
 			}
 			tokenString := headerParts[1]
 
-			claims := &types.Claims{}
+			claims := &Claims{}
 			token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 					return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -141,10 +140,10 @@ func GetUserSubStatusFromContext(ctx context.Context) (string, bool) {
 }
 
 // ValidateJWTToken validates a JWT token string and returns the claims
-func ValidateJWTToken(tokenString string, jwtCfg config.JWTConfig) (*types.Claims, error) {
+func ValidateJWTToken(tokenString string, jwtCfg config.JWTConfig) (*Claims, error) {
 	secretKey := []byte(jwtCfg.SecretKey)
 	
-	claims := &types.Claims{}
+	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])

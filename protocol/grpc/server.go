@@ -54,7 +54,7 @@ func BootstrapServer(
 	// Additional interceptors:
 	_, logInterceptor := grpclog.Interceptors(log)
 	_, recoveryInterceptor := grpcrecovery.Interceptors(grpcrecovery.RegisterMetrics(registry))
-	sessionInterceptor := session.InterceptorSession()
+	sessionInterceptor := session.InterceptorSession(log)
 	requestIDInterceptor := grpcrequest.RequestIDMiddleware()
 
 	// Simple rate limiter for demonstration (10 requests/sec, 20 burst).

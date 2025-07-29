@@ -2,34 +2,23 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
 	database "github.com/FACorreiaa/go-poi-au-suggestions/app/db"
+	"github.com/FACorreiaa/go-poi-au-suggestions/app/logger"
 	"github.com/FACorreiaa/go-poi-au-suggestions/app/observability/metrics"
 	"github.com/FACorreiaa/go-poi-au-suggestions/config"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/broker"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/clients"
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/container"
-	"github.com/FACorreiaa/go-poi-au-suggestions/logger"
-	grpcServer "github.com/FACorreiaa/go-poi-au-suggestions/protocol/grpc"
 )
-
-type Dependencies struct {
-	DB              *pgxpool.Pool
-	Container       *container.Container
-	ServiceRegistry *clients.ServiceRegistry
-	HTTPClient      *clients.HTTPClient
-}
 
 func initializeLogger() error {
 	return logger.Init(
@@ -61,45 +50,6 @@ func setupDatabases(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, err
 		zap.String("host", cfg.Repositories.Postgres.Host),
 		zap.String("port", cfg.Repositories.Postgres.Port))
 
-	//// Initialize Redis
-	//redisHost := cfg.Repositories.Redis.Host
-	//if redisHost == "" {
-	//	redisHost = os.Getenv("REDIS_HOST")
-	//	if redisHost == "" {
-	//		redisHost = "localhost"
-	//	}
-	//}
-	//
-	//redisPort := cfg.Repositories.Redis.Port
-	//if redisPort == "" {
-	//	redisPort = os.Getenv("REDIS_PORT")
-	//	if redisPort == "" {
-	//		redisPort = "6379"
-	//	}
-	//}
-	//
-	//redisPassword := cfg.Repositories.Redis.Password
-	//if redisPassword == "" {
-	//	redisPassword = os.Getenv("REDIS_PASSWORD")
-	//}
-	//
-	//redisClient := redis.NewClient(&redis.Options{
-	//	Addr:     fmt.Sprintf("%s:%s", redisHost, redisPort),
-	//	Password: redisPassword,
-	//	DB:       cfg.Repositories.Redis.DB,
-	//})
-	//
-	//// Test Redis connection
-	//_, err = redisClient.Ping(ctx).Result()
-	//if err != nil {
-	//	pool.Close()
-	//	return nil, fmt.Errorf("failed to connect to Redis: %w", err)
-	//}
-
-	//logger.Log.Info("Connected to Redis",
-	//	zap.String("host", redisHost),
-	//	zap.String("port", redisPort))
-
 	if err = database.RunMigrations(dbConfig.ConnectionURL, slogLogger); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
@@ -108,7 +58,7 @@ func setupDatabases(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, err
 	return pool, nil
 }
 
-func startServices(ctx context.Context, cfg *config.Config, deps *Dependencies, reg *prometheus.Registry) error {
+func startServices(ctx context.Context, cfg *config.Config, app *internal.Application, reg *prometheus.Registry) error {
 	errChan := make(chan error, 2)
 
 	// Start gRPC server
@@ -121,67 +71,26 @@ func startServices(ctx context.Context, cfg *config.Config, deps *Dependencies, 
 			}
 		}
 
-		// Get tracer provider from OpenTelemetry
-		// traceProvider := otel.GetTracerProvider()
-
-		server, listener, err := grpcServer.BootstrapServer(grpcPort, logger.Log, reg, nil)
-		if err != nil {
-			logger.Log.Error("Failed to bootstrap gRPC server", zap.Error(err))
-			errChan <- err
-			return
-		}
-
-		// Here you would register your gRPC services
-		// Example: pb.RegisterYourServiceServer(server, yourServiceImpl)
-
-		logger.Log.Info("Starting gRPC server", zap.String("port", grpcPort))
-		if err := server.Serve(listener); err != nil {
+		if err := internal.ServeGRPC(ctx, grpcPort, app, reg); err != nil {
 			logger.Log.Error("gRPC server error", zap.Error(err))
 			errChan <- err
 		}
 	}()
 
-	// Start HTTP server (metrics, health checks, etc.)
+	// Start HTTP server
 	go func() {
 		httpPort := cfg.Server.HTTPPort
 		if httpPort == "" {
 			httpPort = "8080" // default HTTP port
 		}
 
-		// Simple HTTP server for metrics and health
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(200)
-			w.Write([]byte("OK"))
-		})
-		
-		// Service registry endpoints
-		mux.HandleFunc("/services", func(w http.ResponseWriter, r *http.Request) {
-			services := deps.ServiceRegistry.GetAllServices()
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(services)
-		})
-		
-		mux.HandleFunc("/services/stats", func(w http.ResponseWriter, r *http.Request) {
-			stats := deps.ServiceRegistry.GetServiceStats()
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(stats)
-		})
-		
-		mux.HandleFunc("/services/healthy", func(w http.ResponseWriter, r *http.Request) {
-			services := deps.ServiceRegistry.GetHealthyServices()
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(services)
-		})
-
-		logger.Log.Info("Starting HTTP server", zap.String("port", httpPort))
-		if err := http.ListenAndServe(":"+httpPort, mux); err != nil {
+		if err := internal.ServeHTTP(httpPort, app, reg); err != nil {
 			logger.Log.Error("HTTP server error", zap.Error(err))
 			errChan <- err
 		}
 	}()
 
+	// Wait for shutdown signal or error
 	select {
 	case err := <-errChan:
 		return err
@@ -190,41 +99,38 @@ func startServices(ctx context.Context, cfg *config.Config, deps *Dependencies, 
 	}
 }
 
-func run(ctx context.Context, cfg *config.Config) (*Dependencies, error) {
+func run(ctx context.Context, cfg *config.Config, reg *prometheus.Registry) (*internal.Application, error) {
 	pool, err := setupDatabases(ctx, cfg)
 	if err != nil {
 		logger.Log.Error("failed to setup databases", zap.Error(err))
 		return nil, err
 	}
 
-	// For now, we'll create a simple slog adapter from zap
-	// In a real microservices setup, you'd want to standardize on one logger
-	// Create a minimal slog logger for container compatibility
-	slogLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
+	// Initialize broker
+	serviceBroker := broker.NewBroker(cfg, logger.Log, pool, reg)
 
-	c, err := container.NewContainer(cfg, slogLogger)
-	if err != nil {
+	// Create and register all services
+	serviceFactory := broker.NewServiceFactory(serviceBroker, cfg, logger.Log, pool)
+	if err := serviceFactory.CreateAndRegisterServices(); err != nil {
 		pool.Close()
-		logger.Log.Error("failed to create container", zap.Error(err))
+		logger.Log.Error("failed to create services", zap.Error(err))
 		return nil, err
 	}
 
-	// Initialize service registry and HTTP client for inter-service communication
-	serviceRegistry := clients.NewServiceRegistry(cfg, logger.Log)
-	serviceRegistry.InitializeServices()
-	
+	// Start broker services
+	if err := serviceBroker.Start(ctx); err != nil {
+		pool.Close()
+		logger.Log.Error("failed to start broker", zap.Error(err))
+		return nil, err
+	}
+
+	// Initialize HTTP client for inter-service communication (if needed)
 	httpClient := clients.NewHTTPClient(cfg, logger.Log)
 
-	// Start health checks in the background
-	go serviceRegistry.StartHealthChecks(ctx, 30*time.Second)
-
-	return &Dependencies{
-		DB:              pool,
-		Container:       c,
-		ServiceRegistry: serviceRegistry,
-		HTTPClient:      httpClient,
+	return &internal.Application{
+		DB:         pool,
+		Broker:     serviceBroker,
+		HTTPClient: httpClient,
 	}, nil
 }
 
@@ -246,18 +152,22 @@ func main() {
 		return
 	}
 
-	deps, err := run(ctx, cfg)
+	app, err := run(ctx, cfg, reg)
 	if err != nil {
 		logger.Log.Error("failed to run the application", zap.Error(err))
 		return
 	}
+	defer func() {
+		app.DB.Close()
+		if err := app.Broker.Stop(); err != nil {
+			logger.Log.Error("failed to stop broker", zap.Error(err))
+		}
+	}()
 
 	// Initialize metrics
 	metrics.InitAppMetrics()
 
-	if err = startServices(ctx, cfg, deps, reg); err != nil {
+	if err = startServices(ctx, cfg, app, reg); err != nil {
 		logger.Log.Error("service error", zap.Error(err))
 	}
-
-	deps.DB.Close()
 }

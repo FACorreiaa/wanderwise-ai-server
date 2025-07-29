@@ -21,20 +21,20 @@ type MockAuthRepo struct {
 }
 
 // Implement all methods of the AuthRepo interface
-func (m *MockAuthRepo) GetUserByEmail(ctx context.Context, email string) (*types.UserAuth, error) {
+func (m *MockAuthRepo) GetUserByEmail(ctx context.Context, email string) (*UserAuth, error) {
 	args := m.Called(ctx, email)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*types.UserAuth), args.Error(1)
+	return args.Get(0).(*UserAuth), args.Error(1)
 }
 
-func (m *MockAuthRepo) GetUserByID(ctx context.Context, userID string) (*types.UserAuth, error) {
+func (m *MockAuthRepo) GetUserByID(ctx context.Context, userID string) (*UserAuth, error) {
 	args := m.Called(ctx, userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*types.UserAuth), args.Error(1)
+	return args.Get(0).(*UserAuth), args.Error(1)
 }
 
 func (m *MockAuthRepo) Register(ctx context.Context, username, email, hashedPassword string) (string, error) {
@@ -72,7 +72,7 @@ func (m *MockAuthRepo) InvalidateAllUserRefreshTokens(ctx context.Context, userI
 	return args.Error(0)
 }
 
-func (m *MockAuthRepo) CreateUser(ctx context.Context, user *types.UserAuth) error {
+func (m *MockAuthRepo) CreateUser(ctx context.Context, user *UserAuth) error {
 	args := m.Called(ctx, user)
 	return args.Error(0)
 }
@@ -111,7 +111,7 @@ func TestLogin(t *testing.T) {
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		assert.NoError(t, err)
 
-		user := &types.UserAuth{
+		user := &UserAuth{
 			ID:       "user123",
 			Username: "testuser",
 			Email:    email,
@@ -160,7 +160,7 @@ func TestLogin(t *testing.T) {
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte("correctpassword"), bcrypt.DefaultCost)
 		assert.NoError(t, err)
 
-		user := &types.UserAuth{
+		user := &UserAuth{
 			ID:       "user123",
 			Username: "testuser",
 			Email:    email,
@@ -307,7 +307,7 @@ func TestRefreshSession(t *testing.T) {
 		refreshToken := "valid-refresh-token"
 		userID := "user123"
 
-		user := &types.UserAuth{
+		user := &UserAuth{
 			ID:       userID,
 			Username: "testuser",
 			Email:    "test@example.com",
@@ -377,7 +377,7 @@ func TestRefreshSession(t *testing.T) {
 		userID := "user123"
 		expectedError := errors.New("database error")
 
-		user := &types.UserAuth{
+		user := &UserAuth{
 			ID:       userID,
 			Username: "testuser",
 			Email:    "test@example.com",
@@ -407,7 +407,7 @@ func TestRefreshSession(t *testing.T) {
 		userID := "user123"
 		expectedError := errors.New("database error")
 
-		user := &types.UserAuth{
+		user := &UserAuth{
 			ID:       userID,
 			Username: "testuser",
 			Email:    "test@example.com",
@@ -601,7 +601,7 @@ func TestGetUserByID(t *testing.T) {
 		ctx := context.Background()
 		userID := "user123"
 
-		expectedUser := &types.UserAuth{
+		expectedUser := &UserAuth{
 			ID:       userID,
 			Username: "testuser",
 			Email:    "test@example.com",
