@@ -19,11 +19,10 @@ import (
 	poiDomain "github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/poi"
 	profilesDomain "github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/profiles"
 	tagsDomain "github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/tags"
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 type IntentClassifier interface {
-	Classify(ctx context.Context, message string) (types.IntentType, error)
+	Classify(ctx context.Context, message string) (IntentType, error)
 }
 
 type Service struct {
@@ -45,7 +44,7 @@ type Service struct {
 	cache             *cache.Cache
 
 	// Events
-	deadLetterCh     chan types.StreamEvent
+	deadLetterCh     chan StreamEvent
 	intentClassifier IntentClassifier
 }
 
@@ -91,21 +90,43 @@ func NewService(
 		cityRepo:          cityRepo,
 		poiRepo:           poiRepo,
 		cache:             cacheInstance,
-		deadLetterCh:      make(chan types.StreamEvent, 100),
-		intentClassifier:  &types.SimpleIntentClassifier{},
+		deadLetterCh:      make(chan StreamEvent, 100),
+		intentClassifier:  &SimpleIntentClassifier{},
 	}
 
-	// Start background processes
 	go service.processDeadLetterQueue()
 
 	return service, nil
 }
 
-func (s *Service) processDeadLetterQueue() {
-	for event := range s.deadLetterCh {
-		s.logger.Warn("Processing dead letter event",
-			zap.String("event_type", string(event.Type)),
-			zap.Any("event_data", event.Data))
-		// Handle dead letter events
-	}
+func (svc *Service) StartChatStream(ctx context.Context, req *pb.StartChatRequest) (*pb.ChatEvent, error) {
+	return nil, nil
+}
+
+func (svc *Service) ContinueChatStream(ctx context.Context, req *pb.ContinueChatRequest) (*pb.ChatEvent, error) {
+	return nil, nil
+}
+
+func (svc *Service) FreeChatStream(ctx context.Context, req *pb.FreeChatRequest) (*pb.ChatEvent, error) {
+	return nil, nil
+}
+
+func (svc *Service) GetChatSessions(ctx context.Context, req *pb.GetChatSessionsRequest) (*pb.GetChatSessionsResponse, error) {
+	return &pb.GetChatSessionsResponse{}, nil
+}
+
+func (svc *Service) SaveItinerary(ctx context.Context, req *pb.SaveItineraryRequest) (*pb.SaveItineraryResponse, error) {
+	return &pb.SaveItineraryResponse{}, nil
+}
+
+func (svc *Service) GetSavedItineraries(ctx context.Context, req *pb.GetSavedItinerariesRequest) (*pb.GetSavedItinerariesResponse, error) {
+	return &pb.GetSavedItinerariesResponse{}, nil
+}
+
+func (svc *Service) RemoveItinerary(ctx context.Context, req *pb.RemoveItineraryRequest) (*pb.RemoveItineraryResponse, error) {
+	return &pb.RemoveItineraryResponse{}, nil
+}
+
+func (svc *Service) GetPOIDetails(ctx context.Context, req *pb.GetPOIDetailsRequest) (*pb.GetPOIDetailsResponse, error) {
+	return &pb.GetPOIDetailsResponse{}, nil
 }

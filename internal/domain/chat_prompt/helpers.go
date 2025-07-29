@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/poi"
 )
 
 func generatePOICacheKey(city string, lat, lon, distance float64, userID uuid.UUID) string {
@@ -66,37 +68,6 @@ func cleanJSONResponse(response string) string {
 	jsonPortion = strings.ReplaceAll(jsonPortion, "`", "")
 
 	return strings.TrimSpace(jsonPortion)
-}
-
-// extractPOIName extracts the full POI name from the message
-func extractPOIName(message string) string {
-	// Remove common words and keep the rest as the POI name
-	words := strings.Fields(strings.ToLower(message))
-	filtered := []string{}
-	stopWords := map[string]bool{
-		"add": true, "remove": true, "to": true, "from": true, "my": true,
-		"itinerary": true, "with": true, "replace": true, "the": true, "in": true,
-	}
-	for _, w := range words {
-		if !stopWords[w] {
-			filtered = append(filtered, w)
-		}
-	}
-	if len(filtered) == 0 {
-		return "Unknown POI"
-	}
-	// Capitalize each word for proper formatting
-	// cases.Title
-	// use this https://pkg.go.dev/golang.org/x/text/cases later and handle language as well
-	// TODO: Replace with golang.org/x/text/cases.Title for proper Unicode support
-	// For now, use a simple manual title case implementation
-	words = strings.Split(strings.Join(filtered, " "), " ")
-	for i, word := range words {
-		if len(word) > 0 {
-			words[i] = strings.ToUpper(word[:1]) + strings.ToLower(word[1:])
-		}
-	}
-	return strings.Join(words, " ")
 }
 
 // helpers
@@ -235,7 +206,7 @@ func (l *Service) handleItineraryFromResponse(
 
 func (l *Service) handleHotelsFromResponse(ctx context.Context, content string, cityID, _, llmInteractionID uuid.UUID) {
 	var hotelData struct {
-		Hotels []HotelDetailedInfo `json:"hotels"`
+		Hotels []poi.HotelDetailedInfo `json:"hotels"`
 	}
 	if err := json.Unmarshal([]byte(cleanJSONResponse(content)), &hotelData); err != nil {
 		l.logger.Error("Failed to parse hotels from unified response", zap.Error(err))
@@ -256,7 +227,7 @@ func (l *Service) handleHotelsFromResponse(ctx context.Context, content string, 
 
 func (l *Service) handleRestaurantsFromResponse(ctx context.Context, content string, cityID, _, llmInteractionID uuid.UUID) {
 	var restaurantData struct {
-		Restaurants []RestaurantDetailedInfo `json:"restaurants"`
+		Restaurants []poi.RestaurantDetailedInfo `json:"restaurants"`
 	}
 	if err := json.Unmarshal([]byte(cleanJSONResponse(content)), &restaurantData); err != nil {
 		l.logger.Error("Failed to parse restaurants from unified response", zap.Error(err))
@@ -273,61 +244,4 @@ func (l *Service) handleRestaurantsFromResponse(ctx context.Context, content str
 	}
 	l.logger.Info("Saved restaurants from unified response",
 		zap.Int("restaurant_count", len(restaurantData.Restaurants)))
-}
-
-func (l *Service) HandlePersonalisedPOIs(ctx context.Context, pois []POIDetailedInfo, cityID uuid.UUID, userLocation *UserLocation, llmInteractionID uuid.UUID, userID, profileID uuid.UUID) ([]POIDetailedInfo, error) {
-	if userLocation == nil || len(pois) == 0 {
-		return pois, nil // No sorting possible
-	}
-
-	if cityID == uuid.Nil {
-		l.logger.Warn("Skipping itinerary creation due to invalid cityID",
-			zap.String("cityID", cityID.String()))
-		return pois, nil
-	}
-
-	err := l.repo.SaveLlmSuggestedPOIsBatch(ctx, pois, userID, profileID, llmInteractionID, cityID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to save personalised POIs: %w", err)
-	}
-
-	itineraryID, err := l.poiRepo.SaveItinerary(ctx, userID, cityID)
-	if err != nil {
-		l.logger.Error("Failed to save itinerary, skipping itinerary creation",
-			zap.Any("error", err),
-			zap.String("cityID", cityID.String()),
-			zap.String("userID", userID.String()))
-		// Don't return error, just skip itinerary creation and continue with POI processing
-		return pois, nil
-	}
-
-	if err := l.poiRepo.SaveItineraryPOIs(ctx, itineraryID, pois); err != nil {
-		return nil, fmt.Errorf("failed to save itinerary POIs: %w", err)
-	}
-
-	sortedPois, err := l.repo.GetLlmSuggestedPOIsByInteractionSortedByDistance(ctx, llmInteractionID, cityID, *userLocation)
-	if err != nil {
-		l.logger.Error("Failed to fetch sorted POIs",
-			zap.Any("error", err))
-		return pois, nil // Return unsorted POIs
-	}
-	return sortedPois, nil
-}
-
-func (l *Service) HandleGeneralPOIs(ctx context.Context, pois []POIDetailedInfo, cityID uuid.UUID) {
-	for _, p := range pois {
-		existingPoi, err := l.poiRepo.FindPoiByNameAndCity(ctx, p.Name, cityID)
-		if err != nil {
-			l.logger.Warn("Failed to check POI existence",
-				zap.String("poi_name", p.Name), zap.Any("error", err))
-			continue
-		}
-		if existingPoi == nil {
-			_, err = l.poiRepo.SavePoi(ctx, p, cityID)
-			if err != nil {
-				l.logger.Warn("Failed to save POI",
-					zap.String("poi_name", p.Name), zap.Any("error", err))
-			}
-		}
-	}
 }

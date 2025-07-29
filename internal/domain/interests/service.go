@@ -10,8 +10,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
-
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
 type Service struct {
@@ -180,7 +178,7 @@ func (svc *Service) UpdateInterest(ctx context.Context, req *pb.UpdateInterestRe
 		}, err
 	}
 
-	updateParams := types.UpdateinterestsParams{
+	updateParams := UpdateinterestsParams{
 		Name:        &req.Interest.Name,
 		Description: &req.Interest.Description,
 		Active:      &req.Interest.Active,
@@ -306,7 +304,7 @@ func (svc *Service) RemoveInterest(ctx context.Context, req *pb.RemoveInterestRe
 	}, nil
 }
 
-func convertToPBInterest(interest *types.Interest) *pb.Interest {
+func convertToPBInterest(interest *Interest) *pb.Interest {
 	pbInterest := &pb.Interest{
 		Id:          interest.ID.String(),
 		Name:        interest.Name,

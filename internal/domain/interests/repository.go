@@ -17,19 +17,19 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain"
 )
 
 var _ Repository = (*RepositoryImpl)(nil)
 
 type Repository interface {
-	CreateInterest(ctx context.Context, name string, description *string, isActive bool, userID string) (*types.Interest, error)
+	CreateInterest(ctx context.Context, name string, description *string, isActive bool, userID string) (*Interest, error)
 	RemoveInterests(ctx context.Context, userID uuid.UUID, interestID uuid.UUID) error
-	GetAllInterests(ctx context.Context) ([]*types.Interest, error)
-	GetInterest(ctx context.Context, interestID uuid.UUID) (*types.Interest, error)
-	UpdateInterests(ctx context.Context, userID uuid.UUID, interestID uuid.UUID, params types.UpdateinterestsParams) error
+	GetAllInterests(ctx context.Context) ([]*Interest, error)
+	GetInterest(ctx context.Context, interestID uuid.UUID) (*Interest, error)
+	UpdateInterests(ctx context.Context, userID uuid.UUID, interestID uuid.UUID, params UpdateinterestsParams) error
 	AddInterestToProfile(ctx context.Context, profileID, interestID uuid.UUID) error
-	GetInterestsForProfile(ctx context.Context, profileID uuid.UUID) ([]*types.Interest, error)
+	GetInterestsForProfile(ctx context.Context, profileID uuid.UUID) ([]*Interest, error)
 }
 
 type RepositoryImpl struct {
@@ -45,7 +45,7 @@ func NewRepositoryImpl(pgxpool *pgxpool.Pool, logger *zap.Logger) *RepositoryImp
 }
 
 // CreateInterest implements user.CreateInterest
-func (r *RepositoryImpl) CreateInterest(ctx context.Context, name string, description *string, isActive bool, userID string) (*types.Interest, error) {
+func (r *RepositoryImpl) CreateInterest(ctx context.Context, name string, description *string, isActive bool, userID string) (*Interest, error) {
 	ctx, span := otel.Tracer("UserRepo").Start(ctx, "CreateInterest", trace.WithAttributes(
 		semconv.DBSystemPostgreSQL,
 		attribute.String("db.operation", "INSERT"),
@@ -61,10 +61,10 @@ func (r *RepositoryImpl) CreateInterest(ctx context.Context, name string, descri
 	// Input validation basic check
 	if name == "" {
 		span.SetStatus(codes.Error, "Interest name cannot be empty")
-		return nil, fmt.Errorf("interest name cannot be empty: %w", types.ErrBadRequest) // Example domain error
+		return nil, fmt.Errorf("interest name cannot be empty: %w", domain.ErrBadRequest) // Example domain error
 	}
 
-	var interest types.Interest
+	var interest Interest
 	query := `
         INSERT INTO user_custom_interests (name, description, active, created_at, updated_at, user_id)
         VALUES ($1, $2, $3, Now(), Now(), $4)
@@ -89,7 +89,7 @@ func (r *RepositoryImpl) CreateInterest(ctx context.Context, name string, descri
 			l.Warn("Attempted to create interest with duplicate name", zap.Error(err))
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "Duplicate interest name")
-			return nil, fmt.Errorf("interest with name '%s' already exists: %w", name, types.ErrConflict)
+			return nil, fmt.Errorf("interest with name '%s' already exists: %w", name, domain.ErrConflict)
 		}
 		// Handle other potential errors
 		l.Error("Failed to insert new interest", zap.Error(err))
@@ -131,7 +131,7 @@ func (r *RepositoryImpl) RemoveInterests(ctx context.Context, userID uuid.UUID, 
 		l.Warn("Attempted to remove non-existent user interest association")
 		// Return an error so the service/HandlerImpl knows the operation didn't change anything
 		span.SetStatus(codes.Error, "Association not found")
-		return fmt.Errorf("interest association not found: %w", types.ErrNotFound)
+		return fmt.Errorf("interest association not found: %w", domain.ErrNotFound)
 	}
 
 	l.Info("User interest removed successfully")
@@ -141,7 +141,7 @@ func (r *RepositoryImpl) RemoveInterests(ctx context.Context, userID uuid.UUID, 
 
 // GetAllInterests TODO does it make sense to only return the active interests ? Just mark active on the UI ?
 // GetAllInterests implements user.UserRepo.
-func (r *RepositoryImpl) GetAllInterests(ctx context.Context) ([]*types.Interest, error) {
+func (r *RepositoryImpl) GetAllInterests(ctx context.Context) ([]*Interest, error) {
 	ctx, span := otel.Tracer("UserRepo").Start(ctx, "GetAllInterests", trace.WithAttributes(
 		semconv.DBSystemPostgreSQL,
 		attribute.String("db.sql.table", "interests"),
@@ -170,9 +170,9 @@ func (r *RepositoryImpl) GetAllInterests(ctx context.Context) ([]*types.Interest
 	}
 	defer rows.Close()
 
-	var interests []*types.Interest
+	var interests []*Interest
 	for rows.Next() {
-		var i types.Interest
+		var i Interest
 		err := rows.Scan(
 			&i.ID, &i.Name, &i.Description, &i.Active, &i.CreatedAt, &i.UpdatedAt, &i.Source,
 		)
@@ -196,7 +196,7 @@ func (r *RepositoryImpl) GetAllInterests(ctx context.Context) ([]*types.Interest
 }
 
 // GetUserEnhancedInterests implements user.UserRepo.
-//func (r *RepositoryImpl) GetUserEnhancedInterests(ctx context.Context, userID uuid.UUID) ([]types.EnhancedInterest, error) {
+//func (r *RepositoryImpl) GetUserEnhancedInterests(ctx context.Context, userID uuid.UUID) ([]EnhancedInterest, error) {
 //	ctx, span := otel.Tracer("UserRepo").Start(ctx, "GetUserEnhancedInterests", trace.WithAttributes(
 //		semconv.DBSystemPostgreSQL,
 //		attribute.String("db.sql.table", "user_custom_interests, interests"),
@@ -223,9 +223,9 @@ func (r *RepositoryImpl) GetAllInterests(ctx context.Context) ([]*types.Interest
 //	}
 //	defer rows.Close()
 //
-//	var interests []types.EnhancedInterest
+//	var interests []EnhancedInterest
 //	for rows.Next() {
-//		var i types.EnhancedInterest
+//		var i EnhancedInterest
 //		err := rows.Scan(
 //			&i.ID, &i.Name, &i.Description, &i.Active, &i.CreatedAt, &i.UpdatedAt, &i.PreferenceLevel,
 //		)
@@ -248,7 +248,7 @@ func (r *RepositoryImpl) GetAllInterests(ctx context.Context) ([]*types.Interest
 //	return interests, nil
 //}
 
-func (r *RepositoryImpl) UpdateInterests(ctx context.Context, userID uuid.UUID, interestID uuid.UUID, params types.UpdateinterestsParams) error {
+func (r *RepositoryImpl) UpdateInterests(ctx context.Context, userID uuid.UUID, interestID uuid.UUID, params UpdateinterestsParams) error {
 	ctx, span := otel.Tracer("UserRepo").Start(ctx, "UpdateUserCustomInterest", trace.WithAttributes(
 		semconv.DBSystemPostgreSQL,
 		attribute.String("db.operation", "UPDATE"),
@@ -276,7 +276,7 @@ func (r *RepositoryImpl) UpdateInterests(ctx context.Context, userID uuid.UUID, 
 			err := errors.New("custom interest name cannot be empty")
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "Invalid input: empty name")
-			return fmt.Errorf("%w: %w", types.ErrBadRequest, err)
+			return fmt.Errorf("%w: %w", domain.ErrBadRequest, err)
 		}
 		setClauses = append(setClauses, fmt.Sprintf("name = $%d", argID))
 		args = append(args, *params.Name)
@@ -301,7 +301,7 @@ func (r *RepositoryImpl) UpdateInterests(ctx context.Context, userID uuid.UUID, 
 	if len(setClauses) == 0 {
 		l.Info("No fields provided to update custom interest")
 		span.SetStatus(codes.Ok, "No update fields")
-		return nil // Or return types.ErrBadRequest("no fields provided for update")
+		return nil // Or return ErrBadRequest("no fields provided for update")
 	}
 
 	// Always update updated_at
@@ -336,7 +336,7 @@ func (r *RepositoryImpl) UpdateInterests(ctx context.Context, userID uuid.UUID, 
 			l.Warn("Attempted to update custom interest to a duplicate name for this user", zap.Error(err))
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "Duplicate custom interest name")
-			return fmt.Errorf("you already have a custom interest named '%s': %w", *params.Name, types.ErrConflict)
+			return fmt.Errorf("you already have a custom interest named '%s': %w", *params.Name, domain.ErrConflict)
 		}
 		// Handle other potential errors
 		l.Error("Failed to execute update custom interest query", zap.Error(err))
@@ -350,7 +350,7 @@ func (r *RepositoryImpl) UpdateInterests(ctx context.Context, userID uuid.UUID, 
 		l.Warn("Custom interest not found for update or user mismatch", zap.Int64("rows_affected", tag.RowsAffected()))
 		span.SetStatus(codes.Error, "Custom interest not found or permission denied")
 		// It's crucial to return NotFound here, as the combination wasn't found
-		return fmt.Errorf("custom interest with ID %s not found for user %s: %w", interestID.String(), userID.String(), types.ErrNotFound)
+		return fmt.Errorf("custom interest with ID %s not found for user %s: %w", interestID.String(), userID.String(), domain.ErrNotFound)
 	}
 
 	l.Info("User custom interest updated successfully")
@@ -358,8 +358,8 @@ func (r *RepositoryImpl) UpdateInterests(ctx context.Context, userID uuid.UUID, 
 	return nil
 }
 
-func (r *RepositoryImpl) GetInterest(ctx context.Context, interestID uuid.UUID) (*types.Interest, error) {
-	var interest types.Interest
+func (r *RepositoryImpl) GetInterest(ctx context.Context, interestID uuid.UUID) (*Interest, error) {
+	var interest Interest
 	ctx, span := otel.Tracer("UserRepo").Start(ctx, "GetInterest", trace.WithAttributes(
 		semconv.DBSystemPostgreSQL,
 		attribute.String("db.sql.table", "interests"),
@@ -431,7 +431,7 @@ func (r *RepositoryImpl) AddInterestToProfile(ctx context.Context, profileID, in
 }
 
 // GetInterestsForProfile retrieves all interests associated with a profile
-func (r *RepositoryImpl) GetInterestsForProfile(ctx context.Context, profileID uuid.UUID) ([]*types.Interest, error) {
+func (r *RepositoryImpl) GetInterestsForProfile(ctx context.Context, profileID uuid.UUID) ([]*Interest, error) {
 	ctx, span := otel.Tracer("UserRepo").Start(ctx, "GetInterestsForProfile", trace.WithAttributes(
 		semconv.DBSystemPostgreSQL,
 		attribute.String("db.operation", "SELECT"),
@@ -458,9 +458,9 @@ func (r *RepositoryImpl) GetInterestsForProfile(ctx context.Context, profileID u
 	}
 	defer rows.Close()
 
-	var interests []*types.Interest
+	var interests []*Interest
 	for rows.Next() {
-		var interest types.Interest
+		var interest Interest
 		err := rows.Scan(
 			&interest.ID,
 			&interest.Name,

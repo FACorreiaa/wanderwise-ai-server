@@ -337,7 +337,7 @@ FROM (
              llmsp.price_level,
              'llm' as poi_source
          FROM user_favorite_llm_pois uflp
-                  INNER JOIN llm_suggested_pois as llmsp ON uflp.llm_poi_id = llm_suggested_pois.id
+                  INNER JOIN llm_suggested_pois as llmsp ON uflp.llm_poi_id = llmsp.id
          WHERE uflp.user_id = $1
      ) combined_favorites
 ORDER BY added_at DESC;
