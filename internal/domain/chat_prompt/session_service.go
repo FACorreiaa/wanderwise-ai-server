@@ -12,10 +12,11 @@ import (
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/genai"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/poi"
 )
 
 func (l *Service) ContinueSessionStreamed(
@@ -31,7 +32,7 @@ func (l *Service) ContinueSessionStreamed(
 
 	l.logger.Debug("Continuing streamed chat session", zap.String("sessionID", sessionID.String()), zap.String("message", message))
 
-	session, err := l.llmInteractionRepo.GetSession(ctx, sessionID)
+	session, err := l.repo.GetSession(ctx, sessionID)
 	if err != nil {
 		err = fmt.Errorf("failed to get session %s: %w", sessionID, err)
 		l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeError, Error: err.Error(), IsFinal: true}, 3)
@@ -63,7 +64,7 @@ func (l *Service) ContinueSessionStreamed(
 	userMessage := ConversationMessage{
 		ID: uuid.New(), Role: RoleUser, Content: message, Timestamp: time.Now(), MessageType: TypeModificationRequest,
 	}
-	if err := l.llmInteractionRepo.AddMessageToSession(ctx, sessionID, userMessage); err != nil {
+	if err := l.repo.AddMessageToSession(ctx, sessionID, userMessage); err != nil {
 		l.logger.Warn("Failed to persist user message, continuing with in-memory history", zap.Error(err))
 		span.RecordError(err, trace.WithAttributes(attribute.String("warning", "User message DB save failed")))
 	}
@@ -188,7 +189,7 @@ func (l *Service) ContinueSessionStreamed(
 		l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeProgress, Data: "Sorting updated POIs by distance..."}, 3)
 		for i, p := range session.CurrentItinerary.AIItineraryResponse.PointsOfInterest {
 			if p.ID == uuid.Nil {
-				dbPoiID, saveErr := l.llmInteractionRepo.SaveSinglePOI(ctx, p, session.UserID, cityID, p.LlmInteractionID)
+				dbPoiID, saveErr := l.repo.SaveSinglePOI(ctx, p, session.UserID, cityID, p.LlmInteractionID)
 				if saveErr != nil {
 					l.logger.Warn("Failed to save new POI", zap.String("name", p.Name), zap.Error(saveErr))
 					continue
@@ -198,7 +199,7 @@ func (l *Service) ContinueSessionStreamed(
 		}
 
 		if (intent == IntentAddPOI || intent == IntentModifyItinerary) && userLocation != nil && userLocation.UserLat != 0 && userLocation.UserLon != 0 {
-			sortedPOIs, err := l.llmInteractionRepo.GetPOIsBySessionSortedByDistance(ctx, sessionID, cityID, *userLocation)
+			sortedPOIs, err := l.repo.GetPOIsBySessionSortedByDistance(ctx, sessionID, cityID, *userLocation)
 			if err != nil {
 				l.logger.Warn("Failed to sort POIs by distance", zap.Error(err))
 				span.RecordError(err)
@@ -214,14 +215,14 @@ func (l *Service) ContinueSessionStreamed(
 	assistantMessage := ConversationMessage{
 		ID: uuid.New(), Role: RoleAssistant, Content: finalResponseMessage, Timestamp: time.Now(), MessageType: assistantMessageType,
 	}
-	if err := l.llmInteractionRepo.AddMessageToSession(ctx, sessionID, assistantMessage); err != nil {
+	if err := l.repo.AddMessageToSession(ctx, sessionID, assistantMessage); err != nil {
 		l.logger.Warn("Failed to save assistant message", zap.Error(err))
 	}
 	session.ConversationHistory = append(session.ConversationHistory, assistantMessage)
 
 	session.UpdatedAt = time.Now()
 	session.ExpiresAt = time.Now().Add(24 * time.Hour)
-	if err := l.llmInteractionRepo.UpdateSession(ctx, *session); err != nil {
+	if err := l.repo.UpdateSession(ctx, *session); err != nil {
 		err = fmt.Errorf("failed to update session %s: %w", sessionID, err)
 		l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeError, Error: err.Error(), IsFinal: true}, 3)
 		return err
@@ -256,7 +257,7 @@ func (l *Service) generatePOIDataStream(
 	ctx context.Context, poiName, cityName string,
 	userLocation *UserLocation, userID, cityID uuid.UUID,
 	eventCh chan<- StreamEvent,
-) (POIDetailedInfo, error) {
+) (poi.POIDetailedInfo, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "generatePOIDataStream",
 		trace.WithAttributes(attribute.String("p.name", poiName), attribute.String("city.name", cityName)))
 	defer span.End()
@@ -274,7 +275,7 @@ func (l *Service) generatePOIDataStream(
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
 		}, 3)
-		return POIDetailedInfo{}, fmt.Errorf("AI stream init failed for POI '%s': %w", poiName, err)
+		return poi.POIDetailedInfo{}, fmt.Errorf("AI stream init failed for POI '%s': %w", poiName, err)
 	}
 
 	l.sendEvent(ctx, eventCh, StreamEvent{
@@ -292,7 +293,7 @@ func (l *Service) generatePOIDataStream(
 				Timestamp: time.Now(),
 				EventID:   uuid.New().String(),
 			}, 3)
-			return POIDetailedInfo{}, fmt.Errorf("streaming POI details for '%s' failed: %w", poiName, err)
+			return poi.POIDetailedInfo{}, fmt.Errorf("streaming POI details for '%s' failed: %w", poiName, err)
 		}
 		for _, cand := range resp.Candidates {
 			if cand.Content != nil {
@@ -318,7 +319,7 @@ func (l *Service) generatePOIDataStream(
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
 		}, 3)
-		return POIDetailedInfo{}, fmt.Errorf("context cancelled during POI detail generation: %w", ctx.Err())
+		return poi.POIDetailedInfo{}, fmt.Errorf("context cancelled during POI detail generation: %w", ctx.Err())
 	}
 
 	fullText := responseTextBuilder.String()
@@ -329,7 +330,7 @@ func (l *Service) generatePOIDataStream(
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
 		}, 3)
-		return POIDetailedInfo{Name: poiName, DescriptionPOI: "Details not found."}, fmt.Errorf("empty response for POI details '%s'", poiName)
+		return poi.POIDetailedInfo{Name: poiName, DescriptionPOI: "Details not found."}, fmt.Errorf("empty response for POI details '%s'", poiName)
 	}
 
 	interaction := LlmInteraction{
@@ -347,14 +348,14 @@ func (l *Service) generatePOIDataStream(
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
 		}, 3)
-		return POIDetailedInfo{}, fmt.Errorf("failed to save LLM interaction: %w", err)
+		return poi.POIDetailedInfo{}, fmt.Errorf("failed to save LLM interaction: %w", err)
 	}
 
 	cleanJSON := cleanJSONResponse(fullText)
-	var poiData POIDetailedInfo
+	var poiData poi.POIDetailedInfo
 	if err := json.Unmarshal([]byte(cleanJSON), &poiData); err != nil || poiData.Name == "" {
 		l.logger.Warn("Invalid POI data from LLM", zap.String("response", fullText), zap.Error(err))
-		poiData = POIDetailedInfo{
+		poiData = poi.POIDetailedInfo{
 			ID:             uuid.New(),
 			Name:           poiName,
 			Category:       "Attraction",
@@ -367,7 +368,7 @@ func (l *Service) generatePOIDataStream(
 	poiData.LlmInteractionID = llmInteractionID
 	poiData.City = cityName
 
-	dbPoiID, err := l.llmInteractionRepo.SaveSinglePOI(ctx, poiData, userID, cityID, llmInteractionID)
+	dbPoiID, err := l.repo.SaveSinglePOI(ctx, poiData, userID, cityID, llmInteractionID)
 	if err != nil {
 		l.logger.Warn("Failed to save POI to database", zap.Error(err))
 		span.RecordError(err)
@@ -377,7 +378,7 @@ func (l *Service) generatePOIDataStream(
 			Timestamp: time.Now(),
 			EventID:   uuid.New().String(),
 		}, 3)
-		return POIDetailedInfo{}, fmt.Errorf("failed to save POI to database: %w", err)
+		return poi.POIDetailedInfo{}, fmt.Errorf("failed to save POI to database: %w", err)
 	}
 	poiData.ID = dbPoiID
 
@@ -400,7 +401,7 @@ func (l *Service) generatePOIDataStream(
 	return poiData, nil
 }
 
-func (l *Service) handleSemanticAddPOIStreamed(ctx context.Context, message string, session *ChatSession, semanticPOIs []POIDetailedInfo, userLocation *UserLocation, cityID uuid.UUID, eventCh chan<- StreamEvent) (string, error) {
+func (l *Service) handleSemanticAddPOIStreamed(ctx context.Context, message string, session *ChatSession, semanticPOIs []poi.POIDetailedInfo, userLocation *UserLocation, cityID uuid.UUID, eventCh chan<- StreamEvent) (string, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "handleSemanticAddPOIStreamed")
 	defer span.End()
 

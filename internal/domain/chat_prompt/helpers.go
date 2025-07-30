@@ -70,10 +70,6 @@ func cleanJSONResponse(response string) string {
 	return strings.TrimSpace(jsonPortion)
 }
 
-// helpers
-// TODO: These methods need to be properly implemented with correct method calls and types
-// They are commented out for now to avoid compilation errors
-
 func (l *Service) ProcessAndSaveUnifiedResponse(
 	ctx context.Context,
 	responses map[string]*strings.Builder,
@@ -170,7 +166,7 @@ func (l *Service) ProcessAndSaveUnifiedResponseFree(
 
 func (l *Service) handleGeneralPoisFromResponse(ctx context.Context, content string, cityID uuid.UUID) {
 	var poiData struct {
-		PointsOfInterest []POIDetailedInfo `json:"points_of_interest"`
+		PointsOfInterest []poi.POIDetailedInfo `json:"points_of_interest"`
 	}
 	if err := json.Unmarshal([]byte(cleanJSONResponse(content)), &poiData); err != nil {
 		l.logger.Error("Failed to parse general POIs from unified response", zap.Error(err))
@@ -188,9 +184,9 @@ func (l *Service) handleItineraryFromResponse(
 	userLocation *UserLocation,
 ) {
 	var itineraryData struct {
-		ItineraryName      string            `json:"itinerary_name"`
-		OverallDescription string            `json:"overall_description"`
-		PointsOfInterest   []POIDetailedInfo `json:"points_of_interest"`
+		ItineraryName      string                `json:"itinerary_name"`
+		OverallDescription string                `json:"overall_description"`
+		PointsOfInterest   []poi.POIDetailedInfo `json:"points_of_interest"`
 	}
 	if err := json.Unmarshal([]byte(cleanJSONResponse(content)), &itineraryData); err != nil {
 		l.logger.Error("Failed to parse itinerary from unified response", zap.Error(err))

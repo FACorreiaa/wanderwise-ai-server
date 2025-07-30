@@ -23,7 +23,7 @@ import (
 )
 
 func (l *Service) ProcessUnifiedChatMessageStream(ctx context.Context, userID, profileID uuid.UUID, cityName, message string, userLocation *UserLocation, eventCh chan<- StreamEvent) error {
-	startTime := time.Now()
+	//startTime := time.Now()
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "ProcessUnifiedChatMessageStream", trace.WithAttributes(
 		attribute.String("message", message),
 	))
@@ -82,7 +82,7 @@ func (l *Service) ProcessUnifiedChatMessageStream(ctx context.Context, userID, p
 		ExpiresAt: time.Now().Add(24 * time.Hour),
 		Status:    "active",
 	}
-	if err := l.llmInteractionRepo.CreateSession(ctx, session); err != nil {
+	if err := l.repo.CreateSession(ctx, session); err != nil {
 		span.RecordError(err)
 		l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeError, Error: err.Error()}, 3)
 		return fmt.Errorf("failed to create session: %w", err)
@@ -230,83 +230,85 @@ func (l *Service) ProcessUnifiedChatMessageStream(ctx context.Context, userID, p
 			}, 3)
 		}
 		closeOnce.Do(func() {
-			close(eventCh)
-			l.logger.Info("Event channel closed by completion goroutine")
+			// Don't close eventCh here - it's managed by the caller
+			// close(eventCh)
+			l.logger.Info("Event processing completed by completion goroutine")
 		})
 	}()
 
-	go func() {
-		asyncCtx := context.Background()
-
-		var fullResponseBuilder strings.Builder
-		responsesMutex.Lock()
-		cityDataContent := ""
-		if responses["city_data"] != nil {
-			cityDataContent = responses["city_data"].String()
-		}
-		for partType, builder := range responses {
-			if builder != nil && builder.Len() > 0 {
-				fullResponseBuilder.WriteString(fmt.Sprintf("[%s]\n%s\n\n", partType, builder.String()))
-			}
-		}
-		responsesMutex.Unlock()
-
-		fullResponse := fullResponseBuilder.String()
-		if fullResponse == "" {
-			fullResponse = fmt.Sprintf("Processed %s request for %s", domain, cityName)
-		}
-
-		var cityID uuid.UUID
-		if cityDataContent != "" {
-			if parsedCityData, parseErr := l.parseCityDataFromResponse(asyncCtx, cityDataContent); parseErr == nil && parsedCityData != nil {
-				if savedCityID, handleErr := l.HandleCityData(asyncCtx, *parsedCityData); handleErr != nil {
-					l.logger.Warn("Failed to save city data during unified stream processing",
-						zap.String("city", cityName), zap.Error(handleErr))
-				} else {
-					l.logger.Info("Successfully saved city data during unified stream processing",
-						zap.String("city", cityName))
-					cityID = savedCityID
-				}
-			} else if parseErr != nil {
-				l.logger.Warn("Failed to parse city data from unified stream response",
-					zap.String("city", cityName), zap.Error(parseErr))
-			}
-		}
-
-		if cityID == uuid.Nil {
-			if existingCity, err := l.cityRepo.FindCityByNameAndCountry(asyncCtx, cityName, ""); err == nil && existingCity != nil {
-				cityID = existingCity.ID
-			} else {
-				l.logger.Warn("Could not find or save city data, skipping POI processing",
-					zap.String("city", cityName))
-				return
-			}
-		}
-
-		interaction := LlmInteraction{
-			ID:           uuid.New(),
-			SessionID:    sessionID,
-			UserID:       userID,
-			ProfileID:    profileID,
-			CityName:     cityName,
-			Prompt:       fmt.Sprintf("Unified Chat Stream - Domain: %s, Message: %s", domain, cleanedMessage),
-			ResponseText: fullResponse,
-			ModelUsed:    model,
-			LatencyMs:    int(time.Since(startTime).Milliseconds()),
-			Timestamp:    startTime,
-		}
-		savedInteractionID, err := l.llmInteractionRepo.SaveInteraction(asyncCtx, interaction)
-		if err != nil {
-			l.logger.Error("Failed to save stream interaction", zap.Error(err))
-			return
-		}
-
-		l.logger.Info("Stream interaction saved successfully",
-			zap.String("saved_interaction_id", savedInteractionID.String()),
-			zap.String("original_session_id", sessionID.String()))
-
-		l.ProcessAndSaveUnifiedResponse(asyncCtx, responses, userID, profileID, cityID, savedInteractionID, userLocation)
-	}()
+	//go func() {
+	//	asyncCtx := context.Background()
+	//
+	//	var fullResponseBuilder strings.Builder
+	//	responsesMutex.Lock()
+	//	cityDataContent := ""
+	//	if responses["city_data"] != nil {
+	//		cityDataContent = responses["city_data"].String()
+	//	}
+	//	for partType, builder := range responses {
+	//		if builder != nil && builder.Len() > 0 {
+	//			fullResponseBuilder.WriteString(fmt.Sprintf("[%s]\n%s\n\n", partType, builder.String()))
+	//		}
+	//	}
+	//	responsesMutex.Unlock()
+	//
+	//	fullResponse := fullResponseBuilder.String()
+	//	if fullResponse == "" {
+	//		fullResponse = fmt.Sprintf("Processed %s request for %s", domain, cityName)
+	//	}
+	//
+	//	var cityID uuid.UUID
+	//	if cityDataContent != "" {
+	//		l.logger.Debug("City data content received", zap.String("content", cityDataContent))
+	//		if parsedCityData, parseErr := l.parseCityDataFromResponse(asyncCtx, cityDataContent); parseErr == nil && parsedCityData != nil {
+	//			if savedCityID, handleErr := l.HandleCityData(asyncCtx, *parsedCityData); handleErr != nil {
+	//				l.logger.Warn("Failed to save city data during unified stream processing",
+	//					zap.String("city", cityName), zap.Error(handleErr))
+	//			} else {
+	//				l.logger.Info("Successfully saved city data during unified stream processing",
+	//					zap.String("city", cityName))
+	//				cityID = savedCityID
+	//			}
+	//		} else if parseErr != nil {
+	//			l.logger.Warn("Failed to parse city data from unified stream response",
+	//				zap.String("city", cityName), zap.Error(parseErr))
+	//		}
+	//	}
+	//
+	//	if cityID == uuid.Nil {
+	//		if existingCity, err := l.cityRepo.FindCityByNameAndCountry(asyncCtx, cityName, ""); err == nil && existingCity != nil {
+	//			cityID = existingCity.ID
+	//		} else {
+	//			l.logger.Warn("Could not find or save city data, skipping POI processing",
+	//				zap.String("city", cityName))
+	//			return
+	//		}
+	//	}
+	//
+	//	interaction := LlmInteraction{
+	//		ID:           uuid.New(),
+	//		SessionID:    sessionID,
+	//		UserID:       userID,
+	//		ProfileID:    profileID,
+	//		CityName:     cityName,
+	//		Prompt:       fmt.Sprintf("Unified Chat Stream - Domain: %s, Message: %s", domain, cleanedMessage),
+	//		ResponseText: fullResponse,
+	//		ModelUsed:    model,
+	//		LatencyMs:    int(time.Since(startTime).Milliseconds()),
+	//		Timestamp:    startTime,
+	//	}
+	//	savedInteractionID, err := l.repo.SaveInteraction(asyncCtx, interaction)
+	//	if err != nil {
+	//		l.logger.Error("Failed to save stream interaction", zap.Error(err))
+	//		return
+	//	}
+	//
+	//	l.logger.Info("Stream interaction saved successfully",
+	//		zap.String("saved_interaction_id", savedInteractionID.String()),
+	//		zap.String("original_session_id", sessionID.String()))
+	//
+	//	l.ProcessAndSaveUnifiedResponse(asyncCtx, responses, userID, profileID, cityID, savedInteractionID, userLocation)
+	//}()
 
 	span.SetStatus(codes.Ok, "Unified chat stream processed successfully")
 	return nil
@@ -351,7 +353,7 @@ func (l *Service) ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityN
 		ExpiresAt: time.Now().Add(24 * time.Hour),
 		Status:    "active",
 	}
-	if err := l.llmInteractionRepo.CreateSession(ctx, session); err != nil {
+	if err := l.repo.CreateSession(ctx, session); err != nil {
 		span.RecordError(err)
 		l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeError, Error: err.Error()}, 3)
 		return fmt.Errorf("failed to create session: %w", err)
@@ -496,15 +498,16 @@ func (l *Service) ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityN
 			}, 3)
 		}
 		closeOnce.Do(func() {
-			close(eventCh)
-			l.logger.Info("Event channel closed by completion goroutine")
+			// Don't close eventCh here - it's managed by the caller
+			// close(eventCh)
+			l.logger.Info("Event processing completed by completion goroutine")
 		})
 	}()
 
 	go func() {
 		wg.Wait()
 
-		asyncCtx := context.Background()
+		//asyncCtx := context.Background()
 
 		var fullResponseBuilder strings.Builder
 		responsesMutex.Lock()
@@ -526,8 +529,9 @@ func (l *Service) ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityN
 
 		var cityID uuid.UUID
 		if cityDataContent != "" {
-			if parsedCityData, parseErr := l.parseCityDataFromResponse(asyncCtx, cityDataContent); parseErr == nil && parsedCityData != nil {
-				if savedCityID, handleErr := l.HandleCityData(asyncCtx, *parsedCityData); handleErr != nil {
+			l.logger.Debug("City data content received", zap.String("content", cityDataContent))
+			if parsedCityData, parseErr := l.parseCityDataFromResponse(ctx, cityDataContent); parseErr == nil && parsedCityData != nil {
+				if savedCityID, handleErr := l.HandleCityData(ctx, *parsedCityData); handleErr != nil {
 					l.logger.Warn("Failed to save city data during unified stream processing",
 						zap.String("city", cityName), zap.Error(handleErr))
 				} else {
@@ -542,7 +546,7 @@ func (l *Service) ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityN
 		}
 
 		if cityID == uuid.Nil {
-			if existingCity, err := l.cityRepo.FindCityByNameAndCountry(asyncCtx, cityName, ""); err == nil && existingCity != nil {
+			if existingCity, err := l.cityRepo.FindCityByNameAndCountry(ctx, cityName, ""); err == nil && existingCity != nil {
 				cityID = existingCity.ID
 			} else {
 				l.logger.Warn("Could not find or save city data, skipping POI processing",
@@ -561,7 +565,7 @@ func (l *Service) ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityN
 			LatencyMs:    int(time.Since(startTime).Milliseconds()),
 			Timestamp:    startTime,
 		}
-		savedInteractionID, err := l.llmInteractionRepo.SaveInteraction(asyncCtx, interaction)
+		savedInteractionID, err := l.repo.SaveInteraction(ctx, interaction)
 		if err != nil {
 			l.logger.Error("Failed to save stream interaction", zap.Error(err))
 			return
@@ -571,7 +575,7 @@ func (l *Service) ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityN
 			zap.String("saved_interaction_id", savedInteractionID.String()),
 			zap.String("original_session_id", sessionID.String()))
 
-		l.ProcessAndSaveUnifiedResponseFree(asyncCtx, responses, cityID, savedInteractionID, userLocation)
+		l.ProcessAndSaveUnifiedResponseFree(ctx, responses, cityID, savedInteractionID, userLocation)
 	}()
 
 	span.SetStatus(codes.Ok, "Unified chat stream processed successfully")

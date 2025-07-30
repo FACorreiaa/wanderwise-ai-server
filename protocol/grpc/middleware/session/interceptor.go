@@ -63,12 +63,18 @@ func InterceptorSession(logger *zap.Logger) grpc.UnaryServerInterceptor {
 
 		// Define unauthenticated methods that don't require tokens
 		unauthenticatedMethods := map[string]bool{
+			"/AuthService/Login":                   true,
+			"/AuthService/Logout":                  true,
+			"/AuthService/Register":                true,
 			"/ai_poi.auth.v1.AuthService/Login":    true,
 			"/ai_poi.auth.v1.AuthService/Register": true,
+			// gRPC reflection service methods
+			"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo": true,
+			"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo":      true,
 		}
 
 		// Check if method requires authentication
-		if unauthenticatedMethods[info.FullMethod] {
+		if unauthenticatedMethods[info.FullMethod] || strings.HasPrefix(info.FullMethod, "/grpc.reflection.") {
 			// For public endpoints, still create anonymous session context
 			sessionCtx := &SessionContext{
 				SessionType: SessionTypeAnonymous,
@@ -84,10 +90,18 @@ func InterceptorSession(logger *zap.Logger) grpc.UnaryServerInterceptor {
 				attribute.Int("session.rate_limit", sessionCtx.RateLimit),
 			)
 			span.SetStatus(codes.Ok, "Anonymous session created")
-			logger.Info("Anonymous session created for public endpoint")
+			logger.Info("Anonymous session created for public endpoint", 
+				zap.String("method", info.FullMethod),
+				zap.Bool("is_reflection", strings.HasPrefix(info.FullMethod, "/grpc.reflection.")))
 
 			return handler(ctx, req)
 		}
+
+		// This method requires authentication - log it
+		logger.Info("Method requires authentication", 
+			zap.String("method", info.FullMethod),
+			zap.Bool("in_map", unauthenticatedMethods[info.FullMethod]),
+			zap.Bool("has_reflection_prefix", strings.HasPrefix(info.FullMethod, "/grpc.reflection.")))
 
 		// Extract metadata from gRPC context
 		md, ok := metadata.FromIncomingContext(ctx)
@@ -296,4 +310,167 @@ func GetPageLimit(ctx context.Context) int {
 		return 1 // Very restrictive default
 	}
 	return session.PageLimit
+}
+
+// InterceptorSessionStream creates a gRPC stream server interceptor for session management
+func InterceptorSessionStream(logger *zap.Logger) grpc.StreamServerInterceptor {
+	tracer := otel.Tracer("AuthInterceptor")
+
+	return func(
+		srv interface{},
+		ss grpc.ServerStream,
+		info *grpc.StreamServerInfo,
+		handler grpc.StreamHandler,
+	) error {
+		ctx := ss.Context()
+		ctx, span := tracer.Start(ctx, "AuthInterceptor.InterceptorSessionStream", trace.WithAttributes(
+			attribute.String("grpc.method", info.FullMethod),
+		))
+		defer span.End()
+
+		logger := logger.With(
+			zap.String("method", info.FullMethod),
+			zap.String("interceptor", "session_stream"),
+		)
+
+		// Define unauthenticated methods that don't require tokens
+		unauthenticatedMethods := map[string]bool{
+			"/AuthService/Login":                   true,
+			"/AuthService/Logout":                  true,
+			"/AuthService/Register":                true,
+			"/ai_poi.auth.v1.AuthService/Login":    true,
+			"/ai_poi.auth.v1.AuthService/Register": true,
+			// gRPC reflection service methods
+			"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo": true,
+			"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo":      true,
+		}
+
+		// Check if method requires authentication
+		if unauthenticatedMethods[info.FullMethod] || strings.HasPrefix(info.FullMethod, "/grpc.reflection.") {
+			// For public endpoints, still create anonymous session context
+			sessionCtx := &SessionContext{
+				SessionType: SessionTypeAnonymous,
+				IsActive:    true,
+				RateLimit:   10, // 10 requests per minute for anonymous
+				PageLimit:   5,  // 5 page views per session
+				ExpiresAt:   time.Now().Add(30 * time.Minute),
+			}
+
+			ctx = context.WithValue(ctx, "session", sessionCtx)
+			span.SetAttributes(
+				attribute.String("session.type", string(SessionTypeAnonymous)),
+				attribute.Int("session.rate_limit", sessionCtx.RateLimit),
+			)
+			span.SetStatus(codes.Ok, "Anonymous session created")
+			logger.Info("STREAM: Anonymous session created for public endpoint", 
+				zap.String("method", info.FullMethod),
+				zap.Bool("is_reflection", strings.HasPrefix(info.FullMethod, "/grpc.reflection.")))
+
+			// Create wrapped stream with new context
+			wrappedStream := &wrappedServerStream{ServerStream: ss, ctx: ctx}
+			return handler(srv, wrappedStream)
+		}
+
+		// This stream method requires authentication - log it
+		logger.Info("STREAM: Method requires authentication", 
+			zap.String("method", info.FullMethod),
+			zap.Bool("in_map", unauthenticatedMethods[info.FullMethod]),
+			zap.Bool("has_reflection_prefix", strings.HasPrefix(info.FullMethod, "/grpc.reflection.")))
+
+		// Extract metadata from gRPC context
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			span.RecordError(fmt.Errorf("missing metadata"))
+			span.SetStatus(codes.Error, "Missing metadata")
+			logger.Warn("Request missing metadata")
+			return status.Error(grpcCodes.Unauthenticated, "missing context metadata")
+		}
+
+		// Try to extract authorization header
+		authHeader := md["authorization"]
+		if len(authHeader) == 0 {
+			// No token provided - treat as anonymous with limited access for non-auth required methods
+			sessionCtx := &SessionContext{
+				SessionType: SessionTypeAnonymous,
+				IsActive:    true,
+				RateLimit:   5, // Very limited for no auth
+				PageLimit:   3, // Very limited page views
+				ExpiresAt:   time.Now().Add(15 * time.Minute),
+			}
+
+			ctx = context.WithValue(ctx, "session", sessionCtx)
+			span.SetAttributes(
+				attribute.String("session.type", string(SessionTypeAnonymous)),
+				attribute.Int("session.rate_limit", sessionCtx.RateLimit),
+			)
+			span.SetStatus(codes.Ok, "Limited anonymous session created for stream")
+			logger.Info("Limited anonymous session created for stream - no auth token")
+
+			// Create wrapped stream with new context
+			wrappedStream := &wrappedServerStream{ServerStream: ss, ctx: ctx}
+			return handler(srv, wrappedStream)
+		}
+
+		// Extract and validate token
+		tokenString := strings.TrimSpace(authHeader[0])
+		if strings.HasPrefix(tokenString, "Bearer ") {
+			tokenString = tokenString[7:] // Remove "Bearer " prefix
+		}
+
+		// Parse and validate JWT token
+		claims := &auth.Claims{}
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+			// Validate signing method
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return auth.JwtSecretKey, nil
+		})
+
+		if err != nil || !token.Valid {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "Invalid token")
+			logger.Warn("Invalid or expired token in stream", zap.Error(err))
+
+			return status.Error(grpcCodes.Unauthenticated, "invalid or expired token")
+		}
+
+		// Token is valid - determine session type based on user role and claims
+		sessionType := determineSessionType(claims.Role, claims.Scope)
+		sessionCtx := createSessionContext(claims, sessionType)
+
+		// Add session context to request context
+		ctx = context.WithValue(ctx, "session", sessionCtx)
+		ctx = context.WithValue(ctx, "userID", claims.UserID)
+		ctx = context.WithValue(ctx, "role", claims.Role)
+
+		span.SetAttributes(
+			attribute.String("session.type", string(sessionCtx.SessionType)),
+			attribute.String("session.user_id", sessionCtx.UserID),
+			attribute.String("session.role", sessionCtx.Role),
+			attribute.Int("session.rate_limit", sessionCtx.RateLimit),
+			attribute.Bool("session.is_active", sessionCtx.IsActive),
+		)
+		span.SetStatus(codes.Ok, "Authenticated stream session created")
+
+		logger.Info("Authenticated stream session created",
+			zap.String("user_id", claims.UserID),
+			zap.String("role", claims.Role),
+			zap.String("session_type", string(sessionType)),
+			zap.Int("rate_limit", sessionCtx.RateLimit))
+
+		// Create wrapped stream with new context
+		wrappedStream := &wrappedServerStream{ServerStream: ss, ctx: ctx}
+		return handler(srv, wrappedStream)
+	}
+}
+
+// wrappedServerStream wraps grpc.ServerStream to provide a custom context
+type wrappedServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (w *wrappedServerStream) Context() context.Context {
+	return w.ctx
 }

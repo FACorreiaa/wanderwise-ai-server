@@ -19,14 +19,16 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/poi"
 )
 
 var _ Repository = (*RepositoryImpl)(nil)
 
 type Repository interface {
 	SaveInteraction(ctx context.Context, interaction LlmInteraction) (uuid.UUID, error)
-	SaveLlmSuggestedPOIsBatch(ctx context.Context, pois []POIDetailedInfo, userID, searchProfileID, llmInteractionID, cityID uuid.UUID) error
-	GetLlmSuggestedPOIsByInteractionSortedByDistance(ctx context.Context, llmInteractionID uuid.UUID, cityID uuid.UUID, userLocation UserLocation) ([]POIDetailedInfo, error)
+	SaveLlmSuggestedPOIsBatch(ctx context.Context, pois []poi.POIDetailedInfo, userID, searchProfileID, llmInteractionID, cityID uuid.UUID) error
+	GetLlmSuggestedPOIsByInteractionSortedByDistance(ctx context.Context, llmInteractionID uuid.UUID, cityID uuid.UUID, userLocation UserLocation) ([]poi.POIDetailedInfo, error)
 	AddChatToBookmark(ctx context.Context, itinerary *UserSavedItinerary) (uuid.UUID, error)
 	GetBookmarkedItineraries(ctx context.Context, userID uuid.UUID, page, limit int) (*PaginatedUserItinerariesResponse, error)
 	RemoveChatFromBookmark(ctx context.Context, userID, itineraryID uuid.UUID) error
@@ -41,10 +43,10 @@ type Repository interface {
 	AddMessageToSession(ctx context.Context, sessionID uuid.UUID, message ConversationMessage) error
 
 	//
-	SaveSinglePOI(ctx context.Context, poi POIDetailedInfo, userID, cityID uuid.UUID, llmInteractionID uuid.UUID) (uuid.UUID, error)
-	GetPOIsBySessionSortedByDistance(ctx context.Context, sessionID, cityID uuid.UUID, userLocation UserLocation) ([]POIDetailedInfo, error)
-	GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetailedInfo POIDetailedInfo, cityID uuid.UUID, sourceInteractionID uuid.UUID) (uuid.UUID, error)
-	SaveItineraryPOIs(ctx context.Context, itineraryID uuid.UUID, pois []POIDetailedInfo) error
+	SaveSinglePOI(ctx context.Context, poi poi.POIDetailedInfo, userID, cityID uuid.UUID, llmInteractionID uuid.UUID) (uuid.UUID, error)
+	GetPOIsBySessionSortedByDistance(ctx context.Context, sessionID, cityID uuid.UUID, userLocation UserLocation) ([]poi.POIDetailedInfo, error)
+	GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetailedInfo poi.POIDetailedInfo, cityID uuid.UUID, sourceInteractionID uuid.UUID) (uuid.UUID, error)
+	SaveItineraryPOIs(ctx context.Context, itineraryID uuid.UUID, pois []poi.POIDetailedInfo) error
 
 	// RAG
 	//SaveInteractionWithEmbedding(ctx context.Context, interaction LlmInteraction, embedding []float32) (uuid.UUID, error)
@@ -161,7 +163,7 @@ func (r *RepositoryImpl) SaveInteraction(ctx context.Context, interaction LlmInt
 	}
 
 	if itineraryID != uuid.Nil {
-		var pois []POIDetailedInfo
+		var pois []poi.POIDetailedInfo
 		// Only parse POIs for itinerary/general responses, skip for domain-specific responses
 		if strings.Contains(interaction.Prompt, "Unified Chat - Domain: dining") ||
 			strings.Contains(interaction.Prompt, "Unified Chat - Domain: accommodation") ||
@@ -244,7 +246,7 @@ func (r *RepositoryImpl) SaveInteraction(ctx context.Context, interaction LlmInt
 	return interactionID, nil
 }
 
-func (r *RepositoryImpl) SaveLlmSuggestedPOIsBatch(ctx context.Context, pois []POIDetailedInfo, userID, searchProfileID, llmInteractionID, cityID uuid.UUID) error {
+func (r *RepositoryImpl) SaveLlmSuggestedPOIsBatch(ctx context.Context, pois []poi.POIDetailedInfo, userID, searchProfileID, llmInteractionID, cityID uuid.UUID) error {
 	ctx, span := otel.Tracer("LlmInteractionRepo").Start(ctx, "SaveLlmSuggestedPOIsBatch", trace.WithAttributes(
 		semconv.DBSystemPostgreSQL,
 		attribute.String("db.operation", "INSERT"),
@@ -313,7 +315,7 @@ func (r *RepositoryImpl) SaveLlmSuggestedPOIsBatch(ctx context.Context, pois []P
 
 func (r *RepositoryImpl) GetLlmSuggestedPOIsByInteractionSortedByDistance(
 	ctx context.Context, llmInteractionID uuid.UUID, cityID uuid.UUID, userLocation UserLocation,
-) ([]POIDetailedInfo, error) {
+) ([]poi.POIDetailedInfo, error) {
 	ctx, span := otel.Tracer("LlmInteractionRepo").Start(ctx, "GetLlmSuggestedPOIsByInteractionSortedByDistance", trace.WithAttributes(
 		semconv.DBSystemPostgreSQL,
 		attribute.String("db.operation", "SELECT"),
@@ -360,9 +362,9 @@ func (r *RepositoryImpl) GetLlmSuggestedPOIsByInteractionSortedByDistance(
 	}
 	defer rows.Close()
 
-	var resultPois []POIDetailedInfo
+	var resultPois []poi.POIDetailedInfo
 	for rows.Next() {
-		var p POIDetailedInfo
+		var p poi.POIDetailedInfo
 		var descr sql.NullString // Handle nullable fields from DB
 		// var cat sql.NullString
 		// var addr sql.NullString
@@ -1238,19 +1240,19 @@ func formatResponseForDisplay(response, cityName string) string {
 	}
 
 	// Try to parse as hotel array
-	var hotels []HotelDetailedInfo
+	var hotels []poi.HotelDetailedInfo
 	if err := json.Unmarshal([]byte(cleanedResponse), &hotels); err == nil && len(hotels) > 0 {
 		return formatHotelResponse(hotels, cityName)
 	}
 
 	// Try to parse as restaurant array
-	var restaurants []RestaurantDetailedInfo
+	var restaurants []poi.RestaurantDetailedInfo
 	if err := json.Unmarshal([]byte(cleanedResponse), &restaurants); err == nil && len(restaurants) > 0 {
 		return formatRestaurantResponse(restaurants, cityName)
 	}
 
 	// Try to parse as POI array
-	var pois []POIDetailedInfo
+	var pois []poi.POIDetailedInfo
 	if err := json.Unmarshal([]byte(cleanedResponse), &pois); err == nil && len(pois) > 0 {
 		return formatPOIResponse(pois, cityName)
 	}
@@ -1330,7 +1332,7 @@ func formatItineraryResponse(response AiCityResponse, cityName string) string {
 }
 
 // Format hotel response to readable text
-func formatHotelResponse(hotels []HotelDetailedInfo, cityName string) string {
+func formatHotelResponse(hotels []poi.HotelDetailedInfo, cityName string) string {
 	if len(hotels) == 0 {
 		return fmt.Sprintf("I searched for hotels in %s for you.", cityName)
 	}
@@ -1343,7 +1345,7 @@ func formatHotelResponse(hotels []HotelDetailedInfo, cityName string) string {
 }
 
 // Format restaurant response to readable text
-func formatRestaurantResponse(restaurants []RestaurantDetailedInfo, cityName string) string {
+func formatRestaurantResponse(restaurants []poi.RestaurantDetailedInfo, cityName string) string {
 	if len(restaurants) == 0 {
 		return fmt.Sprintf("I searched for restaurants in %s for you.", cityName)
 	}
@@ -1356,7 +1358,7 @@ func formatRestaurantResponse(restaurants []RestaurantDetailedInfo, cityName str
 }
 
 // Format POI response to readable text
-func formatPOIResponse(pois []POIDetailedInfo, cityName string) string {
+func formatPOIResponse(pois []poi.POIDetailedInfo, cityName string) string {
 	if len(pois) == 0 {
 		return fmt.Sprintf("I searched for activities in %s for you.", cityName)
 	}
@@ -1407,7 +1409,7 @@ func formatCityDataResponse(cityData GeneralCityData) string {
 }
 
 // Helper functions
-func getFirstPOIName(pois []POIDetailedInfo) string {
+func getFirstPOIName(pois []poi.POIDetailedInfo) string {
 	if len(pois) > 0 {
 		return pois[0].Name
 	}
@@ -1464,7 +1466,7 @@ func (r *RepositoryImpl) AddMessageToSession(ctx context.Context, sessionID uuid
 	return r.UpdateSession(ctx, *session)
 }
 
-func (r *RepositoryImpl) SaveSinglePOI(ctx context.Context, poi POIDetailedInfo, userID, cityID, llmInteractionID uuid.UUID) (uuid.UUID, error) {
+func (r *RepositoryImpl) SaveSinglePOI(ctx context.Context, poi poi.POIDetailedInfo, userID, cityID, llmInteractionID uuid.UUID) (uuid.UUID, error) {
 	ctx, span := otel.Tracer("LlmInteractionRepo").Start(ctx, "SaveSinglePOI", trace.WithAttributes(
 		attribute.String("poi.name", poi.Name), /* ... */
 	))
@@ -1532,7 +1534,7 @@ func (r *RepositoryImpl) SaveSinglePOI(ctx context.Context, poi POIDetailedInfo,
 	return returnedID, nil
 }
 
-func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, _, cityID uuid.UUID, userLocation UserLocation) ([]POIDetailedInfo, error) {
+func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, _, cityID uuid.UUID, userLocation UserLocation) ([]poi.POIDetailedInfo, error) {
 
 	query := `
         SELECT id, name, latitude, longitude, category, description_poi, 
@@ -1551,9 +1553,9 @@ func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, _
 	}
 	defer rows.Close()
 
-	var pois []POIDetailedInfo
+	var pois []poi.POIDetailedInfo
 	for rows.Next() {
-		var p POIDetailedInfo
+		var p poi.POIDetailedInfo
 		var lat, lon, dist sql.NullFloat64 // Use nullable types
 		var cat, desc sql.NullString
 
@@ -1626,7 +1628,7 @@ func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, _
 // 	// SessionIDInsideData string `json:"session_id,omitempty"`
 // }
 
-func parsePOIsFromResponse(responseText string, logger *zap.Logger) ([]POIDetailedInfo, error) {
+func parsePOIsFromResponse(responseText string, logger *zap.Logger) ([]poi.POIDetailedInfo, error) {
 	cleanedResponse := cleanJSONResponse(responseText)
 
 	// Debug logging to see the actual cleaned response
@@ -1645,7 +1647,7 @@ func parsePOIsFromResponse(responseText string, logger *zap.Logger) ([]POIDetail
 	// Check if this looks like an itinerary response instead of a POI response
 	if strings.Contains(cleanedResponse, "itinerary_name") {
 		logger.Debug("parsePOIsFromResponse: Response appears to be an itinerary, not POI data")
-		return []POIDetailedInfo{}, nil
+		return []poi.POIDetailedInfo{}, nil
 	}
 
 	// First try to parse as unified chat response format with "data" wrapper
@@ -1655,7 +1657,7 @@ func parsePOIsFromResponse(responseText string, logger *zap.Logger) ([]POIDetail
 	err := json.Unmarshal([]byte(cleanedResponse), &unifiedResponse)
 	if err == nil {
 		// Collect POIs from both general points_of_interest and itinerary points_of_interest
-		var allPOIs []POIDetailedInfo
+		var allPOIs []poi.POIDetailedInfo
 		if unifiedResponse.Data.PointsOfInterest != nil {
 			allPOIs = append(allPOIs, unifiedResponse.Data.PointsOfInterest...)
 		}
@@ -1681,11 +1683,11 @@ func parsePOIsFromResponse(responseText string, logger *zap.Logger) ([]POIDetail
 	}
 
 	// Third, try to parse as a single POI (for individual POI additions)
-	var singlePOI POIDetailedInfo
+	var singlePOI poi.POIDetailedInfo
 	err = json.Unmarshal([]byte(cleanedResponse), &singlePOI)
 	if err == nil && singlePOI.Name != "" {
 		logger.Debug("parsePOIsFromResponse: Parsed as single POI", zap.String("poiName", singlePOI.Name))
-		return []POIDetailedInfo{singlePOI}, nil
+		return []poi.POIDetailedInfo{singlePOI}, nil
 	}
 
 	// If all fail, log the error and return empty
@@ -1693,10 +1695,10 @@ func parsePOIsFromResponse(responseText string, logger *zap.Logger) ([]POIDetail
 		zap.Error(err),
 		zap.Int("cleanedResponseLength", len(cleanedResponse)),
 		zap.String("responsePreview", cleanedResponse[:min(200, len(cleanedResponse))]))
-	return []POIDetailedInfo{}, nil
+	return []poi.POIDetailedInfo{}, nil
 }
 
-func (r *RepositoryImpl) GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetailedInfo POIDetailedInfo, cityID uuid.UUID, _ uuid.UUID) (uuid.UUID, error) {
+func (r *RepositoryImpl) GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetailedInfo poi.POIDetailedInfo, cityID uuid.UUID, _ uuid.UUID) (uuid.UUID, error) {
 	var poiDBID uuid.UUID
 	findPoiQuery := `SELECT id FROM points_of_interest WHERE name = $1 AND city_id = $2 LIMIT 1`
 	err := tx.QueryRow(ctx, findPoiQuery, POIDetailedInfo.Name, cityID).Scan(&poiDBID)
@@ -1724,7 +1726,7 @@ func (r *RepositoryImpl) GetOrCreatePOI(ctx context.Context, tx pgx.Tx, POIDetai
 	return poiDBID, nil
 }
 
-func (r *RepositoryImpl) SaveItineraryPOIs(ctx context.Context, itineraryID uuid.UUID, pois []POIDetailedInfo) error {
+func (r *RepositoryImpl) SaveItineraryPOIs(ctx context.Context, itineraryID uuid.UUID, pois []poi.POIDetailedInfo) error {
 	batch := &pgx.Batch{}
 	for i, poi := range pois {
 		query := `

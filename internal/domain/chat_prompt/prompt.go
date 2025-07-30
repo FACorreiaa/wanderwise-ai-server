@@ -3,9 +3,11 @@ package chat_prompt
 import (
 	"fmt"
 	"strings"
+
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/profiles"
 )
 
-func getUserPreferencesPrompt(searchProfile *UserPreferenceProfileResponse) string {
+func getUserPreferencesPrompt(searchProfile *profiles.UserPreferenceProfileResponse) string {
 	// Base preferences
 	basePrefs := fmt.Sprintf(`
 BASIC PREFERENCES:

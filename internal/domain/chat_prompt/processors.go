@@ -16,12 +16,14 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/genai"
 
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/city"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/interests"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/poi"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/profiles"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/tags"
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
-func (l *Service) PreparePromptData(interests []*interests.Interest, tags []*tags.Tags, searchProfile *UserPreferenceProfileResponse) (interestNames []string, tagsPromptPart string, userPrefs string) {
+func (l *Service) PreparePromptData(interests []*interests.Interest, tags []*tags.Tags, searchProfile *profiles.UserPreferenceProfileResponse) (interestNames []string, tagsPromptPart string, userPrefs string) {
 	if len(interests) == 0 {
 		interestNames = []string{"general sightseeing", "local experiences"}
 	} else {
@@ -48,7 +50,7 @@ func (l *Service) PreparePromptData(interests []*interests.Interest, tags []*tag
 	return interestNames, tagsPromptPart, userPrefs
 }
 
-func (l *Service) CollectResults(resultCh <-chan GenAIResponse) (itinerary AiCityResponse, llmInteractionID uuid.UUID, rawPersonalisedPOIs []POIDetailedInfo, errors []error) {
+func (l *Service) CollectResults(resultCh <-chan GenAIResponse) (itinerary AiCityResponse, llmInteractionID uuid.UUID, rawPersonalisedPOIs []poi.POIDetailedInfo, errors []error) {
 	for res := range resultCh {
 		if res.Err != nil {
 			errors = append(errors, res.Err)
@@ -84,7 +86,7 @@ func (l *Service) HandleCityData(ctx context.Context, cityData GeneralCityData) 
 		return uuid.Nil, fmt.Errorf("failed to check city existence: %w", err)
 	}
 	if c == nil {
-		cityDetail := CityDetail{
+		cityDetail := city.CityDetail{
 			Name:            cityData.City,
 			Country:         cityData.Country,
 			StateProvince:   cityData.StateProvince,
@@ -102,7 +104,7 @@ func (l *Service) HandleCityData(ctx context.Context, cityData GeneralCityData) 
 	return cityID, nil
 }
 
-func (l *Service) HandleGeneralPOIs(ctx context.Context, pois []POIDetailedInfo, cityID uuid.UUID) {
+func (l *Service) HandleGeneralPOIs(ctx context.Context, pois []poi.POIDetailedInfo, cityID uuid.UUID) {
 	for _, p := range pois {
 		existingPoi, err := l.poiRepo.FindPoiByNameAndCity(ctx, p.Name, cityID)
 		if err != nil {
@@ -118,7 +120,7 @@ func (l *Service) HandleGeneralPOIs(ctx context.Context, pois []POIDetailedInfo,
 	}
 }
 
-func (l *Service) HandlePersonalisedPOIs(ctx context.Context, pois []POIDetailedInfo, cityID uuid.UUID, userLocation *UserLocation, llmInteractionID uuid.UUID, userID, profileID uuid.UUID) ([]POIDetailedInfo, error) {
+func (l *Service) HandlePersonalisedPOIs(ctx context.Context, pois []poi.POIDetailedInfo, cityID uuid.UUID, userLocation *UserLocation, llmInteractionID uuid.UUID, userID, profileID uuid.UUID) ([]poi.POIDetailedInfo, error) {
 	if userLocation == nil || len(pois) == 0 {
 		return pois, nil
 	}
@@ -129,7 +131,7 @@ func (l *Service) HandlePersonalisedPOIs(ctx context.Context, pois []POIDetailed
 		return pois, nil
 	}
 
-	err := l.llmInteractionRepo.SaveLlmSuggestedPOIsBatch(ctx, pois, userID, profileID, llmInteractionID, cityID)
+	err := l.repo.SaveLlmSuggestedPOIsBatch(ctx, pois, userID, profileID, llmInteractionID, cityID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save personalised POIs: %w", err)
 	}
@@ -147,7 +149,7 @@ func (l *Service) HandlePersonalisedPOIs(ctx context.Context, pois []POIDetailed
 		return nil, fmt.Errorf("failed to save itinerary POIs: %w", err)
 	}
 
-	sortedPois, err := l.llmInteractionRepo.GetLlmSuggestedPOIsByInteractionSortedByDistance(ctx, llmInteractionID, cityID, *userLocation)
+	sortedPois, err := l.repo.GetLlmSuggestedPOIsByInteractionSortedByDistance(ctx, llmInteractionID, cityID, *userLocation)
 	if err != nil {
 		l.logger.Error("Failed to fetch sorted POIs", zap.Error(err))
 		return pois, nil
@@ -157,7 +159,7 @@ func (l *Service) HandlePersonalisedPOIs(ctx context.Context, pois []POIDetailed
 
 func (l *Service) GenerateEnhancedPersonalisedPOIWorker(wg *sync.WaitGroup, ctx context.Context,
 	cityName string, userID, profileID uuid.UUID, resultCh chan<- GenAIResponse,
-	enhancedPromptData string, domain DomainType,
+	enhancedPromptData string, domain profiles.DomainType,
 	config *genai.GenerateContentConfig) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GenerateEnhancedPersonalisedPOIWorker", trace.WithAttributes(
 		attribute.String("city.name", cityName),
@@ -219,7 +221,7 @@ func (l *Service) GenerateEnhancedPersonalisedPOIWorker(wg *sync.WaitGroup, ctx 
 	}
 }
 
-func (l *Service) generatePOIData(ctx context.Context, poiName, cityName string, userLocation *UserLocation, userID, cityID uuid.UUID) (POIDetailedInfo, error) {
+func (l *Service) generatePOIData(ctx context.Context, poiName, cityName string, userLocation *UserLocation, userID, cityID uuid.UUID) (poi.POIDetailedInfo, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GeneratePOIData", trace.WithAttributes(
 		attribute.String("p.name", poiName),
 		attribute.String("city.name", cityName),
@@ -231,7 +233,7 @@ func (l *Service) generatePOIData(ctx context.Context, poiName, cityName string,
 	response, err := l.aiClient.GenerateContent(ctx, prompt, "", nil)
 	if err != nil {
 		span.RecordError(err)
-		return POIDetailedInfo{}, fmt.Errorf("failed to generate POI data: %w", err)
+		return poi.POIDetailedInfo{}, fmt.Errorf("failed to generate POI data: %w", err)
 	}
 
 	interaction := LlmInteraction{
@@ -241,22 +243,22 @@ func (l *Service) generatePOIData(ctx context.Context, poiName, cityName string,
 		ModelUsed:    model,
 		CityName:     cityName,
 	}
-	savedLlmInteractionID, err := l.llmInteractionRepo.SaveInteraction(ctx, interaction)
+	savedLlmInteractionID, err := l.repo.SaveInteraction(ctx, interaction)
 	if err != nil {
 		l.logger.Error("Failed to save LLM interaction in generatePOIData", zap.Error(err))
-		return POIDetailedInfo{}, fmt.Errorf("failed to save LLM interaction: %w", err)
+		return poi.POIDetailedInfo{}, fmt.Errorf("failed to save LLM interaction: %w", err)
 	}
 	span.SetAttributes(attribute.String("llm.interaction_id.for_poi_data", savedLlmInteractionID.String()))
 
 	cleanResponse := cleanJSONResponse(response)
-	var poiData POIDetailedInfo
+	var poiData poi.POIDetailedInfo
 	if err := json.Unmarshal([]byte(cleanResponse), &poiData); err != nil || poiData.Name == "" {
 		l.logger.Warn("LLM returned invalid or empty POI data",
 			zap.String("poiName", poiName),
 			zap.String("llmResponse", response),
 			zap.Error(err))
 		span.AddEvent("Invalid LLM response")
-		poiData = POIDetailedInfo{
+		poiData = poi.POIDetailedInfo{
 			ID:             uuid.New(),
 			Name:           poiName,
 			Latitude:       0,
@@ -296,7 +298,7 @@ func (l *Service) generatePOIData(ctx context.Context, poiName, cityName string,
 	}
 
 	llmInteractionID := uuid.New()
-	_, err = l.llmInteractionRepo.SaveSinglePOI(ctx, poiData, userID, cityID, savedLlmInteractionID)
+	_, err = l.repo.SaveSinglePOI(ctx, poiData, userID, cityID, savedLlmInteractionID)
 	if err != nil {
 		l.logger.Warn("Failed to save POI to database", zap.Error(err))
 		span.RecordError(err)
@@ -312,7 +314,7 @@ func (l *Service) generatePOIData(ctx context.Context, poiName, cityName string,
 	return poiData, nil
 }
 
-func (l *Service) generateSemanticPOIRecommendations(ctx context.Context, userMessage string, cityID uuid.UUID, userID uuid.UUID, userLocation *UserLocation, semanticWeight float64) ([]POIDetailedInfo, error) {
+func (l *Service) generateSemanticPOIRecommendations(ctx context.Context, userMessage string, cityID uuid.UUID, userID uuid.UUID, userLocation *UserLocation, semanticWeight float64) ([]poi.POIDetailedInfo, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "generateSemanticPOIRecommendations", trace.WithAttributes(
 		attribute.String("user.message", userMessage),
 		attribute.String("city.id", cityID.String()),
@@ -342,11 +344,11 @@ func (l *Service) generateSemanticPOIRecommendations(ctx context.Context, userMe
 		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
 	}
 
-	var pois []POIDetailedInfo
+	var pois []poi.POIDetailedInfo
 
 	if userLocation != nil && userLocation.UserLat != 0 && userLocation.UserLon != 0 {
-		filter := POIFilter{
-			Location: GeoPoint{
+		filter := poi.POIFilter{
+			Location: poi.GeoPoint{
 				Latitude:  userLocation.UserLat,
 				Longitude: userLocation.UserLon,
 			},

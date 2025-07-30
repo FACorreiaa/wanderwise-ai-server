@@ -16,6 +16,11 @@ func min(a, b int) int {
 }
 
 func (l *Service) sendEvent(ctx context.Context, ch chan<- StreamEvent, event StreamEvent, retries int) bool {
+	defer func() {
+		if r := recover(); r != nil {
+			l.logger.Warn("Recovered from panic in sendEvent", zap.Any("panic", r), zap.String("eventType", event.Type))
+		}
+	}()
 	for i := 0; i < retries; i++ {
 		if event.EventID == "" {
 			event.EventID = uuid.New().String()
@@ -27,7 +32,15 @@ func (l *Service) sendEvent(ctx context.Context, ch chan<- StreamEvent, event St
 		select {
 		case <-ctx.Done():
 			l.logger.Warn("Context cancelled, not sending stream event", zap.String("eventType", event.Type))
-			l.deadLetterCh <- event
+			// Only send to dead letter if it's not closed
+			func() {
+				defer func() {
+					if recover() != nil {
+						// Dead letter channel is closed, ignore
+					}
+				}()
+				l.deadLetterCh <- event
+			}()
 			return false
 		default:
 			select {
@@ -35,11 +48,27 @@ func (l *Service) sendEvent(ctx context.Context, ch chan<- StreamEvent, event St
 				return true
 			case <-ctx.Done():
 				l.logger.Warn("Context cancelled while trying to send stream event", zap.String("eventType", event.Type))
-				l.deadLetterCh <- event
+				// Only send to dead letter if it's not closed
+				func() {
+					defer func() {
+						if recover() != nil {
+							// Dead letter channel is closed, ignore
+						}
+					}()
+					l.deadLetterCh <- event
+				}()
 				return false
 			case <-time.After(2 * time.Second):
 				l.logger.Warn("Dropped stream event due to slow consumer or blocked channel (timeout)", zap.String("eventType", event.Type))
-				l.deadLetterCh <- event
+				// Only send to dead letter if it's not closed
+				func() {
+					defer func() {
+						if recover() != nil {
+							// Dead letter channel is closed, ignore
+						}
+					}()
+					l.deadLetterCh <- event
+				}()
 			}
 		}
 		time.Sleep(100 * time.Millisecond)

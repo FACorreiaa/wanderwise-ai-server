@@ -18,6 +18,7 @@ import (
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/interests"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/poi"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/profiles"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/tags"
 )
 
@@ -26,7 +27,7 @@ const (
 	defaultTemperature = 0.5
 )
 
-func (l *Service) FetchUserData(ctx context.Context, userID, profileID uuid.UUID) (interests []*interests.Interest, searchProfile *UserPreferenceProfileResponse, tags []*tags.Tags, err error) {
+func (l *Service) FetchUserData(ctx context.Context, userID, profileID uuid.UUID) (interests []*interests.Interest, searchProfile *profiles.UserPreferenceProfileResponse, tags []*tags.Tags, err error) {
 	interests, err = l.interestRepo.GetInterestsForProfile(ctx, profileID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch user interests: %w", err)
@@ -115,7 +116,7 @@ func (l *Service) GetUserChatSessions(ctx context.Context, userID uuid.UUID, pag
 
 func (l *Service) getPOIDetailedInfos(wg *sync.WaitGroup, ctx context.Context,
 	city string, lat float64, lon float64, userID uuid.UUID,
-	resultCh chan<- POIDetailedInfo, config *genai.GenerateContentConfig) {
+	resultCh chan<- poi.POIDetailedInfo, config *genai.GenerateContentConfig) {
 	defer wg.Done()
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "getPOIDetailedInfos", trace.WithAttributes(
 		attribute.String("city.name", city),
@@ -136,7 +137,7 @@ func (l *Service) getPOIDetailedInfos(wg *sync.WaitGroup, ctx context.Context,
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Failed to generate POI details")
-		resultCh <- POIDetailedInfo{Err: fmt.Errorf("failed to generate POI details: %w", err)}
+		resultCh <- poi.POIDetailedInfo{Err: fmt.Errorf("failed to generate POI details: %w", err)}
 		return
 	}
 
@@ -151,17 +152,17 @@ func (l *Service) getPOIDetailedInfos(wg *sync.WaitGroup, ctx context.Context,
 		err := fmt.Errorf("no valid POI details content from AI")
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Empty response from AI")
-		resultCh <- POIDetailedInfo{Err: err}
+		resultCh <- poi.POIDetailedInfo{Err: err}
 		return
 	}
 
 	span.SetAttributes(attribute.Int("response.length", len(txt)))
 	cleanTxt := cleanJSONResponse(txt)
-	var detailedInfo POIDetailedInfo
+	var detailedInfo poi.POIDetailedInfo
 	if err := json.Unmarshal([]byte(cleanTxt), &detailedInfo); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Failed to parse POI details JSON")
-		resultCh <- POIDetailedInfo{Err: fmt.Errorf("failed to parse POI details JSON: %w", err)}
+		resultCh <- poi.POIDetailedInfo{Err: fmt.Errorf("failed to parse POI details JSON: %w", err)}
 		return
 	}
 	latencyMs := int(time.Since(startTime).Milliseconds())
@@ -180,10 +181,10 @@ func (l *Service) getPOIDetailedInfos(wg *sync.WaitGroup, ctx context.Context,
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Failed to save LLM interaction for POI details")
-		resultCh <- POIDetailedInfo{Err: fmt.Errorf("failed to save LLM interaction for POI details: %w", err)}
+		resultCh <- poi.POIDetailedInfo{Err: fmt.Errorf("failed to save LLM interaction for POI details: %w", err)}
 		return
 	}
-	resultCh <- POIDetailedInfo{
+	resultCh <- poi.POIDetailedInfo{
 		City:             city,
 		Name:             detailedInfo.Name,
 		Latitude:         detailedInfo.Latitude,
@@ -204,7 +205,7 @@ func (l *Service) getPOIDetailedInfos(wg *sync.WaitGroup, ctx context.Context,
 	span.SetStatus(codes.Ok, "POI details generated and saved successfully")
 }
 
-func (l *Service) GetPOIDetailedInfosResponse(ctx context.Context, userID uuid.UUID, city string, lat, lon float64) (*POIDetailedInfo, error) {
+func (l *Service) GetPOIDetailedInfosResponse(ctx context.Context, userID uuid.UUID, city string, lat, lon float64) (*poi.POIDetailedInfo, error) {
 	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "GetPOIDetailedInfosResponse", trace.WithAttributes(
 		attribute.String("city.name", city),
 		attribute.Float64("latitude", lat),
@@ -220,7 +221,7 @@ func (l *Service) GetPOIDetailedInfosResponse(ctx context.Context, userID uuid.U
 	span.SetAttributes(attribute.String("cache.key", cacheKey))
 
 	if cached, found := l.cache.Get(cacheKey); found {
-		if p, ok := cached.(*POIDetailedInfo); ok {
+		if p, ok := cached.(*poi.POIDetailedInfo); ok {
 			l.logger.Info("Cache hit for POI details", zap.String("cache_key", cacheKey))
 			span.AddEvent("Cache hit")
 			span.SetStatus(codes.Ok, "POI details served from cache")
@@ -259,7 +260,7 @@ func (l *Service) GetPOIDetailedInfosResponse(ctx context.Context, userID uuid.U
 	l.logger.Debug("Cache and database miss, fetching POI details from AI", zap.String("cache_key", cacheKey))
 	span.AddEvent("Cache and database miss")
 
-	resultCh := make(chan POIDetailedInfo, 1)
+	resultCh := make(chan poi.POIDetailedInfo, 1)
 	var wg sync.WaitGroup
 	wg.Add(1)
 

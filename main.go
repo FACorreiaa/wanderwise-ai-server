@@ -8,6 +8,7 @@ import (
 	"os/signal"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
@@ -30,7 +31,6 @@ func initializeLogger() error {
 }
 
 func setupDatabases(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
-	// Create a temporary slog logger for database operations
 	slogLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))
@@ -67,7 +67,7 @@ func startServices(ctx context.Context, cfg *config.Config, app *internal.Applic
 		if grpcPort == "" {
 			grpcPort = os.Getenv("GRPC_PORT")
 			if grpcPort == "" {
-				grpcPort = "9000" // default gRPC port
+				grpcPort = "9000"
 			}
 		}
 
@@ -81,7 +81,7 @@ func startServices(ctx context.Context, cfg *config.Config, app *internal.Applic
 	go func() {
 		httpPort := cfg.Server.HTTPPort
 		if httpPort == "" {
-			httpPort = "8080" // default HTTP port
+			httpPort = "8080"
 		}
 
 		if err := internal.ServeHTTP(httpPort, app, reg); err != nil {
@@ -138,6 +138,11 @@ func main() {
 	println("Go AI POI microservices platform starting...")
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		println("Warning: .env file not found or error loading:", err.Error())
+	}
 
 	reg := prometheus.NewRegistry()
 	println("Loaded prometheus registry")

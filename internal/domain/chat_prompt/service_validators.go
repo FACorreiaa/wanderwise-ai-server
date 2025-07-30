@@ -7,12 +7,12 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 	"google.golang.org/genai"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/poi"
 )
 
 func (l *Service) extractCityFromMessage(ctx context.Context, message string) (cityName, cleanedMessage string, err error) {
@@ -118,12 +118,12 @@ func (l *Service) ensureItineraryExists(session *ChatSession) {
 			AIItineraryResponse: AIItineraryResponse{
 				ItineraryName:      fmt.Sprintf("Trip to %s", session.SessionContext.CityName),
 				OverallDescription: fmt.Sprintf("Exploring %s", session.SessionContext.CityName),
-				PointsOfInterest:   []POIDetailedInfo{},
+				PointsOfInterest:   []poi.POIDetailedInfo{},
 			},
 		}
 	}
 	if session.CurrentItinerary.AIItineraryResponse.PointsOfInterest == nil {
-		session.CurrentItinerary.AIItineraryResponse.PointsOfInterest = []POIDetailedInfo{}
+		session.CurrentItinerary.AIItineraryResponse.PointsOfInterest = []poi.POIDetailedInfo{}
 	}
 }
 

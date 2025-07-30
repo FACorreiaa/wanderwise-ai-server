@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/poi"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/profiles"
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
-func (l *Service) getPersonalizedPOIWithSemanticContext(interestNames []string, cityName, tagsPromptPart, userPrefs string, semanticPOIs []POIDetailedInfo) string {
+func (l *Service) getPersonalizedPOIWithSemanticContext(interestNames []string, cityName, tagsPromptPart, userPrefs string, semanticPOIs []poi.POIDetailedInfo) string {
 	prompt := fmt.Sprintf(`
         Generate a personalized trip itinerary for %s, tailored to user interests [%s].
 
