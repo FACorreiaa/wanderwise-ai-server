@@ -95,6 +95,33 @@ func (f *ServiceFactory) CreateAndRegisterServices() error {
 	}
 	f.broker.RegisterService(chatPromptService)
 	f.logger.Info("Chat prompt service registered successfully")
-	
+
+	// Create and register Recents Service
+	recentsService, err := NewRecentsService(f.cfg, f.logger, f.db)
+	if err != nil {
+		f.logger.Error("Failed to create recents service", zap.Error(err))
+		return err
+	}
+	f.broker.RegisterService(recentsService)
+	f.logger.Info("Recents service registered successfully")
+
+	// Create and register POI Service
+	poiService, err := NewPOIService(f.cfg, f.logger, f.db)
+	if err != nil {
+		f.logger.Error("Failed to create POI service", zap.Error(err))
+		return err
+	}
+	f.broker.RegisterService(poiService)
+	f.logger.Info("POI service registered successfully")
+
+	// Create and register Statistics Service
+	statisticsService, err := NewStatisticsService(f.cfg, f.logger, f.db)
+	if err != nil {
+		f.logger.Error("Failed to create statistics service", zap.Error(err))
+		return err
+	}
+	f.broker.RegisterService(statisticsService)
+	f.logger.Info("Statistics service registered successfully")
+
 	return nil
 }

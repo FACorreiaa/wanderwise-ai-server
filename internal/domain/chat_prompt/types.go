@@ -412,15 +412,14 @@ type MessageMetadata struct {
 }
 
 type SessionContext struct {
-	CityName            string                         `json:"city_name"` // e.g., "Barcelona"
-	LastCityID          uuid.UUID                      `json:"last_city_id"`
+	CityName            string                                  `json:"city_name"` // e.g., "Barcelona"
+	LastCityID          uuid.UUID                               `json:"last_city_id"`
 	UserPreferences     *profiles.UserPreferenceProfileResponse `json:"user_preferences"`
-	ActiveInterests     []string                       `json:"active_interests"`
-	ActiveTags          []string                       `json:"active_tags"`
-	ConversationSummary string                         `json:"conversation_summary"`
-	ModificationHistory []ModificationRecord           `json:"modification_history"`
+	ActiveInterests     []string                                `json:"active_interests"`
+	ActiveTags          []string                                `json:"active_tags"`
+	ConversationSummary string                                  `json:"conversation_summary"`
+	ModificationHistory []ModificationRecord                    `json:"modification_history"`
 }
-
 
 type ModificationRecord struct {
 	Type        string    `json:"type"` // add_poi, remove_poi, change_preferences

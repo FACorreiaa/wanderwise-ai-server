@@ -15,14 +15,17 @@ import (
 type ServiceType string
 
 const (
-	AuthService        ServiceType = "auth"
-	UserService        ServiceType = "user"
-	TagsService        ServiceType = "tags"
-	InterestsService   ServiceType = "interests"
-	ProfilesService    ServiceType = "profiles"
-	CityService        ServiceType = "city"
-	ListsService       ServiceType = "lists"
-	ChatPromptService  ServiceType = "chat_prompt"
+	AuthService       ServiceType = "auth"
+	UserService       ServiceType = "user"
+	TagsService       ServiceType = "tags"
+	InterestsService  ServiceType = "interests"
+	ProfilesService   ServiceType = "profiles"
+	CityService       ServiceType = "city"
+	ListsService      ServiceType = "lists"
+	ChatPromptService ServiceType = "chat_prompt"
+	RecentsService    ServiceType = "recents"
+	POIService        ServiceType = "poi"
+	StatisticsService ServiceType = "statistics"
 	// Additional services will be added here as needed
 )
 

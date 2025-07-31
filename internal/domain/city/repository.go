@@ -151,8 +151,16 @@ func (r *RepositoryImpl) FindCityByNameAndCountry(ctx context.Context, cityName,
 	return &cityDetail, nil
 }
 
-// FindCityByFuzzyName finds the city with the most similar name using trigram similarity.
+// FindCityByFuzzyName finds the city with the most similar name using pattern matching.
 func (r *RepositoryImpl) FindCityByFuzzyName(ctx context.Context, cityName string) (*CityDetail, error) {
+	ctx, span := otel.Tracer("CityRepository").Start(ctx, "FindCityByFuzzyName", trace.WithAttributes(
+		attribute.String("city.name", cityName),
+	))
+	defer span.End()
+
+	l := r.logger.With(zap.String("method", "FindCityByFuzzyName"))
+	l.Debug("Finding city by fuzzy name", zap.String("city_name", cityName))
+
 	query := `
 		SELECT 
 			id, name, country, 
@@ -161,15 +169,32 @@ func (r *RepositoryImpl) FindCityByFuzzyName(ctx context.Context, cityName strin
 			ST_Y(center_location) as center_latitude,    -- Extract Y coordinate (latitude)
 			ST_X(center_location) as center_longitude   -- Extract X coordinate (longitude)
 		FROM cities
-		WHERE similarity(name, $1) > 0.3 -- you can adjust the threshold
-		ORDER BY similarity(name, $1) DESC
+		WHERE LOWER(name) LIKE LOWER($1) OR LOWER(name) LIKE LOWER($2) OR LOWER(name) LIKE LOWER($3)
+		ORDER BY 
+			CASE 
+				WHEN LOWER(name) = LOWER($1) THEN 1  -- exact match gets highest priority
+				WHEN LOWER(name) LIKE LOWER($1 || '%') THEN 2  -- starts with pattern
+				WHEN LOWER(name) LIKE LOWER('%' || $1 || '%') THEN 3  -- contains pattern
+				ELSE 4
+			END,
+			LENGTH(name) ASC  -- prefer shorter names for same match type
 		LIMIT 1
 	`
 
 	var cityDetail CityDetail
 	var lat, lon sql.NullFloat64 // To handle potentially NULL location
 
-	err := r.pgpool.QueryRow(ctx, query, cityName).Scan(
+	// Create pattern variations for fuzzy matching
+	exactPattern := cityName
+	startsWithPattern := cityName + "%"
+	containsPattern := "%" + cityName + "%"
+
+	l.Debug("Executing fuzzy search query", 
+		zap.String("exact_pattern", exactPattern),
+		zap.String("starts_with_pattern", startsWithPattern),
+		zap.String("contains_pattern", containsPattern))
+
+	err := r.pgpool.QueryRow(ctx, query, exactPattern, startsWithPattern, containsPattern).Scan(
 		&cityDetail.ID,
 		&cityDetail.Name,
 		&cityDetail.Country,
@@ -180,8 +205,13 @@ func (r *RepositoryImpl) FindCityByFuzzyName(ctx context.Context, cityName strin
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
+			l.Warn("No city found by fuzzy name", zap.String("city_name", cityName))
+			span.SetStatus(codes.Error, "City not found")
 			return nil, nil
 		}
+		l.Error("Failed to find city by fuzzy name", zap.String("city_name", cityName), zap.Error(err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Database query failed")
 		return nil, fmt.Errorf("failed to find city by fuzzy name '%s': %w", cityName, err)
 	}
 
@@ -191,6 +221,16 @@ func (r *RepositoryImpl) FindCityByFuzzyName(ctx context.Context, cityName strin
 	if lon.Valid {
 		cityDetail.CenterLongitude = lon.Float64
 	}
+
+	l.Info("City found by fuzzy name", 
+		zap.String("searched_city", cityName),
+		zap.String("found_city", cityDetail.Name),
+		zap.String("country", cityDetail.Country))
+	span.SetAttributes(
+		attribute.String("found.city.name", cityDetail.Name),
+		attribute.String("found.city.id", cityDetail.ID.String()),
+	)
+	span.SetStatus(codes.Ok, "City found")
 
 	return &cityDetail, nil
 }

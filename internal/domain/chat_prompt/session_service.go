@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/genai"
 
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/city"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/poi"
 )
 
@@ -49,13 +50,42 @@ func (l *Service) ContinueSessionStreamed(
 	if err != nil || cityData == nil {
 		cityData, err = l.cityRepo.FindCityByFuzzyName(ctx, session.SessionContext.CityName)
 		if err != nil || cityData == nil {
-			if err == nil {
-				err = fmt.Errorf("city '%s' not found for session %s %w", session.SessionContext.CityName, sessionID, err)
-			} else {
-				err = fmt.Errorf("failed to find city '%s' for session %s: %w", session.SessionContext.CityName, sessionID, err)
+			// Create a fallback city entry if none exists
+			l.logger.Warn("City not found in database, creating fallback entry", 
+				zap.String("city_name", session.SessionContext.CityName),
+				zap.String("session_id", sessionID.String()))
+			
+			fallbackCity := city.CityDetail{
+				Name:    session.SessionContext.CityName,
+				Country: "Unknown", // Will be updated when we have more data
+				AiSummary: fmt.Sprintf("City information for %s (created as fallback)", session.SessionContext.CityName),
 			}
-			l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeError, Error: err.Error(), IsFinal: true}, 3)
-			return err
+			
+			cityID, saveErr := l.cityRepo.SaveCity(ctx, fallbackCity)
+			if saveErr != nil {
+				l.logger.Error("Failed to create fallback city", 
+					zap.String("city_name", session.SessionContext.CityName),
+					zap.Error(saveErr))
+				if err == nil {
+					err = fmt.Errorf("city '%s' not found for session %s and failed to create fallback", session.SessionContext.CityName, sessionID)
+				} else {
+					err = fmt.Errorf("failed to find city '%s' for session %s: %w", session.SessionContext.CityName, sessionID, err)
+				}
+				l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeError, Error: err.Error(), IsFinal: true}, 3)
+				return err
+			}
+			
+			// Create cityData with the new ID
+			cityData = &city.CityDetail{
+				ID:        cityID,
+				Name:      session.SessionContext.CityName,
+				Country:   "Unknown",
+				AiSummary: fallbackCity.AiSummary,
+			}
+			
+			l.logger.Info("Created fallback city entry", 
+				zap.String("city_name", session.SessionContext.CityName),
+				zap.String("city_id", cityID.String()))
 		}
 	}
 	cityID := cityData.ID
@@ -235,8 +265,13 @@ func (l *Service) ContinueSessionStreamed(
 		Timestamp: time.Now(),
 	}, 3)
 	l.sendEvent(ctx, eventCh, StreamEvent{
-		Type:    EventTypeComplete,
-		Data:    "Turn completed.",
+		Type: EventTypeComplete,
+		Data: map[string]interface{}{
+			"message":         "Turn completed successfully",
+			"session_id":      sessionID.String(),
+			"full_response":   finalResponseMessage,
+			"final_response":  finalResponseMessage,
+		},
 		IsFinal: true,
 		Navigation: &NavigationData{
 			URL:       fmt.Sprintf("/itinerary?sessionId=%s&cityName=%s&domain=itinerary", sessionID.String(), url.QueryEscape(session.CityName)),

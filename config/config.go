@@ -34,21 +34,21 @@ type JWTConfig struct {
 type RateLimitConfig struct {
 	// Enable/disable rate limiting
 	Enabled bool `mapstructure:"enabled"`
-	
+
 	// Anonymous users (not logged in)
 	AnonymousRequests struct {
 		PerMinute int `mapstructure:"perMinute"`
 		PerHour   int `mapstructure:"perHour"`
 		PerDay    int `mapstructure:"perDay"`
 	} `mapstructure:"anonymous"`
-	
+
 	// Logged in users (free tier)
 	LoggedInUsers struct {
 		PerMinute int `mapstructure:"perMinute"`
 		PerHour   int `mapstructure:"perHour"`
 		PerDay    int `mapstructure:"perDay"`
 	} `mapstructure:"loggedIn"`
-	
+
 	// Paying users (premium tier)
 	PayingUsers struct {
 		PerMinute int `mapstructure:"perMinute"`
@@ -104,7 +104,7 @@ type Config struct {
 		GrpcPort string        `mapstructure:"GrpcPort"`
 		Timeout  time.Duration `mapstructure:"HTTPTimeout"`
 	} `mapstructure:"server"`
-	
+
 	UpstreamServices struct {
 		Auth       string `mapstructure:"auth"`
 		POI        string `mapstructure:"poi"`

@@ -2,583 +2,202 @@ package chat_prompt
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 	"google.golang.org/genai"
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/profiles"
 )
 
-func (l *Service) ProcessUnifiedChatMessageStream(ctx context.Context, userID, profileID uuid.UUID, cityName, message string, userLocation *UserLocation, eventCh chan<- StreamEvent) error {
-	//startTime := time.Now()
-	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "ProcessUnifiedChatMessageStream", trace.WithAttributes(
-		attribute.String("message", message),
-	))
-	defer span.End()
+func (l *Service) extractLocationData(metadata map[string]string) (string, *UserLocation) {
+	cityName := metadata["city_name"]
+	latStr, latOk := metadata["user_lat"]
+	lonStr, lonOk := metadata["user_lon"]
 
-	extractedCity, cleanedMessage, err := l.extractCityFromMessage(ctx, message)
-	if err != nil {
-		span.RecordError(err)
-		l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeError, Error: err.Error()}, 3)
-		return fmt.Errorf("failed to parse message: %w", err)
-	}
-	if extractedCity != "" {
-		cityName = extractedCity
-	}
-	span.SetAttributes(attribute.String("extracted.city", cityName), attribute.String("cleaned.message", cleanedMessage))
-
-	domainDetector := &DomainDetector{}
-	domain := domainDetector.DetectDomain(ctx, cleanedMessage)
-	span.SetAttributes(attribute.String("detected.domain", string(domain)))
-
-	_, searchProfile, _, err := l.FetchUserData(ctx, userID, profileID)
-	if err != nil {
-		span.RecordError(err)
-		l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeError, Error: err.Error()}, 3)
-		return fmt.Errorf("failed to fetch user data: %w", err)
-	}
-	basePreferences := getUserPreferencesPrompt(searchProfile)
-
-	var lat, lon float64
-	if userLocation == nil && searchProfile.UserLatitude != nil && searchProfile.UserLongitude != nil {
-		userLocation = &UserLocation{
-			UserLat: *searchProfile.UserLatitude,
-			UserLon: *searchProfile.UserLongitude,
+	if latOk && lonOk {
+		lat, errLat := strconv.ParseFloat(latStr, 64)
+		lon, errLon := strconv.ParseFloat(lonStr, 64)
+		if errLat == nil && errLon == nil {
+			return cityName, &UserLocation{UserLat: lat, UserLon: lon}
 		}
 	}
-	if userLocation != nil {
-		lat, lon = userLocation.UserLat, userLocation.UserLon
+
+	return cityName, nil
+}
+
+func (l *Service) ProcessUnifiedChatMessageStream(ctx context.Context, userID, profileID uuid.UUID, message string, metadata map[string]string, eventCh chan<- StreamEvent) error {
+	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "ProcessUnifiedChatMessageStream")
+	defer span.End()
+
+	fmt.Printf("DEBUG: ProcessUnifiedChatMessageStream started - user: %s, message: %s\n", userID.String(), message)
+
+	cityName, userLocation := l.extractLocationData(metadata)
+	fmt.Printf("DEBUG: Extracted city: %s, userLocation: %v\n", cityName, userLocation)
+
+	// Extract city from message if not present in metadata
+	if cityName == "" {
+		fmt.Printf("DEBUG: No city in metadata, extracting from message\n")
+		extractedCity, _, err := l.extractCityFromMessage(ctx, message)
+		if err != nil {
+			fmt.Printf("DEBUG: Failed to extract city from message: %v\n", err)
+			return fmt.Errorf("failed to parse message: %w", err)
+		}
+		cityName = extractedCity
+		fmt.Printf("DEBUG: Extracted city from message: %s\n", cityName)
 	}
 
-	sessionID := uuid.New()
+	fmt.Printf("DEBUG: Calling processStream with city: %s\n", cityName)
+	// Don't use goroutine here - we want to wait for processing to complete
+	err := l.processStream(ctx, userID, profileID, cityName, message, userLocation, eventCh)
+	fmt.Printf("DEBUG: processStream completed with error: %v\n", err)
+	return err
+}
 
+func (l *Service) processStream(ctx context.Context, userID, profileID uuid.UUID, cityName, message string, userLocation *UserLocation, eventCh chan<- StreamEvent) error {
+	_, span := otel.Tracer("LlmInteractionService").Start(ctx, "processStream")
+	defer span.End()
+
+	startTime := time.Now()
+	fmt.Printf("DEBUG: processStream started for city: %s at %s\n", cityName, startTime.Format(time.RFC3339))
+
+	// Create a new chat session
+	sessionID := uuid.New()
 	session := ChatSession{
 		ID:        sessionID,
 		UserID:    userID,
 		ProfileID: profileID,
 		CityName:  cityName,
 		ConversationHistory: []ConversationMessage{
-			{Role: "user", Content: message, Timestamp: time.Now()},
+			{
+				ID:          uuid.New(),
+				Role:        RoleUser,
+				Content:     message,
+				Timestamp:   startTime,
+				MessageType: TypeInitialRequest,
+			},
 		},
 		SessionContext: SessionContext{
 			CityName:            cityName,
-			ConversationSummary: fmt.Sprintf("Trip plan for %s", cityName),
+			ConversationSummary: fmt.Sprintf("Initial request for %s", cityName),
 		},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(24 * time.Hour),
-		Status:    "active",
+		CreatedAt: startTime,
+		UpdatedAt: startTime,
+		ExpiresAt: startTime.Add(24 * time.Hour),
+		Status:    StatusActive,
 	}
+
+	// Save the session to database
 	if err := l.repo.CreateSession(ctx, session); err != nil {
-		span.RecordError(err)
-		l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeError, Error: err.Error()}, 3)
+		fmt.Printf("DEBUG: Failed to create session: %v\n", err)
+		l.sendEvent(ctx, eventCh, StreamEvent{
+			Type:  EventTypeError,
+			Error: fmt.Sprintf("Failed to create session: %v", err),
+		}, 3)
 		return fmt.Errorf("failed to create session: %w", err)
 	}
 
-	cacheKeyData := map[string]interface{}{
-		"user_id":     userID.String(),
-		"profile_id":  profileID.String(),
-		"city":        cityName,
-		"message":     cleanedMessage,
-		"domain":      string(domain),
-		"preferences": basePreferences,
-	}
-	cacheKeyBytes, err := json.Marshal(cacheKeyData)
-	if err != nil {
-		l.logger.Error("Failed to marshal cache key data", zap.Error(err))
-		cacheKeyBytes = []byte(fmt.Sprintf("fallback_%s_%s", cleanedMessage, cityName))
-	}
-	hash := md5.Sum(cacheKeyBytes)
-	cacheKey := hex.EncodeToString(hash[:])
+	fmt.Printf("DEBUG: Created session ID: %s\n", sessionID.String())
 
-	var wg sync.WaitGroup
-	var closeOnce sync.Once
-
+	// Send start event with session ID
+	fmt.Printf("DEBUG: Sending start event\n")
 	l.sendEvent(ctx, eventCh, StreamEvent{
 		Type: EventTypeStart,
 		Data: map[string]interface{}{
-			"domain":     string(domain),
-			"city":       cityName,
+			"message":    fmt.Sprintf("Starting chat for city: %s", cityName),
+			"start_time": startTime.Format(time.RFC3339),
 			"session_id": sessionID.String(),
-			"cache_key":  cacheKey,
 		},
 	}, 3)
 
-	responses := make(map[string]*strings.Builder)
-	responsesMutex := sync.Mutex{}
-
-	sendEventWithResponse := func(event StreamEvent) {
-		if event.Type == EventTypeChunk {
-			responsesMutex.Lock()
-			if data, ok := event.Data.(map[string]interface{}); ok {
-				if partType, exists := data["part"].(string); exists {
-					if chunk, chunkExists := data["chunk"].(string); chunkExists {
-						if responses[partType] == nil {
-							responses[partType] = &strings.Builder{}
-						}
-						responses[partType].WriteString(chunk)
-					}
-				}
-			}
-			responsesMutex.Unlock()
-		}
-		l.sendEvent(ctx, eventCh, event, 3)
-	}
-
-	switch domain {
-	case profiles.DomainItinerary, profiles.DomainGeneral:
-		wg.Add(3)
-
-		go func() {
-			defer wg.Done()
-			prompt := getCityDataPrompt(cityName)
-			partCacheKey := cacheKey + "_city_data"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "city_data", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-		go func() {
-			defer wg.Done()
-			prompt := getGeneralPOIPrompt(cityName)
-			partCacheKey := cacheKey + "_general_pois"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "general_pois", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-		go func() {
-			defer wg.Done()
-			prompt := getPersonalizedItineraryPrompt(cityName, basePreferences)
-			partCacheKey := cacheKey + "_itinerary"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "itinerary", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-	case profiles.DomainAccommodation:
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			prompt := getAccommodationPrompt(cityName, lat, lon, basePreferences)
-			partCacheKey := cacheKey + "_hotels"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "hotels", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-	case profiles.DomainDining:
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			prompt := getDiningPrompt(cityName, lat, lon, basePreferences)
-			partCacheKey := cacheKey + "_restaurants"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "restaurants", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-	case profiles.DomainActivities:
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			prompt := getActivitiesPrompt(cityName, lat, lon, basePreferences)
-			partCacheKey := cacheKey + "_activities"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "activities", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-	default:
-		sendEventWithResponse(StreamEvent{Type: EventTypeError, Error: fmt.Sprintf("unhandled domain: %s", domain)})
-		return fmt.Errorf("unhandled domain type: %s", domain)
-	}
-
-	go func() {
-		wg.Wait()
-		if ctx.Err() == nil {
-			var routeType string
-			var baseURL string
-			switch domain {
-			case profiles.DomainAccommodation:
-				routeType = "hotels"
-				baseURL = "/hotels"
-			case profiles.DomainDining:
-				routeType = "restaurants"
-				baseURL = "/restaurants"
-			case profiles.DomainActivities:
-				routeType = "activities"
-				baseURL = "/activities"
-			default:
-				routeType = "itinerary"
-				baseURL = "/itinerary"
-			}
-
-			l.sendEvent(ctx, eventCh, StreamEvent{
-				Type: EventTypeComplete,
-				Data: map[string]interface{}{"session_id": sessionID.String()},
-				Navigation: &NavigationData{
-					URL:       fmt.Sprintf("%s?sessionId=%s&cityName=%s&domain=%s", baseURL, sessionID.String(), url.QueryEscape(cityName), routeType),
-					RouteType: routeType,
-					QueryParams: map[string]string{
-						"sessionId": sessionID.String(),
-						"cityName":  cityName,
-						"domain":    routeType,
-					},
-				},
-			}, 3)
-		}
-		closeOnce.Do(func() {
-			// Don't close eventCh here - it's managed by the caller
-			// close(eventCh)
-			l.logger.Info("Event processing completed by completion goroutine")
-		})
-	}()
-
-	//go func() {
-	//	asyncCtx := context.Background()
-	//
-	//	var fullResponseBuilder strings.Builder
-	//	responsesMutex.Lock()
-	//	cityDataContent := ""
-	//	if responses["city_data"] != nil {
-	//		cityDataContent = responses["city_data"].String()
-	//	}
-	//	for partType, builder := range responses {
-	//		if builder != nil && builder.Len() > 0 {
-	//			fullResponseBuilder.WriteString(fmt.Sprintf("[%s]\n%s\n\n", partType, builder.String()))
-	//		}
-	//	}
-	//	responsesMutex.Unlock()
-	//
-	//	fullResponse := fullResponseBuilder.String()
-	//	if fullResponse == "" {
-	//		fullResponse = fmt.Sprintf("Processed %s request for %s", domain, cityName)
-	//	}
-	//
-	//	var cityID uuid.UUID
-	//	if cityDataContent != "" {
-	//		l.logger.Debug("City data content received", zap.String("content", cityDataContent))
-	//		if parsedCityData, parseErr := l.parseCityDataFromResponse(asyncCtx, cityDataContent); parseErr == nil && parsedCityData != nil {
-	//			if savedCityID, handleErr := l.HandleCityData(asyncCtx, *parsedCityData); handleErr != nil {
-	//				l.logger.Warn("Failed to save city data during unified stream processing",
-	//					zap.String("city", cityName), zap.Error(handleErr))
-	//			} else {
-	//				l.logger.Info("Successfully saved city data during unified stream processing",
-	//					zap.String("city", cityName))
-	//				cityID = savedCityID
-	//			}
-	//		} else if parseErr != nil {
-	//			l.logger.Warn("Failed to parse city data from unified stream response",
-	//				zap.String("city", cityName), zap.Error(parseErr))
-	//		}
-	//	}
-	//
-	//	if cityID == uuid.Nil {
-	//		if existingCity, err := l.cityRepo.FindCityByNameAndCountry(asyncCtx, cityName, ""); err == nil && existingCity != nil {
-	//			cityID = existingCity.ID
-	//		} else {
-	//			l.logger.Warn("Could not find or save city data, skipping POI processing",
-	//				zap.String("city", cityName))
-	//			return
-	//		}
-	//	}
-	//
-	//	interaction := LlmInteraction{
-	//		ID:           uuid.New(),
-	//		SessionID:    sessionID,
-	//		UserID:       userID,
-	//		ProfileID:    profileID,
-	//		CityName:     cityName,
-	//		Prompt:       fmt.Sprintf("Unified Chat Stream - Domain: %s, Message: %s", domain, cleanedMessage),
-	//		ResponseText: fullResponse,
-	//		ModelUsed:    model,
-	//		LatencyMs:    int(time.Since(startTime).Milliseconds()),
-	//		Timestamp:    startTime,
-	//	}
-	//	savedInteractionID, err := l.repo.SaveInteraction(asyncCtx, interaction)
-	//	if err != nil {
-	//		l.logger.Error("Failed to save stream interaction", zap.Error(err))
-	//		return
-	//	}
-	//
-	//	l.logger.Info("Stream interaction saved successfully",
-	//		zap.String("saved_interaction_id", savedInteractionID.String()),
-	//		zap.String("original_session_id", sessionID.String()))
-	//
-	//	l.ProcessAndSaveUnifiedResponse(asyncCtx, responses, userID, profileID, cityID, savedInteractionID, userLocation)
-	//}()
-
-	span.SetStatus(codes.Ok, "Unified chat stream processed successfully")
-	return nil
-}
-
-func (l *Service) ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityName, message string, userLocation *UserLocation, eventCh chan<- StreamEvent) error {
-	startTime := time.Now()
-	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "ProcessUnifiedChatMessageStream", trace.WithAttributes(
-		attribute.String("message", message),
-	))
-	defer span.End()
-
-	extractedCity, cleanedMessage, err := l.extractCityFromMessage(ctx, message)
+	// Create a simple prompt for the LLM
+	prompt := fmt.Sprintf("You are a helpful travel assistant. The user asked: %s. Please provide a helpful response about %s.", message, cityName)
+	fmt.Printf("DEBUG: Created prompt: %s\n", prompt)
+	
+	// Use the AI client to generate streaming response  
+	fmt.Printf("DEBUG: Calling GenerateContentStream\n")
+	iter, err := l.aiClient.GenerateContentStream(ctx, prompt, nil)
 	if err != nil {
-		span.RecordError(err)
-		l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeError, Error: err.Error()}, 3)
-		return fmt.Errorf("failed to parse message: %w", err)
-	}
-	if extractedCity != "" {
-		cityName = extractedCity
-	}
-	span.SetAttributes(attribute.String("extracted.city", cityName), attribute.String("cleaned.message", cleanedMessage))
-
-	domainDetector := &DomainDetector{}
-	domain := domainDetector.DetectDomain(ctx, cleanedMessage)
-	span.SetAttributes(attribute.String("detected.domain", string(domain)))
-
-	sessionID := uuid.New()
-
-	session := ChatSession{
-		ID:       sessionID,
-		CityName: cityName,
-		ConversationHistory: []ConversationMessage{
-			{Role: "user", Content: message, Timestamp: time.Now()},
-		},
-		SessionContext: SessionContext{
-			CityName:            cityName,
-			ConversationSummary: fmt.Sprintf("Trip plan for %s", cityName),
-		},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(24 * time.Hour),
-		Status:    "active",
-	}
-	if err := l.repo.CreateSession(ctx, session); err != nil {
-		span.RecordError(err)
-		l.sendEvent(ctx, eventCh, StreamEvent{Type: EventTypeError, Error: err.Error()}, 3)
-		return fmt.Errorf("failed to create session: %w", err)
+		fmt.Printf("DEBUG: GenerateContentStream failed: %v\n", err)
+		l.sendEvent(ctx, eventCh, StreamEvent{
+			Type:  EventTypeError,
+			Error: fmt.Sprintf("Failed to start LLM stream: %v", err), 
+		}, 3)
+		return err
 	}
 
-	cacheKeyData := map[string]interface{}{
-		"city":    cityName,
-		"message": cleanedMessage,
-		"domain":  string(domain),
-	}
-	cacheKeyBytes, err := json.Marshal(cacheKeyData)
-	if err != nil {
-		l.logger.Error("Failed to marshal cache key data", zap.Error(err))
-		cacheKeyBytes = []byte(fmt.Sprintf("fallback_%s_%s", cleanedMessage, cityName))
-	}
-	hash := md5.Sum(cacheKeyBytes)
-	cacheKey := hex.EncodeToString(hash[:])
-
-	var wg sync.WaitGroup
-	var closeOnce sync.Once
-
-	l.sendEvent(ctx, eventCh, StreamEvent{
-		Type: EventTypeStart,
-		Data: map[string]interface{}{
-			"domain":     string(domain),
-			"city":       cityName,
-			"session_id": sessionID.String(),
-			"cache_key":  cacheKey,
-		},
-	}, 3)
-
-	responses := make(map[string]*strings.Builder)
-	responsesMutex := sync.Mutex{}
-
-	sendEventWithResponse := func(event StreamEvent) {
-		if event.Type == EventTypeChunk {
-			responsesMutex.Lock()
-			if data, ok := event.Data.(map[string]interface{}); ok {
-				if partType, exists := data["part"].(string); exists {
-					if chunk, chunkExists := data["chunk"].(string); chunkExists {
-						if responses[partType] == nil {
-							responses[partType] = &strings.Builder{}
-						}
-						responses[partType].WriteString(chunk)
-					}
-				}
-			}
-			responsesMutex.Unlock()
-		}
-		l.sendEvent(ctx, eventCh, event, 3)
-	}
-
-	switch domain {
-	case profiles.DomainItinerary, profiles.DomainGeneral:
-		wg.Add(3)
-
-		go func() {
-			defer wg.Done()
-			prompt := getCityDataPrompt(cityName)
-			partCacheKey := cacheKey + "_city_data"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "city_data", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-		go func() {
-			defer wg.Done()
-			prompt := getGeneralPOIPrompt(cityName)
-			partCacheKey := cacheKey + "_general_pois"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "general_pois", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-		go func() {
-			defer wg.Done()
-			prompt := getGeneralizedItineraryPrompt(cityName)
-			partCacheKey := cacheKey + "_itinerary"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "itinerary", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-	case profiles.DomainAccommodation:
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			prompt := getGeneralAccommodationPrompt(cityName)
-			partCacheKey := cacheKey + "_hotels"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "hotels", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-	case profiles.DomainDining:
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			prompt := getGeneralDiningPrompt(cityName)
-			partCacheKey := cacheKey + "_restaurants"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "restaurants", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-	case profiles.DomainActivities:
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			prompt := getGeneralActivitiesPrompt(cityName)
-			partCacheKey := cacheKey + "_activities"
-			l.streamWorkerWithResponseAndCache(ctx, prompt, "activities", sendEventWithResponse, domain, partCacheKey)
-		}()
-
-	default:
-		sendEventWithResponse(StreamEvent{Type: EventTypeError, Error: fmt.Sprintf("unhandled domain: %s", domain)})
-		return fmt.Errorf("unhandled domain type: %s", domain)
-	}
-
-	go func() {
-		wg.Wait()
-		if ctx.Err() == nil {
-			var routeType string
-			var baseURL string
-			switch domain {
-			case profiles.DomainAccommodation:
-				routeType = "hotels"
-				baseURL = "/hotels"
-			case profiles.DomainDining:
-				routeType = "restaurants"
-				baseURL = "/restaurants"
-			case profiles.DomainActivities:
-				routeType = "activities"
-				baseURL = "/activities"
-			default:
-				routeType = "itinerary"
-				baseURL = "/itinerary"
-			}
-
-			l.sendEvent(ctx, eventCh, StreamEvent{
-				Type: EventTypeComplete,
-				Data: map[string]interface{}{"session_id": sessionID.String()},
-				Navigation: &NavigationData{
-					URL:       fmt.Sprintf("%s?sessionId=%s&cityName=%s&domain=%s", baseURL, sessionID.String(), url.QueryEscape(cityName), routeType),
-					RouteType: routeType,
-					QueryParams: map[string]string{
-						"sessionId": sessionID.String(),
-						"cityName":  cityName,
-						"domain":    routeType,
-					},
-				},
-			}, 3)
-		}
-		closeOnce.Do(func() {
-			// Don't close eventCh here - it's managed by the caller
-			// close(eventCh)
-			l.logger.Info("Event processing completed by completion goroutine")
-		})
-	}()
-
-	go func() {
-		wg.Wait()
-
-		//asyncCtx := context.Background()
-
-		var fullResponseBuilder strings.Builder
-		responsesMutex.Lock()
-		cityDataContent := ""
-		if responses["city_data"] != nil {
-			cityDataContent = responses["city_data"].String()
-		}
-		for partType, builder := range responses {
-			if builder != nil && builder.Len() > 0 {
-				fullResponseBuilder.WriteString(fmt.Sprintf("[%s]\n%s\n\n", partType, builder.String()))
-			}
-		}
-		responsesMutex.Unlock()
-
-		fullResponse := fullResponseBuilder.String()
-		if fullResponse == "" {
-			fullResponse = fmt.Sprintf("Processed %s request for %s", domain, cityName)
-		}
-
-		var cityID uuid.UUID
-		if cityDataContent != "" {
-			l.logger.Debug("City data content received", zap.String("content", cityDataContent))
-			if parsedCityData, parseErr := l.parseCityDataFromResponse(ctx, cityDataContent); parseErr == nil && parsedCityData != nil {
-				if savedCityID, handleErr := l.HandleCityData(ctx, *parsedCityData); handleErr != nil {
-					l.logger.Warn("Failed to save city data during unified stream processing",
-						zap.String("city", cityName), zap.Error(handleErr))
-				} else {
-					l.logger.Info("Successfully saved city data during unified stream processing",
-						zap.String("city", cityName))
-					cityID = savedCityID
-				}
-			} else if parseErr != nil {
-				l.logger.Warn("Failed to parse city data from unified stream response",
-					zap.String("city", cityName), zap.Error(parseErr))
-			}
-		}
-
-		if cityID == uuid.Nil {
-			if existingCity, err := l.cityRepo.FindCityByNameAndCountry(ctx, cityName, ""); err == nil && existingCity != nil {
-				cityID = existingCity.ID
-			} else {
-				l.logger.Warn("Could not find or save city data, skipping POI processing",
-					zap.String("city", cityName))
-				return
-			}
-		}
-
-		interaction := LlmInteraction{
-			ID:           uuid.New(),
-			SessionID:    sessionID,
-			CityName:     cityName,
-			Prompt:       fmt.Sprintf("Unified Chat Stream - Domain: %s, Message: %s", domain, cleanedMessage),
-			ResponseText: fullResponse,
-			ModelUsed:    model,
-			LatencyMs:    int(time.Since(startTime).Milliseconds()),
-			Timestamp:    startTime,
-		}
-		savedInteractionID, err := l.repo.SaveInteraction(ctx, interaction)
+	fmt.Printf("DEBUG: Starting to iterate over stream responses\n")
+	// Stream the response chunks
+	chunkCount := 0
+	var fullResponse strings.Builder
+	for resp, err := range iter {
+		chunkCount++
+		fmt.Printf("DEBUG: Received chunk %d\n", chunkCount)
 		if err != nil {
-			l.logger.Error("Failed to save stream interaction", zap.Error(err))
-			return
+			l.sendEvent(ctx, eventCh, StreamEvent{
+				Type:  EventTypeError,
+				Error: fmt.Sprintf("Error during streaming: %v", err),
+			}, 3)
+			return err
 		}
+		
+		if resp != nil && len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
+			for _, part := range resp.Candidates[0].Content.Parts {
+				if part.Text != "" {
+					chunkText := part.Text
+					fullResponse.WriteString(chunkText)
+					fmt.Printf("DEBUG: AI chunk content: %q\n", chunkText)
+					
+					// Send each chunk as a streaming event with session ID
+					l.sendEvent(ctx, eventCh, StreamEvent{
+						Type: EventTypeChunk,
+						Data: map[string]interface{}{
+							"session_id": sessionID.String(),
+							"chunk":      chunkText,
+						},
+					}, 3)
+				}
+			}
+		}
+	}
+	
+	endTime := time.Now()
+	duration := endTime.Sub(startTime)
+	fmt.Printf("DEBUG: Full AI response: %q\n", fullResponse.String())
+	fmt.Printf("DEBUG: processStream completed at %s, duration: %v\n", endTime.Format(time.RFC3339), duration)
 
-		l.logger.Info("Stream interaction saved successfully (free)",
-			zap.String("saved_interaction_id", savedInteractionID.String()),
-			zap.String("original_session_id", sessionID.String()))
+	// Save the assistant's response to the session
+	assistantMessage := ConversationMessage{
+		ID:          uuid.New(),
+		Role:        RoleAssistant,
+		Content:     fullResponse.String(),
+		Timestamp:   endTime,
+		MessageType: TypeResponse,
+	}
+	
+	if err := l.repo.AddMessageToSession(ctx, sessionID, assistantMessage); err != nil {
+		fmt.Printf("DEBUG: Failed to save assistant message to session: %v\n", err)
+		// Don't fail the entire stream for this, just log it
+	}
 
-		l.ProcessAndSaveUnifiedResponseFree(ctx, responses, cityID, savedInteractionID, userLocation)
-	}()
-
-	span.SetStatus(codes.Ok, "Unified chat stream processed successfully")
+	// Send completion event with session ID and full response
+	l.sendEvent(ctx, eventCh, StreamEvent{
+		Type: EventTypeComplete,
+		Data: map[string]interface{}{
+			"message":         "Stream completed successfully",
+			"start_time":      startTime.Format(time.RFC3339),
+			"end_time":        endTime.Format(time.RFC3339),
+			"duration_ms":     duration.Milliseconds(),
+			"total_chunks":    chunkCount,
+			"session_id":      sessionID.String(),
+			"full_response":   fullResponse.String(),
+		},
+	}, 3)
 	return nil
 }
 
@@ -610,6 +229,118 @@ func (l *Service) parseCityDataFromResponse(_ context.Context, responseContent s
 	}
 
 	return &generalCity, nil
+}
+
+func (l *Service) ProcessUnifiedChatMessageStreamFree(ctx context.Context, cityName, message string, userLocation *UserLocation, eventCh chan<- StreamEvent) error {
+	ctx, span := otel.Tracer("LlmInteractionService").Start(ctx, "ProcessUnifiedChatMessageStreamFree")
+	defer span.End()
+
+	fmt.Printf("DEBUG: ProcessUnifiedChatMessageStreamFree started - message: %s\n", message)
+
+	// Extract city from message if not present in metadata
+	if cityName == "" {
+		fmt.Printf("DEBUG: No city provided, extracting from message\n")
+		extractedCity, _, err := l.extractCityFromMessage(ctx, message)
+		if err != nil {
+			fmt.Printf("DEBUG: Failed to extract city from message: %v\n", err)
+			return fmt.Errorf("failed to parse message: %w", err)
+		}
+		cityName = extractedCity
+		fmt.Printf("DEBUG: Extracted city from message: %s\n", cityName)
+	}
+
+	fmt.Printf("DEBUG: Calling processStreamFree with city: %s\n", cityName)
+	// Process as a free chat stream (no user/profile requirements)
+	err := l.processStreamFree(ctx, cityName, message, userLocation, eventCh)
+	fmt.Printf("DEBUG: processStreamFree completed with error: %v\n", err)
+	return err
+}
+
+func (l *Service) processStreamFree(ctx context.Context, cityName, message string, userLocation *UserLocation, eventCh chan<- StreamEvent) error {
+	_, span := otel.Tracer("LlmInteractionService").Start(ctx, "processStreamFree")
+	defer span.End()
+
+	startTime := time.Now()
+	fmt.Printf("DEBUG: processStreamFree started for city: %s at %s\n", cityName, startTime.Format(time.RFC3339))
+
+	// Send start event
+	fmt.Printf("DEBUG: Sending start event\n")
+	l.sendEvent(ctx, eventCh, StreamEvent{
+		Type: EventTypeStart,
+		Data: map[string]interface{}{
+			"message":    fmt.Sprintf("Starting free chat for city: %s", cityName),
+			"start_time": startTime.Format(time.RFC3339),
+		},
+	}, 3)
+
+	// Create a simple prompt for the LLM (free version - basic travel assistance)
+	prompt := fmt.Sprintf("You are a helpful travel assistant. The user asked: %s. Please provide a helpful response about %s.", message, cityName)
+	fmt.Printf("DEBUG: Created prompt: %s\n", prompt)
+	
+	// Use the AI client to generate streaming response  
+	fmt.Printf("DEBUG: Calling GenerateContentStream\n")
+	iter, err := l.aiClient.GenerateContentStream(ctx, prompt, nil)
+	if err != nil {
+		fmt.Printf("DEBUG: GenerateContentStream failed: %v\n", err)
+		l.sendEvent(ctx, eventCh, StreamEvent{
+			Type:  EventTypeError,
+			Error: fmt.Sprintf("Failed to start LLM stream: %v", err), 
+		}, 3)
+		return err
+	}
+
+	fmt.Printf("DEBUG: Starting to iterate over stream responses\n")
+	// Stream the response chunks
+	chunkCount := 0
+	var fullResponse strings.Builder
+	for resp, err := range iter {
+		chunkCount++
+		fmt.Printf("DEBUG: Received chunk %d\n", chunkCount)
+		if err != nil {
+			l.sendEvent(ctx, eventCh, StreamEvent{
+				Type:  EventTypeError,
+				Error: fmt.Sprintf("Error during streaming: %v", err),
+			}, 3)
+			return err
+		}
+		
+		if resp != nil && len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
+			for _, part := range resp.Candidates[0].Content.Parts {
+				if part.Text != "" {
+					chunkText := part.Text
+					fullResponse.WriteString(chunkText)
+					fmt.Printf("DEBUG: AI chunk content: %q\n", chunkText)
+					
+					// Send each chunk as a streaming event with session ID
+					l.sendEvent(ctx, eventCh, StreamEvent{
+						Type: EventTypeChunk,
+						Data: map[string]interface{}{
+							"session_id": "",
+							"chunk":      chunkText,
+						},
+					}, 3)
+				}
+			}
+		}
+	}
+	
+	endTime := time.Now()
+	duration := endTime.Sub(startTime)
+	fmt.Printf("DEBUG: Full AI response: %q\n", fullResponse.String())
+	fmt.Printf("DEBUG: processStreamFree completed at %s, duration: %v\n", endTime.Format(time.RFC3339), duration)
+
+	// Send completion event
+	l.sendEvent(ctx, eventCh, StreamEvent{
+		Type: EventTypeComplete,
+		Data: map[string]interface{}{
+			"message":      "Free chat stream completed successfully",
+			"start_time":   startTime.Format(time.RFC3339),
+			"end_time":     endTime.Format(time.RFC3339),
+			"duration_ms":  duration.Milliseconds(),
+			"total_chunks": chunkCount,
+		},
+	}, 3)
+	return nil
 }
 
 func (l *Service) streamWorkerWithResponseAndCache(ctx context.Context, prompt, partType string, sendEvent func(StreamEvent), domain profiles.DomainType, cacheKey string) {

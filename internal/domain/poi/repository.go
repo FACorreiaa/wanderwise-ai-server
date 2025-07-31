@@ -1060,13 +1060,13 @@ func (r *RepositoryImpl) SaveRestaurantDetails(ctx context.Context, restaurant R
 
 	// Normalize opening_hours
 	var openingHoursJSON sql.NullString // Use sql.NullString for JSONB to handle NULL correctly
-	if restaurant.OpeningHours != nil && *restaurant.OpeningHours != "" {
-		if json.Valid([]byte(*restaurant.OpeningHours)) {
-			openingHoursJSON.String = *restaurant.OpeningHours
+	if restaurant.OpeningHours != nil && len(restaurant.OpeningHours) > 0 {
+		if hoursJSON, err := json.Marshal(restaurant.OpeningHours); err == nil {
+			openingHoursJSON.String = string(hoursJSON)
 			openingHoursJSON.Valid = true
 		} else {
-			r.logger.Warn("Invalid JSON for opening_hours, setting to NULL",
-				zap.String("value", *restaurant.OpeningHours),
+			r.logger.Warn("Failed to marshal opening_hours, setting to NULL",
+				zap.Error(err),
 				zap.String("restaurant_name", restaurant.Name))
 			// openingHoursJSON remains invalid, which inserts NULL
 		}
@@ -2466,7 +2466,13 @@ func (r *RepositoryImpl) GetPOIsByLocationAndDistanceWithCategory(ctx context.Co
 			poi.PhoneNumber = phoneNumber.String
 		}
 		if openingHours.Valid {
-			poi.OpeningHours = map[string]string{"general": openingHours.String}
+			var hoursSlice []string
+			if err := json.Unmarshal([]byte(openingHours.String), &hoursSlice); err == nil {
+				poi.OpeningHours = hoursSlice
+			} else {
+				// Fallback: treat as single string
+				poi.OpeningHours = []string{openingHours.String}
+			}
 		}
 		if poiType.Valid {
 			poi.Category = poiType.String

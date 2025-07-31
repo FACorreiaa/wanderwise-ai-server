@@ -1279,16 +1279,16 @@ func TestListsService_AddListItem(t *testing.T) {
 		}
 
 		req := &pb.AddListItemRequest{
-			UserId:             "any-user-id", // Will be overridden by auth
-			ListId:             listID.String(),
-			ItemId:             itemID.String(),
-			ContentType:        pb.ContentType_CONTENT_TYPE_POI,
-			Position:           1,
-			Notes:              "Great place to visit",
-			DayNumber:          2,
-			DurationMinutes:    120,
-			ItemAiDescription:  "AI generated description",
-			Request:            &pb.BaseRequest{},
+			UserId:            "any-user-id", // Will be overridden by auth
+			ListId:            listID.String(),
+			ItemId:            itemID.String(),
+			ContentType:       pb.ContentType_CONTENT_TYPE_POI,
+			Position:          1,
+			Notes:             "Great place to visit",
+			DayNumber:         2,
+			DurationMinutes:   120,
+			ItemAiDescription: "AI generated description",
+			Request:           &pb.BaseRequest{},
 		}
 
 		// Mock expectations

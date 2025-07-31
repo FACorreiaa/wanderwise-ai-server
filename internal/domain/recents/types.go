@@ -1,4 +1,4 @@
-package poi
+package recents
 
 import (
 	"context"
@@ -13,138 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/genai"
 )
-
-// POIFilters represents filters for POI queries
-type POIFilters struct {
-	City       string `json:"city,omitempty"`
-	Category   string `json:"category,omitempty"`
-	PriceRange string `json:"price_range,omitempty"`
-}
-
-type POIDetailedInfo struct {
-	ID               uuid.UUID `json:"id,omitempty"`
-	City             string    `json:"city"`
-	CityID           uuid.UUID `json:"city_id"`
-	Name             string    `json:"name"`
-	DescriptionPOI   string    `json:"description_poi,omitempty"`
-	Distance         float64   `json:"distance"`
-	Latitude         float64   `json:"latitude,omitempty"`
-	Longitude        float64   `json:"longitude,omitempty"`
-	Category         string    `json:"category"`
-	Description      string    `json:"description"`
-	Rating           float64   `json:"rating"`
-	Address          string    `json:"address"`
-	PhoneNumber      string    `json:"phone_number"`
-	Website          string    `json:"website"`
-	OpeningHours     []string  `json:"opening_hours"`
-	Images           []string  `json:"images,omitempty"`
-	PriceRange       string    `json:"price_range"`
-	PriceLevel       string    `json:"price_level"`
-	Reviews          []string  `json:"reviews"`
-	LlmInteractionID uuid.UUID `json:"llm_interaction_id"`
-	Tags             []string  `json:"tags,omitempty"`
-	Priority         int       `json:"priority,omitempty"` // Popularity score 1-10
-	CreatedAt        time.Time `json:"created_at"`
-	CuisineType      string    `json:"cuisine_type,omitempty"` // For restaurants
-	StarRating       string    `json:"star_rating,omitempty"`  // For hotels
-	Amenities        string    `json:"amenities"`
-	PhotoUrls        []*string `json:"photo_urls,omitempty"`
-	ReviewCount      *int      `json:"review_count"`
-	IsVerified       *bool     `json:"is_verified,omitempty"`
-	Err              error     `json:"-"`
-	Source           string    `json:"source,omitempty"` // Source of the POI data (e.g., "google", "yelp", etc.)
-}
-
-// UnmarshalJSON implements custom JSON unmarshaling for POIDetailedInfo
-// to handle opening_hours field that can be either string or map[string]string
-func (p *POIDetailedInfo) UnmarshalJSON(data []byte) error {
-	// Define a temporary struct with the same fields as POIDetailedInfo
-	// but with OpeningHours as json.RawMessage to handle both string and map
-	type Alias POIDetailedInfo
-	aux := &struct {
-		OpeningHours json.RawMessage `json:"opening_hours"`
-		*Alias
-	}{
-		Alias: (*Alias)(p),
-	}
-
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	// Handle OpeningHours field
-	if len(aux.OpeningHours) > 0 {
-		// Try to unmarshal as map[string]string first
-		var hoursMap []string
-		if err := json.Unmarshal(aux.OpeningHours, &hoursMap); err == nil {
-			p.OpeningHours = hoursMap
-		} else {
-			// If that fails, try to unmarshal as string
-			var hoursString string
-			if err := json.Unmarshal(aux.OpeningHours, &hoursString); err == nil {
-				p.OpeningHours = []string{hoursString}
-			}
-		}
-	}
-
-	return nil
-}
-
-type AddPoiRequest struct {
-	ID       string           `json:"poi_id"`
-	IsLlmPoi bool             `json:"is_llm_poi"`
-	POIData  *POIDetailedInfo `json:"poi_data,omitempty"` // Optional POI data for creating new POIs
-}
-
-type UserLocation struct {
-	UserLat        float64 `json:"user_lat"`
-	UserLon        float64 `json:"user_lon"`
-	SearchRadiusKm float64 // Radius in kilometers for searching nearby POIs
-}
-
-type HotelDetailedInfo struct {
-	ID               uuid.UUID `json:"id"`
-	City             string    `json:"city"`
-	Name             string    `json:"name"`
-	Latitude         float64   `json:"latitude"`
-	Longitude        float64   `json:"longitude"`
-	Category         string    `json:"category"` // e.g., "Hotel", "Hostel"
-	Description      string    `json:"description"`
-	Address          string    `json:"address"`
-	PhoneNumber      *string   `json:"phone_number"`
-	Website          *string   `json:"website"`
-	OpeningHours     *string   `json:"opening_hours"`
-	PriceRange       *string   `json:"price_range"`
-	Rating           float64   `json:"rating"`
-	Tags             []string  `json:"tags"`
-	Images           []string  `json:"images"`
-	LlmInteractionID uuid.UUID `json:"llm_interaction_id"`
-	Err              error     `json:"-"` // Not serialized
-}
-
-type RestaurantDetailedInfo struct {
-	ID               uuid.UUID `json:"id"`
-	City             string    `json:"city"`
-	Name             string    `json:"name"`
-	Latitude         float64   `json:"latitude"`
-	Longitude        float64   `json:"longitude"`
-	Category         string    `json:"category"`
-	Description      string    `json:"description"`
-	Address          *string   `json:"address"`
-	Website          *string   `json:"website"`
-	PhoneNumber      *string   `json:"phone_number"`
-	OpeningHours     []string  `json:"opening_hours"`
-	PriceLevel       *string   `json:"price_level"`  // Changed to *string
-	CuisineType      *string   `json:"cuisine_type"` // Changed to *string
-	Tags             []string  `json:"tags"`
-	Images           []string  `json:"images"`
-	ReviewCount      *string   `json:"review_count"`
-	PhotoUrls        []*string `json:"photo_urls"`
-	IsVerified       *bool     `json:"is_verified"`
-	Rating           float64   `json:"rating"`
-	LlmInteractionID uuid.UUID `json:"llm_interaction_id"`
-	Err              error     `json:"-"`
-}
 
 type LlmInteraction struct {
 	ID                 uuid.UUID       `json:"id"`
@@ -232,6 +100,12 @@ type AIRequestPayloadForLog struct {
 type ChatTurn struct { // You might not need this explicit struct if directly using []*genai.Content
 	Role  string       `json:"role"` // "user" or "model"
 	Parts []genai.Part `json:"parts"`
+}
+
+type UserLocation struct {
+	UserLat        float64 `json:"user_lat"`
+	UserLon        float64 `json:"user_lon"`
+	SearchRadiusKm float64 // Radius in kilometers for searching nearby POIs
 }
 
 type UserSavedItinerary struct {
@@ -332,6 +206,26 @@ type HotelUserPreferences struct {
 	SearchRadiusKm      float64   `json:"search_radius_km"` // Optional, for filtering hotels within a certain radius
 }
 
+type HotelDetailedInfo struct {
+	ID               uuid.UUID `json:"id"`
+	City             string    `json:"city"`
+	Name             string    `json:"name"`
+	Latitude         float64   `json:"latitude"`
+	Longitude        float64   `json:"longitude"`
+	Category         string    `json:"category"` // e.g., "Hotel", "Hostel"
+	Description      string    `json:"description"`
+	Address          string    `json:"address"`
+	PhoneNumber      *string   `json:"phone_number"`
+	Website          *string   `json:"website"`
+	OpeningHours     *string   `json:"opening_hours"`
+	PriceRange       *string   `json:"price_range"`
+	Rating           float64   `json:"rating"`
+	Tags             []string  `json:"tags"`
+	Images           []string  `json:"images"`
+	LlmInteractionID uuid.UUID `json:"llm_interaction_id"`
+	Err              error     `json:"-"` // Not serialized
+}
+
 type HotelPreferenceRequest struct {
 	City        string               `json:"city"`
 	Lat         float64              `json:"lat"`
@@ -346,6 +240,27 @@ type RestaurantUserPreferences struct {
 	DietaryRestrictions string
 	Ambiance            string
 	SpecialFeatures     string
+}
+
+type RestaurantDetailedInfo struct {
+	ID               uuid.UUID `json:"id"`
+	City             string    `json:"city"`
+	Name             string    `json:"name"`
+	Latitude         float64   `json:"latitude"`
+	Longitude        float64   `json:"longitude"`
+	Category         string    `json:"category"`
+	Description      string    `json:"description"`
+	Address          *string   `json:"address"`
+	Website          *string   `json:"website"`
+	PhoneNumber      *string   `json:"phone_number"`
+	OpeningHours     *string   `json:"opening_hours"`
+	PriceLevel       *string   `json:"price_level"`  // Changed to *string
+	CuisineType      *string   `json:"cuisine_type"` // Changed to *string
+	Tags             []string  `json:"tags"`
+	Images           []string  `json:"images"`
+	Rating           float64   `json:"rating"`
+	LlmInteractionID uuid.UUID `json:"llm_interaction_id"`
+	Err              error     `json:"-"`
 }
 
 // Context-aware chat types
@@ -479,6 +394,75 @@ type RecentInteractionsFilter struct {
 	Search          string `json:"search"`           // Search term for city name
 	MinInteractions int    `json:"min_interactions"` // Minimum number of interactions
 	MaxInteractions int    `json:"max_interactions"` // Maximum number of interactions
+}
+
+type POIDetailedInfo struct {
+	ID               uuid.UUID         `json:"id,omitempty"`
+	City             string            `json:"city"`
+	CityID           uuid.UUID         `json:"city_id"`
+	Name             string            `json:"name"`
+	DescriptionPOI   string            `json:"description_poi,omitempty"`
+	Distance         float64           `json:"distance"`
+	Latitude         float64           `json:"latitude,omitempty"`
+	Longitude        float64           `json:"longitude,omitempty"`
+	Category         string            `json:"category"`
+	Description      string            `json:"description"`
+	Rating           float64           `json:"rating"`
+	Address          string            `json:"address"`
+	PhoneNumber      string            `json:"phone_number"`
+	Website          string            `json:"website"`
+	OpeningHours     map[string]string `json:"opening_hours"`
+	Images           []string          `json:"images,omitempty"`
+	PriceRange       string            `json:"price_range"`
+	PriceLevel       string            `json:"price_level"`
+	Reviews          []string          `json:"reviews"`
+	LlmInteractionID uuid.UUID         `json:"llm_interaction_id"`
+	Tags             []string          `json:"tags,omitempty"`
+	Priority         int               `json:"priority,omitempty"` // Popularity score 1-10
+	CreatedAt        time.Time         `json:"created_at"`
+	CuisineType      string            `json:"cuisine_type,omitempty"` // For restaurants
+	StarRating       string            `json:"star_rating,omitempty"`  // For hotels
+	Amenities        string            `json:"amenities"`
+	PhotoUrls        []*string         `json:"photo_urls,omitempty"`
+	ReviewCount      *int              `json:"review_count"`
+	IsVerified       *bool             `json:"is_verified,omitempty"`
+	Err              error             `json:"-"`
+	Source           string            `json:"source,omitempty"` // Source of the POI data (e.g., "google", "yelp", etc.)
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for POIDetailedInfo
+// to handle opening_hours field that can be either string or map[string]string
+func (p *POIDetailedInfo) UnmarshalJSON(data []byte) error {
+	// Define a temporary struct with the same fields as POIDetailedInfo
+	// but with OpeningHours as json.RawMessage to handle both string and map
+	type Alias POIDetailedInfo
+	aux := &struct {
+		OpeningHours json.RawMessage `json:"opening_hours"`
+		*Alias
+	}{
+		Alias: (*Alias)(p),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Handle OpeningHours field
+	if len(aux.OpeningHours) > 0 {
+		// Try to unmarshal as map[string]string first
+		var hoursMap map[string]string
+		if err := json.Unmarshal(aux.OpeningHours, &hoursMap); err == nil {
+			p.OpeningHours = hoursMap
+		} else {
+			// If that fails, try to unmarshal as string
+			var hoursString string
+			if err := json.Unmarshal(aux.OpeningHours, &hoursString); err == nil {
+				p.OpeningHours = map[string]string{"general": hoursString}
+			}
+		}
+	}
+
+	return nil
 }
 
 type IntentType string

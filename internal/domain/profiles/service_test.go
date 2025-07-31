@@ -72,7 +72,7 @@ func (m *MockRepository) SetDefaultSearchProfile(ctx context.Context, userID, pr
 
 func createTestProfilesService(t *testing.T, mockRepo *MockRepository) *Service {
 	logger := zap.NewNop()
-	
+
 	// Create a mock pgxpool.Pool - for this test we don't actually use it
 	var pgpool *pgxpool.Pool = nil
 
@@ -83,7 +83,7 @@ func createMockProfile() *UserPreferenceProfileResponse {
 	now := time.Now()
 	profileID := uuid.New()
 	userID := uuid.New()
-	
+
 	return &UserPreferenceProfileResponse{
 		ID:                   profileID,
 		UserID:               userID,
@@ -966,37 +966,37 @@ func TestProfileConverters(t *testing.T) {
 		params := convertPBToCreateParams(pbProfile)
 
 		assert.Equal(t, pbProfile.ProfileName, params.ProfileName)
-		
+
 		// Only true boolean values get set as pointers
 		assert.NotNil(t, params.IsDefault)
 		assert.Equal(t, pbProfile.IsDefault, *params.IsDefault)
-		
+
 		assert.NotNil(t, params.SearchRadiusKm)
 		assert.Equal(t, pbProfile.SearchRadiusKm, *params.SearchRadiusKm)
-		
+
 		assert.NotNil(t, params.PreferredTime)
 		assert.Equal(t, DayPreferenceDay, *params.PreferredTime)
-		
+
 		assert.NotNil(t, params.BudgetLevel)
 		assert.Equal(t, int(pbProfile.BudgetLevel), *params.BudgetLevel)
-		
+
 		assert.NotNil(t, params.PreferredPace)
 		assert.Equal(t, SearchPaceModerate, *params.PreferredPace)
-		
+
 		assert.NotNil(t, params.PreferAccessiblePOIs)
 		assert.Equal(t, pbProfile.PreferAccessiblePois, *params.PreferAccessiblePOIs)
-		
+
 		// This should be nil since PreferOutdoorSeating is false
 		assert.Nil(t, params.PreferOutdoorSeating)
-		
+
 		assert.NotNil(t, params.PreferDogFriendly)
 		assert.Equal(t, pbProfile.PreferDogFriendly, *params.PreferDogFriendly)
-		
+
 		assert.Equal(t, pbProfile.PreferredVibes, params.PreferredVibes)
-		
+
 		assert.NotNil(t, params.PreferredTransport)
 		assert.Equal(t, TransportPreferenceWalk, *params.PreferredTransport)
-		
+
 		assert.Equal(t, pbProfile.DietaryNeeds, params.DietaryNeeds)
 	})
 
@@ -1019,36 +1019,36 @@ func TestProfileConverters(t *testing.T) {
 		params := convertPBToUpdateParams(pbProfile)
 
 		assert.Equal(t, pbProfile.ProfileName, params.ProfileName)
-		
+
 		// IsDefault is false, so it should be nil
 		assert.Nil(t, params.IsDefault)
-		
+
 		assert.NotNil(t, params.SearchRadiusKm)
 		assert.Equal(t, pbProfile.SearchRadiusKm, *params.SearchRadiusKm)
-		
+
 		assert.NotNil(t, params.PreferredTime)
 		assert.Equal(t, DayPreferenceNight, *params.PreferredTime)
-		
+
 		assert.NotNil(t, params.BudgetLevel)
 		assert.Equal(t, int(pbProfile.BudgetLevel), *params.BudgetLevel)
-		
+
 		assert.NotNil(t, params.PreferredPace)
 		assert.Equal(t, SearchPaceFast, *params.PreferredPace)
-		
+
 		// PreferAccessiblePois is false, so it should be nil
 		assert.Nil(t, params.PreferAccessiblePOIs)
-		
+
 		assert.NotNil(t, params.PreferOutdoorSeating)
 		assert.Equal(t, pbProfile.PreferOutdoorSeating, *params.PreferOutdoorSeating)
-		
+
 		// PreferDogFriendly is false, so it should be nil
 		assert.Nil(t, params.PreferDogFriendly)
-		
+
 		assert.Equal(t, pbProfile.PreferredVibes, params.PreferredVibes)
-		
+
 		assert.NotNil(t, params.PreferredTransport)
 		assert.Equal(t, TransportPreferenceCar, *params.PreferredTransport)
-		
+
 		assert.Equal(t, pbProfile.DietaryNeeds, params.DietaryNeeds)
 	})
 }

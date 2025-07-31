@@ -90,7 +90,7 @@ func InterceptorSession(logger *zap.Logger) grpc.UnaryServerInterceptor {
 				attribute.Int("session.rate_limit", sessionCtx.RateLimit),
 			)
 			span.SetStatus(codes.Ok, "Anonymous session created")
-			logger.Info("Anonymous session created for public endpoint", 
+			logger.Info("Anonymous session created for public endpoint",
 				zap.String("method", info.FullMethod),
 				zap.Bool("is_reflection", strings.HasPrefix(info.FullMethod, "/grpc.reflection.")))
 
@@ -98,7 +98,7 @@ func InterceptorSession(logger *zap.Logger) grpc.UnaryServerInterceptor {
 		}
 
 		// This method requires authentication - log it
-		logger.Info("Method requires authentication", 
+		logger.Info("Method requires authentication",
 			zap.String("method", info.FullMethod),
 			zap.Bool("in_map", unauthenticatedMethods[info.FullMethod]),
 			zap.Bool("has_reflection_prefix", strings.HasPrefix(info.FullMethod, "/grpc.reflection.")))
@@ -362,7 +362,7 @@ func InterceptorSessionStream(logger *zap.Logger) grpc.StreamServerInterceptor {
 				attribute.Int("session.rate_limit", sessionCtx.RateLimit),
 			)
 			span.SetStatus(codes.Ok, "Anonymous session created")
-			logger.Info("STREAM: Anonymous session created for public endpoint", 
+			logger.Info("STREAM: Anonymous session created for public endpoint",
 				zap.String("method", info.FullMethod),
 				zap.Bool("is_reflection", strings.HasPrefix(info.FullMethod, "/grpc.reflection.")))
 
@@ -372,7 +372,7 @@ func InterceptorSessionStream(logger *zap.Logger) grpc.StreamServerInterceptor {
 		}
 
 		// This stream method requires authentication - log it
-		logger.Info("STREAM: Method requires authentication", 
+		logger.Info("STREAM: Method requires authentication",
 			zap.String("method", info.FullMethod),
 			zap.Bool("in_map", unauthenticatedMethods[info.FullMethod]),
 			zap.Bool("has_reflection_prefix", strings.HasPrefix(info.FullMethod, "/grpc.reflection.")))

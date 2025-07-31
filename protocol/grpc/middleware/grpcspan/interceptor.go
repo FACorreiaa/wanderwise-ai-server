@@ -12,10 +12,10 @@ import (
 // rather than having to update the servers and clients individually.
 func Handlers() (middleware.ClientHandler, middleware.ServerHandler) {
 	return middleware.ClientHandler{
-		Handler: otelgrpc.NewClientHandler(),
-	}, middleware.ServerHandler{
-		Handler: otelgrpc.NewServerHandler(),
-	}
+			Handler: otelgrpc.NewClientHandler(),
+		}, middleware.ServerHandler{
+			Handler: otelgrpc.NewServerHandler(),
+		}
 }
 
 // Deprecated: Use Handlers() instead

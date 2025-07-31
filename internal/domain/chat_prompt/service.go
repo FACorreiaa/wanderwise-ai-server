@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"time"
 
 	pb "github.com/FACorreiaa/loci-proto/modules/chat/generated"
@@ -15,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -27,8 +27,34 @@ import (
 	poiDomain "github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/poi"
 	profilesDomain "github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/profiles"
 	tagsDomain "github.com/FACorreiaa/go-poi-au-suggestions/internal/domain/tags"
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
+
+func (svc *Service) startStreamProcessing(
+	ctx context.Context,
+	processFunc func(ctx context.Context, eventCh chan<- StreamEvent) error,
+	eventCh chan<- StreamEvent,
+) {
+	defer func() {
+		if r := recover(); r != nil {
+			svc.logger.Error("Panic recovered in stream processing", zap.Any("panic", r))
+			// Ensure the channel is not closed while trying to send to it
+			select {
+			case eventCh <- StreamEvent{Type: EventTypeError, Error: "internal server error"}:
+			case <-ctx.Done():
+			}
+		}
+		close(eventCh)
+	}()
+
+	if err := processFunc(ctx, eventCh); err != nil {
+		// Log the error and send an error event
+		svc.logger.Error("Error processing stream", zap.Error(err))
+		select {
+		case eventCh <- StreamEvent{Type: EventTypeError, Error: err.Error()}:
+		case <-ctx.Done():
+		}
+	}
+}
 
 type IntentClassifier interface {
 	Classify(ctx context.Context, message string) (IntentType, error)
@@ -109,7 +135,8 @@ func NewService(
 }
 
 func (svc *Service) StartChatStream(req *pb.StartChatRequest, stream pb.ChatService_StartChatStreamServer) error {
-	ctx := stream.Context()
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
 
 	userID, err := domain.CheckUserAuth(ctx)
 	if err != nil {
@@ -117,10 +144,8 @@ func (svc *Service) StartChatStream(req *pb.StartChatRequest, stream pb.ChatServ
 	}
 
 	ctx, span := svc.tracer.Start(ctx, "ChatService.StartChatStream", trace.WithAttributes(
-		attribute.String("chat.operation", "start_chat_stream"),
 		attribute.String("chat.user_id", userID),
 		attribute.String("chat.profile_id", req.ProfileId),
-		attribute.String("chat.initial_message", req.InitialMessage),
 	))
 	defer span.End()
 
@@ -134,212 +159,350 @@ func (svc *Service) StartChatStream(req *pb.StartChatRequest, stream pb.ChatServ
 		return status.Errorf(codes.InvalidArgument, "invalid profile ID: %v", err)
 	}
 
-	req.UserId = userID
+	return svc.handleStream(ctx, stream, func(eventCh chan<- StreamEvent) error {
+		return svc.ProcessUnifiedChatMessageStream(ctx, userUUID, profileUUID, req.InitialMessage, req.Metadata, eventCh)
+	})
+}
 
+func (svc *Service) handleStream(ctx context.Context, stream grpc.ServerStream, processFunc func(eventCh chan<- StreamEvent) error) error {
 	eventCh := make(chan StreamEvent, 200)
-
-	// Create a cancellable context with timeout for the streaming goroutine
-	streamCtx, cancelStream := context.WithTimeout(ctx, 20*time.Second) // 20 second max
-	defer cancelStream()                                                // Cancel when function exits
+	errCh := make(chan error, 1)
 
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				svc.logger.Error("Panic in StartChatStream", zap.Any("panic", r))
-				select {
-				case eventCh <- StreamEvent{
-					Type:      EventTypeError,
-					Error:     "Internal server error",
-					Timestamp: time.Now(),
-					EventID:   uuid.New().String(),
-				}:
-				case <-ctx.Done():
-				}
-			}
-		}()
-
-		_ = req.ContextType
-
-		cityName := ""
-		var userLocation *UserLocation
-
-		if req.Metadata != nil {
-			if city, exists := req.Metadata["city_name"]; exists {
-				cityName = city
-			}
-			if lat, exists := req.Metadata["user_lat"]; exists {
-				if lon, exists := req.Metadata["user_lon"]; exists {
-					if latFloat, err := strconv.ParseFloat(lat, 64); err == nil {
-						if lonFloat, err := strconv.ParseFloat(lon, 64); err == nil {
-							userLocation = &UserLocation{
-								UserLat: latFloat,
-								UserLon: lonFloat,
-							}
-						}
-					}
-				}
-			}
+		defer close(errCh)
+		defer close(eventCh)
+		if err := processFunc(eventCh); err != nil {
+			errCh <- err
 		}
-
-		var typesUserLocation *types.UserLocation
-		if userLocation != nil {
-			typesUserLocation = &types.UserLocation{
-				UserLat: userLocation.UserLat,
-				UserLon: userLocation.UserLon,
-			}
-		}
-
-		// Call the domain service's own LLM processing method
-		fmt.Printf("DEBUG: Starting LLM stream for user %s, message: %s\n", userID, req.InitialMessage)
-
-		// Convert types.UserLocation to domain UserLocation if needed
-		var domainUserLocation *UserLocation
-		if typesUserLocation != nil {
-			domainUserLocation = &UserLocation{
-				UserLat: typesUserLocation.UserLat,
-				UserLon: typesUserLocation.UserLon,
-			}
-		}
-
-		// Create a wrapper channel with debug logging
-		wrappedEventCh := make(chan StreamEvent, 100)
-
-		// Start a goroutine to forward events with debug logging
-		go func() {
-			defer func() {
-				close(wrappedEventCh)
-				fmt.Printf("DEBUG: Closed wrappedEventCh\n")
-			}()
-
-			fmt.Printf("DEBUG: Starting ProcessUnifiedChatMessageStream\n")
-
-			// Call the domain service's own stream processing method
-			err := svc.ProcessUnifiedChatMessageStream(
-				streamCtx, // Use cancellable context
-				userUUID,
-				profileUUID,
-				cityName,
-				req.InitialMessage,
-				domainUserLocation,
-				wrappedEventCh,
-			)
-
-			fmt.Printf("DEBUG: ProcessUnifiedChatMessageStream completed with error: %v\n", err)
-
-			if err != nil && streamCtx.Err() == nil {
-				svc.logger.Error("Failed to process unified chat message stream", zap.Error(err))
-				select {
-				case wrappedEventCh <- StreamEvent{
-					Type:      EventTypeError,
-					Error:     err.Error(),
-					Timestamp: time.Now(),
-					EventID:   uuid.New().String(),
-				}:
-				case <-streamCtx.Done():
-				}
-			}
-		}()
-
-		// Forward events from wrapped channel to main eventCh with debug logging
-		fmt.Printf("DEBUG: Starting event forwarding loop\n")
-		go func() {
-			defer close(eventCh)
-			for {
-				select {
-				case event, ok := <-wrappedEventCh:
-					if !ok {
-						fmt.Printf("DEBUG: wrappedEventCh closed, ending forwarding\n")
-						return
-					}
-
-					// Debug print to see LLM output in terminal
-					fmt.Printf("DEBUG LLM OUTPUT: Type=%s, Data=%s, Error=%s\n", event.Type, event.Data, event.Error)
-
-					select {
-					case eventCh <- event:
-					case <-streamCtx.Done():
-						fmt.Printf("DEBUG: Context cancelled during event forwarding\n")
-						return
-					}
-
-				case <-streamCtx.Done():
-					fmt.Printf("DEBUG: Context cancelled, stopping event forwarding\n")
-					return
-				}
-			}
-		}()
 	}()
 
-	// Stream events back to client
 	for {
 		select {
 		case event, ok := <-eventCh:
 			if !ok {
-				return nil // Channel closed, streaming complete
+				// processFunc has finished
+				return nil
 			}
-
 			pbEvent, err := svc.convertStreamEventToChatEvent(event)
 			if err != nil {
-				svc.logger.Error("Failed to convert stream event to chat event", zap.Error(err))
-				continue
+				svc.logger.Error("Failed to convert stream event", zap.Error(err))
+				continue // Or handle more gracefully
+			}
+			if err := stream.SendMsg(pbEvent); err != nil {
+				svc.logger.Error("Failed to send message to stream", zap.Error(err))
+				return err // Client disconnected or other stream error
 			}
 
-			if err := stream.Send(pbEvent); err != nil {
-				svc.logger.Error("Failed to send chat event", zap.Error(err))
-				// Cancel the stream context to stop background processing
-				cancelStream()
-
-				// Check if it's a client disconnect
-				if status.Code(err) == codes.Canceled || status.Code(err) == codes.Unavailable {
-					svc.logger.Info("Client disconnected during streaming")
-					return nil
-				}
+		case err := <-errCh:
+			if err != nil {
+				svc.logger.Error("Error during stream processing", zap.Error(err))
+				// Decide if you want to send an error message to the client
 				return err
 			}
 
-			if event.Type == EventTypeComplete || event.Type == EventTypeError {
-				return nil
-			}
-
 		case <-ctx.Done():
-			svc.logger.Info("Client disconnected from chat stream")
+			svc.logger.Info("Stream cancelled by client")
 			return ctx.Err()
 		}
 	}
 }
 
 func (svc *Service) ContinueChatStream(req *pb.ContinueChatRequest, stream pb.ChatService_ContinueChatStreamServer) error {
-	// Implementation placeholder - similar pattern to StartChatStream
-	return status.Error(codes.Unimplemented, "ContinueChatStream not yet implemented")
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+
+	userID, err := domain.CheckUserAuth(ctx)
+	if err != nil {
+		return err
+	}
+
+	ctx, span := svc.tracer.Start(ctx, "ChatService.ContinueChatStream", trace.WithAttributes(
+		attribute.String("chat.user_id", userID),
+		attribute.String("chat.session_id", req.SessionId),
+	))
+	defer span.End()
+
+	sessionUUID, err := uuid.Parse(req.SessionId)
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument, "invalid session ID: %v", err)
+	}
+
+	return svc.handleStream(ctx, stream, func(eventCh chan<- StreamEvent) error {
+		return svc.ContinueSessionStreamed(ctx, sessionUUID, req.Message, nil, eventCh)
+	})
 }
 
 func (svc *Service) FreeChatStream(req *pb.FreeChatRequest, stream pb.ChatService_FreeChatStreamServer) error {
-	// Implementation placeholder - similar pattern to StartChatStream
-	return status.Error(codes.Unimplemented, "FreeChatStream not yet implemented")
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+
+	ctx, span := svc.tracer.Start(ctx, "ChatService.FreeChatStream", trace.WithAttributes(
+		attribute.String("chat.message", req.Message),
+	))
+	defer span.End()
+
+	return svc.handleStream(ctx, stream, func(eventCh chan<- StreamEvent) error {
+		return svc.ProcessUnifiedChatMessageStreamFree(ctx, "", req.Message, nil, eventCh)
+	})
 }
 
 func (svc *Service) GetChatSessions(ctx context.Context, req *pb.GetChatSessionsRequest) (*pb.GetChatSessionsResponse, error) {
-	return &pb.GetChatSessionsResponse{}, nil
+	userID, err := domain.CheckUserAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, span := svc.tracer.Start(ctx, "ChatService.GetChatSessions", trace.WithAttributes(
+		attribute.String("chat.user_id", userID),
+		attribute.Int("limit", int(req.Limit)),
+		attribute.Int("offset", int(req.Offset)),
+	))
+	defer span.End()
+
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid user ID: %v", err)
+	}
+
+	// Convert offset to page number (assuming offset-based pagination)
+	limit := int(req.Limit)
+	if limit < 1 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	offset := int(req.Offset)
+	if offset < 0 {
+		offset = 0
+	}
+
+	page := (offset / limit) + 1
+
+	response, err := svc.GetUserChatSessions(ctx, userUUID, page, limit)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get chat sessions: %v", err)
+	}
+
+	// Convert domain response to protobuf
+	pbSessions := make([]*pb.ChatSession, len(response.Sessions))
+	for i, session := range response.Sessions {
+		pbSessions[i] = &pb.ChatSession{
+			Id:           session.ID.String(),
+			UserId:       userID,
+			Title:        session.CityName, // Use city name as title for now
+			CreatedAt:    timestamppb.New(session.CreatedAt),
+			UpdatedAt:    timestamppb.New(session.UpdatedAt),
+			MessageCount: 0, // Will need to be calculated if needed
+		}
+	}
+
+	return &pb.GetChatSessionsResponse{
+		Sessions:   pbSessions,
+		TotalCount: int32(response.Total),
+	}, nil
 }
 
 func (svc *Service) SaveItinerary(ctx context.Context, req *pb.SaveItineraryRequest) (*pb.SaveItineraryResponse, error) {
-	return &pb.SaveItineraryResponse{}, nil
+	userID, err := domain.CheckUserAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, span := svc.tracer.Start(ctx, "ChatService.SaveItinerary", trace.WithAttributes(
+		attribute.String("chat.user_id", userID),
+		attribute.String("itinerary.title", req.Title),
+	))
+	defer span.End()
+
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid user ID: %v", err)
+	}
+
+	if req.Title == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "title is required")
+	}
+
+	// Create the bookmark request from protobuf
+	var description *string
+	if req.Description != "" {
+		description = &req.Description
+	}
+
+	bookmarkReq := BookmarkRequest{
+		Title:       req.Title,
+		Description: description,
+	}
+
+	// The protobuf only has SessionId, so use that
+	if req.SessionId != "" {
+		sessionUUID, err := uuid.Parse(req.SessionId)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid session_id: %v", err)
+		}
+		bookmarkReq.SessionID = &sessionUUID
+	} else {
+		return nil, status.Errorf(codes.InvalidArgument, "session_id is required")
+	}
+
+	itineraryID, err := svc.SaveItenerary(ctx, userUUID, bookmarkReq)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to save itinerary: %v", err)
+	}
+
+	return &pb.SaveItineraryResponse{
+		ItineraryId: itineraryID.String(),
+		Success:     true,
+		Message:     "Itinerary saved successfully",
+	}, nil
 }
 
 func (svc *Service) GetSavedItineraries(ctx context.Context, req *pb.GetSavedItinerariesRequest) (*pb.GetSavedItinerariesResponse, error) {
-	return &pb.GetSavedItinerariesResponse{}, nil
+	userID, err := domain.CheckUserAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, span := svc.tracer.Start(ctx, "ChatService.GetSavedItineraries", trace.WithAttributes(
+		attribute.String("chat.user_id", userID),
+		attribute.Int("limit", int(req.Limit)),
+		attribute.Int("offset", int(req.Offset)),
+	))
+	defer span.End()
+
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid user ID: %v", err)
+	}
+
+	// Convert offset to page number
+	limit := int(req.Limit)
+	if limit < 1 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	offset := int(req.Offset)
+	if offset < 0 {
+		offset = 0
+	}
+
+	page := (offset / limit) + 1
+
+	response, err := svc.GetBookmarkedItineraries(ctx, userUUID, page, limit)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get saved itineraries: %v", err)
+	}
+
+	// Convert domain response to protobuf
+	pbItineraries := make([]*pb.UserSavedItinerary, len(response.Itineraries))
+	for i, itinerary := range response.Itineraries {
+		description := ""
+		if itinerary.Description.Valid {
+			description = itinerary.Description.String
+		}
+
+		pbItineraries[i] = &pb.UserSavedItinerary{
+			Id:            itinerary.ID.String(),
+			UserId:        userID,
+			Title:         itinerary.Title,
+			Description:   description,
+			ItineraryData: "", // JSON data would go here if available
+			CreatedAt:     timestamppb.New(itinerary.CreatedAt),
+			UpdatedAt:     timestamppb.New(itinerary.UpdatedAt),
+		}
+	}
+
+	return &pb.GetSavedItinerariesResponse{
+		Itineraries: pbItineraries,
+		TotalCount:  int32(response.TotalRecords),
+	}, nil
 }
 
 func (svc *Service) RemoveItinerary(ctx context.Context, req *pb.RemoveItineraryRequest) (*pb.RemoveItineraryResponse, error) {
-	return &pb.RemoveItineraryResponse{}, nil
+	userID, err := domain.CheckUserAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, span := svc.tracer.Start(ctx, "ChatService.RemoveItinerary", trace.WithAttributes(
+		attribute.String("chat.user_id", userID),
+		attribute.String("itinerary.id", req.ItineraryId),
+	))
+	defer span.End()
+
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid user ID: %v", err)
+	}
+
+	itineraryUUID, err := uuid.Parse(req.ItineraryId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid itinerary ID: %v", err)
+	}
+
+	err = svc.RemoveItenerary(ctx, userUUID, itineraryUUID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to remove itinerary: %v", err)
+	}
+
+	return &pb.RemoveItineraryResponse{
+		Success: true,
+		Message: "Itinerary removed successfully",
+	}, nil
 }
 
 func (svc *Service) GetPOIDetails(ctx context.Context, req *pb.GetPOIDetailsRequest) (*pb.GetPOIDetailsResponse, error) {
-	return &pb.GetPOIDetailsResponse{}, nil
+	userID, err := domain.CheckUserAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, span := svc.tracer.Start(ctx, "ChatService.GetPOIDetails", trace.WithAttributes(
+		attribute.String("chat.user_id", userID),
+		attribute.String("poi.poi_id", req.PoiId),
+		attribute.Bool("include_reviews", req.IncludeReviews),
+		attribute.Bool("include_photos", req.IncludePhotos),
+	))
+	defer span.End()
+
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid user ID: %v", err)
+	}
+
+	if req.PoiId == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "poi_id is required")
+	}
+
+	poiUUID, err := uuid.Parse(req.PoiId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid poi_id: %v", err)
+	}
+
+	// Note: The existing GetPOIDetailedInfosResponse method expects city name and coordinates
+	// For now, we'll return a placeholder implementation since the API signature doesn't match
+	// In a real implementation, you'd need a method that takes POI ID
+	_ = userUUID
+	_ = poiUUID
+
+	return &pb.GetPOIDetailsResponse{
+		Poi: &pb.POIDetailedInfo{
+			Id:          req.PoiId,
+			Name:        "Placeholder POI",
+			Description: "This is a placeholder implementation. The actual implementation would fetch POI details by ID.",
+		},
+	}, nil
 }
 
 // convertStreamEventToChatEvent converts domain StreamEvent to protobuf ChatEvent
 func (svc *Service) convertStreamEventToChatEvent(event StreamEvent) (*pb.ChatEvent, error) {
+	fmt.Printf("DEBUG: Converting event - Type: %s, Message: %q, Data: %v\n", event.Type, event.Message, event.Data)
+
 	pbEvent := &pb.ChatEvent{
 		EventType: event.Type,
 		Data:      event.Message,
@@ -367,6 +530,13 @@ func (svc *Service) convertStreamEventToChatEvent(event StreamEvent) (*pb.ChatEv
 			},
 		}
 	case EventTypeComplete:
+		// For complete events, set the Data field to the full response
+		if data, ok := event.Data.(map[string]interface{}); ok {
+			if fullResponse, exists := data["full_response"].(string); exists {
+				pbEvent.Data = fullResponse
+			}
+		}
+
 		pbEvent.Payload = &pb.ChatEvent_Complete{
 			Complete: &pb.CompleteEvent{
 				SessionId:   pbEvent.SessionId,
@@ -374,11 +544,24 @@ func (svc *Service) convertStreamEventToChatEvent(event StreamEvent) (*pb.ChatEv
 			},
 		}
 	case EventTypeMessage, EventTypeChunk:
+		content := event.Message
+		if content == "" && event.Data != nil {
+			// For chunk events, the content might be in Data field
+			if dataStr, ok := event.Data.(string); ok {
+				content = dataStr
+			} else if dataMap, ok := event.Data.(map[string]interface{}); ok {
+				// New format: chunk is in the "chunk" field
+				if chunkStr, exists := dataMap["chunk"].(string); exists {
+					content = chunkStr
+				}
+			}
+		}
+
 		pbEvent.Payload = &pb.ChatEvent_Message{
 			Message: &pb.ChatMessage{
 				Id:        event.EventID,
 				SessionId: pbEvent.SessionId,
-				Content:   event.Message,
+				Content:   content,
 				Role:      "assistant",
 				CreatedAt: timestamppb.New(event.Timestamp),
 			},

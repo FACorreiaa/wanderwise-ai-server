@@ -29,10 +29,10 @@ func NewChatPromptService(cfg *config.Config, logger *zap.Logger, db *pgxpool.Po
 	tagsRepo := tagsDomain.NewRepositoryImpl(db, logger)
 	cityRepo := cityDomain.NewCityRepository(db, logger)
 	poiRepo := poiDomain.NewRepository(db, logger)
-	
+
 	// Create domain services
 	profilesService := profilesDomain.NewService(context.Background(), profilesRepo, db, logger)
-	
+
 	// Create domain service with all injected dependencies
 	chatPromptService, err := chatPromptDomain.NewService(
 		context.Background(),

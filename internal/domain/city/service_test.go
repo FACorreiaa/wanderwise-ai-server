@@ -172,7 +172,7 @@ func TestService_GetCities(t *testing.T) {
 			expectedError: false,
 			validateResp: func(t *testing.T, resp *pb.GetCitiesResponse) {
 				assert.NotNil(t, resp)
-				assert.Len(t, resp.Cities, 2) // Should return 2 cities (offset 1, limit 2)
+				assert.Len(t, resp.Cities, 2)              // Should return 2 cities (offset 1, limit 2)
 				assert.Equal(t, int32(3), resp.TotalCount) // Total count should still be 3
 				assert.Equal(t, "success", resp.Response.Status)
 			},
@@ -788,7 +788,7 @@ func TestConvertToPBCity(t *testing.T) {
 				assert.NotNil(t, city.Metadata)
 				assert.NotNil(t, city.CreatedAt)
 				assert.NotNil(t, city.UpdatedAt)
-				
+
 				// Check that unset fields have appropriate defaults
 				assert.Equal(t, "", city.CountryCode)
 				assert.Equal(t, "", city.Timezone)
@@ -852,7 +852,7 @@ func TestService_NewService(t *testing.T) {
 // Benchmark tests
 func BenchmarkConvertToPBCity(b *testing.B) {
 	city := createSampleCity()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		convertToPBCity(&city)
@@ -862,17 +862,17 @@ func BenchmarkConvertToPBCity(b *testing.B) {
 func BenchmarkService_GetCities(b *testing.B) {
 	service, mockRepo := createTestService()
 	ctx := context.Background()
-	
+
 	cities := createSampleCities()
 	mockRepo.On("GetAllCities", mock.Anything).Return(cities, nil)
-	
+
 	request := &pb.GetCitiesRequest{
 		Limit:       10,
 		Offset:      0,
 		CountryCode: "",
 		PopularOnly: false,
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = service.GetCities(ctx, request)

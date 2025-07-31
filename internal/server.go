@@ -10,11 +10,14 @@ import (
 	"sync/atomic"
 
 	pba "github.com/FACorreiaa/loci-proto/modules/auth/generated"
-	pbc "github.com/FACorreiaa/loci-proto/modules/city/generated"
 	pbch "github.com/FACorreiaa/loci-proto/modules/chat/generated"
+	pbc "github.com/FACorreiaa/loci-proto/modules/city/generated"
 	pbi "github.com/FACorreiaa/loci-proto/modules/interests/generated"
 	pbl "github.com/FACorreiaa/loci-proto/modules/list/generated"
+	pbpo "github.com/FACorreiaa/loci-proto/modules/poi/generated"
 	pbp "github.com/FACorreiaa/loci-proto/modules/profiles/generated"
+	pbr "github.com/FACorreiaa/loci-proto/modules/recents/generated"
+	pbs "github.com/FACorreiaa/loci-proto/modules/statistics/generated"
 	pbt "github.com/FACorreiaa/loci-proto/modules/tags/generated"
 	pbu "github.com/FACorreiaa/loci-proto/modules/user/generated"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -102,6 +105,21 @@ func ServeGRPC(ctx context.Context, port string, app *Application, reg *promethe
 
 	if err := registerChatPromptService(server, app.Broker, log); err != nil {
 		log.Error("failed to register chat prompt service", zap.Error(err))
+		return err
+	}
+
+	if err := registerRecentsService(server, app.Broker, log); err != nil {
+		log.Error("failed to register recents service", zap.Error(err))
+		return err
+	}
+
+	if err := registerPOIService(server, app.Broker, log); err != nil {
+		log.Error("failed to register POI service", zap.Error(err))
+		return err
+	}
+
+	if err := registerStatisticsService(server, app.Broker, log); err != nil {
+		log.Error("failed to register statistics service", zap.Error(err))
 		return err
 	}
 
@@ -357,5 +375,59 @@ func registerChatPromptService(server *grpc.Server, brokerInstance *broker.Broke
 
 	pbch.RegisterChatServiceServer(server, chatPromptImpl.GetGRPCService())
 	log.Info("Chat prompt service registered with gRPC server")
+	return nil
+}
+
+func registerRecentsService(server *grpc.Server, brokerInstance *broker.Broker, log *zap.Logger) error {
+	service, exists := brokerInstance.GetService(broker.RecentsService)
+	if !exists {
+		log.Error("Recents service not found in broker")
+		return errors.New("recents service not found in broker")
+	}
+
+	recentsImpl, ok := service.(*broker.RecentsServiceImpl)
+	if !ok {
+		log.Error("Failed to cast recents service to RecentsServiceImpl")
+		return errors.New("failed to cast recents service")
+	}
+
+	pbr.RegisterRecentsServiceServer(server, recentsImpl.GetGRPCService())
+	log.Info("Recents service registered with gRPC server")
+	return nil
+}
+
+func registerPOIService(server *grpc.Server, brokerInstance *broker.Broker, log *zap.Logger) error {
+	service, exists := brokerInstance.GetService(broker.POIService)
+	if !exists {
+		log.Error("POI service not found in broker")
+		return errors.New("POI service not found in broker")
+	}
+
+	poiImpl, ok := service.(*broker.POIServiceImpl)
+	if !ok {
+		log.Error("Failed to cast POI service to POIServiceImpl")
+		return errors.New("failed to cast POI service")
+	}
+
+	pbpo.RegisterPOIServiceServer(server, poiImpl.GetGRPCService())
+	log.Info("POI service registered with gRPC server")
+	return nil
+}
+
+func registerStatisticsService(server *grpc.Server, brokerInstance *broker.Broker, log *zap.Logger) error {
+	service, exists := brokerInstance.GetService(broker.StatisticsService)
+	if !exists {
+		log.Error("Statistics service not found in broker")
+		return errors.New("statistics service not found in broker")
+	}
+
+	statisticsImpl, ok := service.(*broker.StatisticsServiceImpl)
+	if !ok {
+		log.Error("Failed to cast statistics service to StatisticsServiceImpl")
+		return errors.New("failed to cast statistics service")
+	}
+
+	pbs.RegisterStatisticsServiceServer(server, statisticsImpl.GetGRPCService())
+	log.Info("Statistics service registered with gRPC server")
 	return nil
 }
