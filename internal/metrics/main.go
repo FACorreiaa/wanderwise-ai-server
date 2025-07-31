@@ -1,16 +1,15 @@
 package metrics
 
 import (
-	"fmt"
-	"log"
 	"net/http"
-	_ "net/http/pprof" //nolint:gosec
+	"net/http/pprof"
 )
 
-func InitPprof() {
-	go func() {
-		log.Println("\nRunning pprof!")
-		log.Println("\nOpen http://localhost:6060/debug/pprof/ in your browser")
-		fmt.Println(http.ListenAndServe(":6060", nil)) //nolint:gosec
-	}()
+// InitPprof registers the pprof handlers on the given ServeMux.
+func InitPprof(mux *http.ServeMux) {
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 }

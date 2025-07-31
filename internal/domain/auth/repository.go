@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,48 +15,39 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/FACorreiaa/go-poi-au-suggestions/internal/domain"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
 )
 
-var _ AuthRepo = (*PostgresAuthRepo)(nil)
+var _ Repository = (*PostgresAuthRepo)(nil)
 
-type AuthRepo interface {
-	// GetUserByEmail fetches user details needed for validation/token generation.
-	GetUserByEmail(ctx context.Context, email string) (*domain.UserAuth, error)
-	// GetUserByID fetches user details by ID.
-	GetUserByID(ctx context.Context, userID string) (*domain.UserAuth, error)
-	// Register stores a new user with a HASHED password. Returns new user ID.
+type Repository interface {
+	GetUserByEmail(ctx context.Context, email string) (*UserAuth, error)
+	GetUserByID(ctx context.Context, userID string) (*UserAuth, error)
 	Register(ctx context.Context, username, email, hashedPassword string) (string, error)
-	// VerifyPassword checks if the given password matches the hash for the userID.
 	VerifyPassword(ctx context.Context, userID, password string) error // Password is plain text here
-	// UpdatePassword updates the user's HASHED password.
 	UpdatePassword(ctx context.Context, userID, newHashedPassword string) error
 
-	// provider specific methods for user management
-	CreateUser(ctx context.Context, user *domain.UserAuth) error
+	// CreateUser specific methods for user management
+	CreateUser(ctx context.Context, user *UserAuth) error
 	CreateUserProvider(ctx context.Context, userID, provider, providerUserID string) error
 	GetUserIDByProvider(ctx context.Context, provider, providerUserID string) (string, error)
 
-	// --- Refresh Token Handling ---
-	// StoreRefreshToken saves a new refresh token for a user.
+	// StoreRefreshToken --- Refresh Token Handling ---
 	StoreRefreshToken(ctx context.Context, userID, token string, expiresAt time.Time) error
-	// ValidateRefreshTokenAndGetUserID checks if a refresh token is valid and returns the user ID.
 	ValidateRefreshTokenAndGetUserID(ctx context.Context, refreshToken string) (userID string, err error)
-	// InvalidateRefreshToken marks a specific refresh token as revoked.
 	InvalidateRefreshToken(ctx context.Context, refreshToken string) error
-	// InvalidateAllUserRefreshTokens marks all tokens for a user as revoked.
 	InvalidateAllUserRefreshTokens(ctx context.Context, userID string) error
 }
 
 type PostgresAuthRepo struct {
-	logger *slog.Logger
+	logger *zap.Logger
 	pgpool *pgxpool.Pool
 }
 
-func NewPostgresAuthRepo(pgxpool *pgxpool.Pool, logger *slog.Logger) *PostgresAuthRepo {
+func NewPostgresAuthRepo(pgxpool *pgxpool.Pool, logger *zap.Logger) *PostgresAuthRepo {
 	return &PostgresAuthRepo{
 		logger: logger,
 		pgpool: pgxpool,
@@ -65,23 +55,23 @@ func NewPostgresAuthRepo(pgxpool *pgxpool.Pool, logger *slog.Logger) *PostgresAu
 }
 
 // GetUserByEmail implements auth.AuthRepo.
-func (r *PostgresAuthRepo) GetUserByEmail(ctx context.Context, email string) (*domain.UserAuth, error) {
-	var user domain.UserAuth
+func (r *PostgresAuthRepo) GetUserByEmail(ctx context.Context, email string) (*UserAuth, error) {
+	var user UserAuth
 	query := `SELECT id, username, email, password_hash FROM users WHERE email = $1 AND is_active = TRUE`
 	err := r.pgpool.QueryRow(ctx, query, email).Scan(&user.ID, &user.Username, &user.Email, &user.Password)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("user with email %s not found: %w", email, types.ErrNotFound) // Use a domain error
 		}
-		r.logger.ErrorContext(ctx, "Error fetching user by email", slog.Any("error", err), slog.String("email", email))
+		r.logger.Error("Error fetching user by email", zap.Error(err), zap.String("email", email))
 		return nil, fmt.Errorf("database error fetching user: %w", err)
 	}
 	return &user, nil
 }
 
 // GetUserByID implements auth.AuthRepo.
-func (r *PostgresAuthRepo) GetUserByID(ctx context.Context, userID string) (*domain.UserAuth, error) {
-	var user domain.UserAuth
+func (r *PostgresAuthRepo) GetUserByID(ctx context.Context, userID string) (*UserAuth, error) {
+	var user UserAuth
 	// Select fields needed by token generation or other logic
 	query := `SELECT id, username, email FROM users WHERE id = $1 AND is_active = TRUE`
 	err := r.pgpool.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Username, &user.Email)
@@ -89,7 +79,7 @@ func (r *PostgresAuthRepo) GetUserByID(ctx context.Context, userID string) (*dom
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("user with ID %s not found: %w", userID, types.ErrNotFound) // Use a domain error
 		}
-		r.logger.ErrorContext(ctx, "Error fetching user by ID", slog.Any("error", err), slog.String("userID", userID))
+		r.logger.Error("Error fetching user by ID", zap.Error(err), zap.String("userID", userID))
 		return nil, fmt.Errorf("database error fetching user by ID: %w", err)
 	}
 	return &user, nil
@@ -103,7 +93,7 @@ func (r *PostgresAuthRepo) Register(ctx context.Context, username, email, hashed
 	ctx, span := tracer.Start(ctx, "PostgresAuthRepo.Register", trace.WithAttributes(
 		semconv.DBSystemPostgreSQL,
 		attribute.String("db.system", "postgresql"),
-		attribute.String("db.statement", "INSERT INTO users ..."),
+		attribute.String("db.statement", "INSERT INTO users"),
 	))
 	defer span.End()
 
@@ -121,7 +111,7 @@ func (r *PostgresAuthRepo) Register(ctx context.Context, username, email, hashed
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return "", fmt.Errorf("email or username already exists: %w", types.ErrConflict)
 		}
-		r.logger.ErrorContext(ctx, "Error inserting user", slog.Any("error", err), slog.String("email", email))
+		r.logger.Error("Error inserting user", zap.Error(err), zap.String("email", email))
 		return "", fmt.Errorf("database error registering user: %w", err)
 	}
 
@@ -142,19 +132,18 @@ func (r *PostgresAuthRepo) VerifyPassword(ctx context.Context, userID, password 
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("user not found: %w", types.ErrNotFound)
 		}
-		r.logger.ErrorContext(ctx, "Error fetching password hash for verification", slog.Any("error", err), slog.String("userID", userID))
+		r.logger.Error("Error fetching password hash for verification", zap.Error(err), zap.String("userID", userID))
 		return fmt.Errorf("database error verifying password: %w", err)
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password))
 	if err != nil {
 		// Don't log the actual password, but log the failure type
-		l := r.logger.With(slog.String("userID", userID))
 		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-			l.WarnContext(ctx, "Password mismatch during verification")
+			r.logger.Warn("Password mismatch during verification", zap.String("userID", userID))
 			return fmt.Errorf("invalid password: %w", types.ErrUnauthenticated) // Specific error
 		}
-		l.ErrorContext(ctx, "Error comparing password hash", slog.Any("error", err))
+		r.logger.Error("Error comparing password hash", zap.Error(err), zap.String("userID", userID))
 		return fmt.Errorf("error during password comparison: %w", err)
 	}
 	return nil
@@ -165,11 +154,11 @@ func (r *PostgresAuthRepo) UpdatePassword(ctx context.Context, userID, newHashed
 	query := `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND is_active = TRUE`
 	tag, err := r.pgpool.Exec(ctx, query, newHashedPassword, userID)
 	if err != nil {
-		r.logger.ErrorContext(ctx, "Error updating password hash", slog.Any("error", err), slog.String("userID", userID))
+		r.logger.Error("Error updating password hash", zap.Error(err), zap.String("userID", userID))
 		return fmt.Errorf("database error updating password: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		r.logger.WarnContext(ctx, "User not found or no password change needed during update", slog.String("userID", userID))
+		r.logger.Warn("User not found or no password change needed during update", zap.String("userID", userID))
 		return fmt.Errorf("user not found or password unchanged: %w", types.ErrNotFound) // Or a different domain error
 	}
 	return nil
@@ -180,7 +169,7 @@ func (r *PostgresAuthRepo) StoreRefreshToken(ctx context.Context, userID, token 
 	query := `INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)`
 	_, err := r.pgpool.Exec(ctx, query, userID, token, expiresAt)
 	if err != nil {
-		r.logger.ErrorContext(ctx, "Error storing refresh token", slog.Any("error", err), slog.String("userID", userID))
+		r.logger.Error("Error storing refresh token", zap.Error(err), zap.String("userID", userID))
 		return fmt.Errorf("database error storing refresh token: %w", err)
 	}
 	return nil
@@ -198,7 +187,7 @@ func (r *PostgresAuthRepo) ValidateRefreshTokenAndGetUserID(ctx context.Context,
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", fmt.Errorf("refresh token not found: %w", types.ErrUnauthenticated)
 		}
-		r.logger.ErrorContext(ctx, "Error querying refresh token", slog.Any("error", err))
+		r.logger.Error("Error querying refresh token", zap.Error(err))
 		return "", fmt.Errorf("database error validating refresh token: %w", err)
 	}
 
@@ -217,11 +206,11 @@ func (r *PostgresAuthRepo) InvalidateRefreshToken(ctx context.Context, refreshTo
 	query := `UPDATE refresh_tokens SET revoked_at = NOW() WHERE token = $1 AND revoked_at IS NULL`
 	tag, err := r.pgpool.Exec(ctx, query, refreshToken)
 	if err != nil {
-		r.logger.ErrorContext(ctx, "Error invalidating refresh token", slog.Any("error", err))
+		r.logger.Error("Error invalidating refresh token", zap.Error(err))
 		return fmt.Errorf("database error invalidating token: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		r.logger.WarnContext(ctx, "Refresh token not found or already invalidated during invalidation attempt")
+		r.logger.Warn("Refresh token not found or already invalidated during invalidation attempt")
 		// Depending on context (e.g., logout), this might not be a critical error
 		// return fmt.Errorf("token not found or already revoked: %w", ErrNotFound)
 	}
@@ -233,7 +222,7 @@ func (r *PostgresAuthRepo) InvalidateAllUserRefreshTokens(ctx context.Context, u
 	query := `UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`
 	_, err := r.pgpool.Exec(ctx, query, userID)
 	if err != nil {
-		r.logger.ErrorContext(ctx, "Error invalidating all refresh tokens for user", slog.Any("error", err), slog.String("userID", userID))
+		r.logger.Error("Error invalidating all refresh tokens for user", zap.Error(err), zap.String("userID", userID))
 		return fmt.Errorf("database error invalidating tokens: %w", err)
 	}
 	// Log how many were invalidated? (tag.RowsAffected())
@@ -250,30 +239,30 @@ func (r *PostgresAuthRepo) GetUserIDByProvider(ctx context.Context, provider, pr
 		))
 	defer span.End()
 
-	l := r.logger.With(slog.String("method", "GetUserIDByProvider"))
+	l := r.logger.With(zap.String("method", "GetUserIDByProvider"))
 
 	var userID string
 	query := `SELECT user_id FROM user_providers WHERE provider = $1 AND provider_user_id = $2`
 	err := r.pgpool.QueryRow(ctx, query, provider, providerUserID).Scan(&userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			l.InfoContext(ctx, "No user found for provider", slog.String("provider", provider), slog.String("provider_user_id", providerUserID))
+			l.Info("No user found for provider", zap.String("provider", provider), zap.String("provider_user_id", providerUserID))
 			span.SetStatus(codes.Ok, "No user found")
 			return "", nil // No user found, not an error
 		}
-		l.ErrorContext(ctx, "Failed to query user by provider", slog.Any("error", err))
+		l.Error("Failed to query user by provider", zap.Error(err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Database query failed")
 		return "", err
 	}
 
-	l.InfoContext(ctx, "User found for provider", slog.String("user_id", userID))
+	l.Info("User found for provider", zap.String("user_id", userID))
 	span.SetStatus(codes.Ok, "User found")
 	return userID, nil
 }
 
 // CreateUser creates a new user in the database
-func (r *PostgresAuthRepo) CreateUser(ctx context.Context, user *domain.UserAuth) error {
+func (r *PostgresAuthRepo) CreateUser(ctx context.Context, user *UserAuth) error {
 	ctx, span := otel.Tracer("UserRepository").Start(ctx, "CreateUser",
 		trace.WithAttributes(
 			attribute.String("email", user.Email),
@@ -281,7 +270,7 @@ func (r *PostgresAuthRepo) CreateUser(ctx context.Context, user *domain.UserAuth
 		))
 	defer span.End()
 
-	l := r.logger.With(slog.String("method", "CreateUser"))
+	l := r.logger.With(zap.String("method", "CreateUser"))
 
 	query := `
         INSERT INTO users (id, username, email, role, created_at)
@@ -293,12 +282,12 @@ func (r *PostgresAuthRepo) CreateUser(ctx context.Context, user *domain.UserAuth
 	err := r.pgpool.QueryRow(ctx, query, user.Username, user.Email, user.Role, time.Now()).Scan(&id, &createdAt)
 	if err != nil {
 		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" { // Unique violation (email)
-			l.WarnContext(ctx, "Email already exists", slog.String("email", user.Email))
+			l.Warn("Email already exists", zap.String("email", user.Email))
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "Email conflict")
 			return types.ErrConflict
 		}
-		l.ErrorContext(ctx, "Failed to create user", slog.Any("error", err))
+		l.Error("Failed to create user", zap.Error(err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Database insert failed")
 		return err
@@ -308,7 +297,7 @@ func (r *PostgresAuthRepo) CreateUser(ctx context.Context, user *domain.UserAuth
 	user.ID = id
 	user.CreatedAt = createdAt
 
-	l.InfoContext(ctx, "User created successfully", slog.String("user_id", user.ID))
+	l.Info("User created successfully", zap.String("user_id", user.ID))
 	span.SetStatus(codes.Ok, "User created")
 	return nil
 }
@@ -323,7 +312,7 @@ func (r *PostgresAuthRepo) CreateUserProvider(ctx context.Context, userID, provi
 		))
 	defer span.End()
 
-	l := r.logger.With(slog.String("method", "CreateUserProvider"))
+	l := r.logger.With(zap.String("method", "CreateUserProvider"))
 
 	query := `
         INSERT INTO user_providers (user_id, provider, provider_user_id, created_at)
@@ -332,18 +321,18 @@ func (r *PostgresAuthRepo) CreateUserProvider(ctx context.Context, userID, provi
 	_, err := r.pgpool.Exec(ctx, query, userID, provider, providerUserID, time.Now())
 	if err != nil {
 		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" { // Unique violation (provider+provider_user_id)
-			l.WarnContext(ctx, "Provider link already exists", slog.String("provider", provider), slog.String("provider_user_id", providerUserID))
+			l.Warn("Provider link already exists", zap.String("provider", provider), zap.String("provider_user_id", providerUserID))
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "Provider link conflict")
 			return types.ErrConflict
 		}
-		l.ErrorContext(ctx, "Failed to create provider link", slog.Any("error", err))
+		l.Error("Failed to create provider link", zap.Error(err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Database insert failed")
 		return err
 	}
 
-	l.InfoContext(ctx, "Provider linked successfully", slog.String("user_id", userID), slog.String("provider", provider))
+	l.Info("Provider linked successfully", zap.String("user_id", userID), zap.String("provider", provider))
 	span.SetStatus(codes.Ok, "Provider linked")
 	return nil
 }
