@@ -2,8 +2,6 @@
 # This file extends docker-compose.yml with development-specific configurations
 # It's automatically loaded by docker-compose
 
-version: '3.8'
-
 services:
   # Make sure the OTel Collector can reach the locally running Go app
   otel-collector:

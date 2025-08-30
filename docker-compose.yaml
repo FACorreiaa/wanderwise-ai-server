@@ -1,7 +1,43 @@
-version: '3.8'
-
 services:
   # === Infrastructure Services ===
+
+  # Envoy Proxy for grpc-web
+  envoy:
+    image: envoyproxy/envoy:v1.28-latest
+    container_name: envoy-grpc-web
+    ports:
+      - "8080:8080"  # grpc-web port
+      - "9901:9901"  # Envoy admin port
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    depends_on:
+      - go-ai-poi-server
+
+  # Main Go Application
+  go-ai-poi-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: go-ai-poi-server
+    env_file:
+      - .env
+    ports:
+      - "8081:8080"  # HTTP port (offset to avoid conflict with Envoy)
+      - "9000:9000"  # gRPC port
+    networks:
+      - microservices-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - GRPC_PORT=9000
+      - HTTP_PORT=8080
 
   # PostgreSQL Database
   postgres:

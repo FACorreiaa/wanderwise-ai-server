@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24.5-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # Install air for hot reloading
 RUN go install github.com/air-verse/air@latest
