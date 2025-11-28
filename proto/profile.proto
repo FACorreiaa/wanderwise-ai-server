@@ -1,0 +1,193 @@
+syntax = "proto3";
+
+package loci.profile;
+
+option go_package = "github.com/your-org/go-ai-poi-server/gen/proto/profile";
+
+import "google/protobuf/timestamp.proto";
+import "proto/common.proto";
+import "proto/interest.proto";
+
+// Enums for preferences
+enum DayPreference {
+  DAY_PREFERENCE_UNSPECIFIED = 0;
+  DAY_PREFERENCE_ANY = 1;
+  DAY_PREFERENCE_DAY = 2;
+  DAY_PREFERENCE_NIGHT = 3;
+}
+
+enum SearchPace {
+  SEARCH_PACE_UNSPECIFIED = 0;
+  SEARCH_PACE_ANY = 1;
+  SEARCH_PACE_RELAXED = 2;
+  SEARCH_PACE_MODERATE = 3;
+  SEARCH_PACE_FAST = 4;
+}
+
+enum TransportPreference {
+  TRANSPORT_PREFERENCE_UNSPECIFIED = 0;
+  TRANSPORT_PREFERENCE_ANY = 1;
+  TRANSPORT_PREFERENCE_WALK = 2;
+  TRANSPORT_PREFERENCE_PUBLIC = 3;
+  TRANSPORT_PREFERENCE_CAR = 4;
+}
+
+// AccommodationPreferences represents accommodation-specific filters
+message AccommodationPreferences {
+  string id = 1;
+  string user_preference_id = 2;
+  repeated string accommodation_type = 3;
+  optional loci.common.RangeFilter star_rating = 4;
+  optional loci.common.RangeFilter price_range_per_night = 5;
+  repeated string amenities = 6;
+  repeated string room_type = 7;
+  optional string chain_preference = 8;
+  repeated string cancellation_policy = 9;
+  optional string booking_flexibility = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+// DiningPreferences represents dining-specific filters
+message DiningPreferences {
+  string id = 1;
+  string user_preference_id = 2;
+  repeated string cuisine_types = 3;
+  repeated string meal_types = 4;
+  repeated string service_style = 5;
+  optional loci.common.RangeFilter price_range_per_person = 6;
+  repeated string dietary_needs = 7;
+  repeated string allergen_free = 8;
+  bool michelin_rated = 9;
+  bool local_recommendations = 10;
+  optional string chain_vs_local = 11;
+  bool organic_preference = 12;
+  bool outdoor_seating_preferred = 13;
+  google.protobuf.Timestamp created_at = 14;
+  google.protobuf.Timestamp updated_at = 15;
+}
+
+// ActivityPreferences represents activity-specific filters
+message ActivityPreferences {
+  string id = 1;
+  string user_preference_id = 2;
+  repeated string activity_categories = 3;
+  optional string physical_activity_level = 4;
+  optional string indoor_outdoor_preference = 5;
+  optional string cultural_immersion_level = 6;
+  optional string must_see_vs_hidden_gems = 7;
+  bool educational_preference = 8;
+  bool photography_opportunities = 9;
+  repeated string season_specific_activities = 10;
+  bool avoid_crowds = 11;
+  repeated string local_events_interest = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+}
+
+// ItineraryPreferences represents itinerary planning-specific filters
+message ItineraryPreferences {
+  string id = 1;
+  string user_preference_id = 2;
+  optional string planning_style = 3;
+  optional string preferred_pace = 4;
+  optional string time_flexibility = 5;
+  optional string morning_vs_evening = 6;
+  optional string weekend_vs_weekday = 7;
+  repeated string preferred_seasons = 8;
+  bool avoid_peak_season = 9;
+  optional string adventure_vs_relaxation = 10;
+  optional string spontaneous_vs_planned = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+}
+
+// UserPreferenceProfile represents a user's preference profile
+message UserPreferenceProfile {
+  string id = 1;
+  string user_id = 2;
+  string profile_name = 3;
+  bool is_default = 4;
+  double search_radius_km = 5;
+  DayPreference preferred_time = 6;
+  int32 budget_level = 7;
+  SearchPace preferred_pace = 8;
+  bool prefer_accessible_pois = 9;
+  bool prefer_outdoor_seating = 10;
+  bool prefer_dog_friendly = 11;
+  repeated string preferred_vibes = 12;
+  TransportPreference preferred_transport = 13;
+  repeated string dietary_needs = 14;
+  repeated loci.interest.Interest interests = 15;
+  repeated loci.interest.Tags tags = 16;
+  optional double user_latitude = 17;
+  optional double user_longitude = 18;
+  optional AccommodationPreferences accommodation_preferences = 19;
+  optional DiningPreferences dining_preferences = 20;
+  optional ActivityPreferences activity_preferences = 21;
+  optional ItineraryPreferences itinerary_preferences = 22;
+  google.protobuf.Timestamp created_at = 23;
+  google.protobuf.Timestamp updated_at = 24;
+}
+
+// CreateUserPreferenceProfileRequest for creating a preference profile
+message CreateUserPreferenceProfileRequest {
+  string profile_name = 1;
+  optional bool is_default = 2;
+  optional double search_radius_km = 3;
+  optional DayPreference preferred_time = 4;
+  optional int32 budget_level = 5;
+  optional SearchPace preferred_pace = 6;
+  optional bool prefer_accessible_pois = 7;
+  optional bool prefer_outdoor_seating = 8;
+  optional bool prefer_dog_friendly = 9;
+  repeated string preferred_vibes = 10;
+  optional TransportPreference preferred_transport = 11;
+  repeated string dietary_needs = 12;
+  repeated string tag_ids = 13;
+  repeated string interest_ids = 14;
+  optional AccommodationPreferences accommodation_preferences = 15;
+  optional DiningPreferences dining_preferences = 16;
+  optional ActivityPreferences activity_preferences = 17;
+  optional ItineraryPreferences itinerary_preferences = 18;
+}
+
+// UpdateUserPreferenceProfileRequest for updating a preference profile
+message UpdateUserPreferenceProfileRequest {
+  string profile_id = 1;
+  optional string profile_name = 2;
+  optional bool is_default = 3;
+  optional double search_radius_km = 4;
+  optional DayPreference preferred_time = 5;
+  optional int32 budget_level = 6;
+  optional SearchPace preferred_pace = 7;
+  optional bool prefer_accessible_pois = 8;
+  optional bool prefer_outdoor_seating = 9;
+  optional bool prefer_dog_friendly = 10;
+  repeated string preferred_vibes = 11;
+  optional TransportPreference preferred_transport = 12;
+  repeated string dietary_needs = 13;
+  repeated string tag_ids = 14;
+  repeated string interest_ids = 15;
+  optional AccommodationPreferences accommodation_preferences = 16;
+  optional DiningPreferences dining_preferences = 17;
+  optional ActivityPreferences activity_preferences = 18;
+  optional ItineraryPreferences itinerary_preferences = 19;
+}
+
+// GetUserPreferenceProfilesRequest for retrieving user preference profiles
+message GetUserPreferenceProfilesRequest {
+  optional string user_id = 1;
+}
+
+// GetUserPreferenceProfilesResponse for preference profiles retrieval
+message GetUserPreferenceProfilesResponse {
+  repeated UserPreferenceProfile profiles = 1;
+}
+
+// ProfileService defines profile-related RPCs
+service ProfileService {
+  rpc GetUserPreferenceProfiles(GetUserPreferenceProfilesRequest) returns (GetUserPreferenceProfilesResponse);
+  rpc CreateUserPreferenceProfile(CreateUserPreferenceProfileRequest) returns (loci.common.Response);
+  rpc UpdateUserPreferenceProfile(UpdateUserPreferenceProfileRequest) returns (loci.common.Response);
+}

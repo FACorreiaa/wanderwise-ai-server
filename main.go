@@ -183,6 +183,7 @@ func main() {
 		CityHandler:             c.CityHandler,
 		RecentsHandler:          c.RecentsHandler,
 		StatisticsHandler:       c.StatisticsHandler,
+		DiscoverHandler:         c.DiscoverHandler,
 		AuthenticateMiddleware:  authenticateMiddleware,
 		RateLimiter:             c.RateLimiter,
 		Logger:                  logger,

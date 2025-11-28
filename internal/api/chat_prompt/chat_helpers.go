@@ -10,64 +10,11 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/utils"
 )
 
 func generatePOICacheKey(city string, lat, lon, distance float64, userID uuid.UUID) string {
 	return fmt.Sprintf("poi:%s:%f:%f:%f:%s", city, lat, lon, distance, userID.String())
-}
-
-func cleanJSONResponse(response string) string {
-	response = strings.TrimSpace(response)
-
-	// Remove markdown code block markers
-	if strings.HasPrefix(response, "```json") {
-		response = strings.TrimPrefix(response, "```json")
-	} else if strings.HasPrefix(response, "```") {
-		response = strings.TrimPrefix(response, "```")
-	}
-
-	response = strings.TrimSuffix(response, "```")
-
-	response = strings.TrimSpace(response)
-
-	firstBrace := strings.Index(response, "{")
-	if firstBrace == -1 {
-		return response // No JSON found, return as is
-	}
-
-	// Find the matching closing brace by counting braces
-	braceCount := 0
-	var lastValidBrace int
-	for i := firstBrace; i < len(response); i++ {
-		switch response[i] {
-		case '{':
-			braceCount++
-		case '}':
-			braceCount--
-			if braceCount == 0 {
-				lastValidBrace = i
-				break
-			}
-		}
-	}
-
-	if braceCount != 0 {
-		// Fallback to last brace method if brace counting fails
-		lastBrace := strings.LastIndex(response, "}")
-		if lastBrace == -1 || lastBrace <= firstBrace {
-			return response // No valid JSON structure found
-		}
-		lastValidBrace = lastBrace
-	}
-
-	// Extract the JSON portion
-	jsonPortion := response[firstBrace : lastValidBrace+1]
-
-	// Remove any remaining backticks that might be within the JSON content
-	// This handles cases where the AI includes markdown formatting within JSON strings
-	jsonPortion = strings.ReplaceAll(jsonPortion, "`", "")
-
-	return strings.TrimSpace(jsonPortion)
 }
 
 // extractPOIName extracts the full POI name from the message
@@ -201,7 +148,7 @@ func (l *ServiceImpl) handleGeneralPoisFromResponse(ctx context.Context, content
 	var poiData struct {
 		PointsOfInterest []types.POIDetailedInfo `json:"points_of_interest"`
 	}
-	if err := json.Unmarshal([]byte(cleanJSONResponse(content)), &poiData); err != nil {
+	if err := json.Unmarshal([]byte(utils.CleanJSONResponse(content)), &poiData); err != nil {
 		l.logger.ErrorContext(ctx, "Failed to parse general POIs from unified response", slog.Any("error", err))
 		return
 	}
@@ -221,7 +168,7 @@ func (l *ServiceImpl) handleItineraryFromResponse(
 		OverallDescription string                  `json:"overall_description"`
 		PointsOfInterest   []types.POIDetailedInfo `json:"points_of_interest"`
 	}
-	if err := json.Unmarshal([]byte(cleanJSONResponse(content)), &itineraryData); err != nil {
+	if err := json.Unmarshal([]byte(utils.CleanJSONResponse(content)), &itineraryData); err != nil {
 		l.logger.ErrorContext(ctx, "Failed to parse itinerary from unified response", slog.Any("error", err))
 		return
 	}
@@ -237,7 +184,7 @@ func (l *ServiceImpl) handleHotelsFromResponse(ctx context.Context, content stri
 	var hotelData struct {
 		Hotels []types.HotelDetailedInfo `json:"hotels"`
 	}
-	if err := json.Unmarshal([]byte(cleanJSONResponse(content)), &hotelData); err != nil {
+	if err := json.Unmarshal([]byte(utils.CleanJSONResponse(content)), &hotelData); err != nil {
 		l.logger.ErrorContext(ctx, "Failed to parse hotels from unified response", slog.Any("error", err))
 		return
 	}
@@ -258,7 +205,7 @@ func (l *ServiceImpl) handleRestaurantsFromResponse(ctx context.Context, content
 	var restaurantData struct {
 		Restaurants []types.RestaurantDetailedInfo `json:"restaurants"`
 	}
-	if err := json.Unmarshal([]byte(cleanJSONResponse(content)), &restaurantData); err != nil {
+	if err := json.Unmarshal([]byte(utils.CleanJSONResponse(content)), &restaurantData); err != nil {
 		l.logger.ErrorContext(ctx, "Failed to parse restaurants from unified response", slog.Any("error", err))
 		return
 	}

@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/utils"
 )
 
 var _ Repository = (*RepositoryImpl)(nil)
@@ -1629,7 +1630,7 @@ func (r *RepositoryImpl) GetPOIsBySessionSortedByDistance(ctx context.Context, _
 // }
 
 func parsePOIsFromResponse(responseText string, logger *slog.Logger) ([]types.POIDetailedInfo, error) {
-	cleanedResponse := cleanJSONResponse(responseText)
+	cleanedResponse := utils.CleanJSONResponse(responseText)
 
 	// Debug logging to see the actual cleaned response
 	logger.Debug("parsePOIsFromResponse: Cleaned response debug",

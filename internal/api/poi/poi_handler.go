@@ -400,19 +400,47 @@ func (h *HandlerImpl) GetPOIs(w http.ResponseWriter, r *http.Request) {
 	l := h.logger.With(slog.String("HandlerImpl", "SearchPOIs"))
 	l.DebugContext(ctx, "Search POIs HandlerImpl invoked")
 
+	// Check if this is a text-based search (q + city parameters)
+	query := r.URL.Query().Get("q")
+	cityName := r.URL.Query().Get("city")
+
+	if query != "" && cityName != "" {
+		// Text-based search mode
+		l.DebugContext(ctx, "Using text-based search", slog.String("query", query), slog.String("city", cityName))
+
+		// Get city ID from city name using the POI service
+		// We'll need to add a helper method to the service for this
+		pois, err := h.poiService.SearchPOIsByQueryAndCity(ctx, query, cityName)
+		if err != nil {
+			l.ErrorContext(ctx, "Failed to search POIs by query and city", slog.Any("error", err))
+			api.ErrorResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to search POIs: %s", err.Error()))
+			return
+		}
+
+		l.InfoContext(ctx, "Successfully searched POIs by query and city")
+		api.WriteJSONResponse(w, r, http.StatusOK, map[string]interface{}{
+			"pois": pois,
+		})
+		return
+	}
+
+	// Geo-based search mode (original behavior)
 	lat, err := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
 	if err != nil {
 		l.ErrorContext(ctx, "Invalid lat format", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid or missing latitude parameter")
 		return
 	}
 	lon, err := strconv.ParseFloat(r.URL.Query().Get("lon"), 64)
 	if err != nil {
 		l.ErrorContext(ctx, "Invalid lon format", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid or missing longitude parameter")
 		return
 	}
 	radius, err := strconv.ParseFloat(r.URL.Query().Get("radius"), 64)
 	if err != nil {
 		l.ErrorContext(ctx, "Invalid format", slog.Any("error", err))
+		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid or missing radius parameter")
 		return
 	}
 	category := r.URL.Query().Get("category")
@@ -1081,18 +1109,22 @@ func (h *HandlerImpl) GetNearbyRecommendations(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Get user ID from context
+	// Get user ID from context (optional - works for both authenticated and unauthenticated users)
+	var userID uuid.UUID
 	userIDStr, ok := auth.GetUserIDFromContext(ctx)
-	if !ok || userIDStr == "" {
-		l.ErrorContext(ctx, "User ID not found in context")
-		api.ErrorResponse(w, r, http.StatusUnauthorized, "Authentication required")
-		return
-	}
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		l.ErrorContext(ctx, "Invalid user ID format", slog.Any("error", err))
-		api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
-		return
+	if ok && userIDStr != "" {
+		parsedID, err := uuid.Parse(userIDStr)
+		if err != nil {
+			l.ErrorContext(ctx, "Invalid user ID format", slog.Any("error", err))
+			api.ErrorResponse(w, r, http.StatusBadRequest, "Invalid user ID format")
+			return
+		}
+		userID = parsedID
+		l.DebugContext(ctx, "Fetching nearby POIs for authenticated user", slog.String("user_id", userID.String()))
+	} else {
+		// Unauthenticated user - use nil UUID
+		userID = uuid.Nil
+		l.DebugContext(ctx, "Fetching nearby POIs for unauthenticated user")
 	}
 
 	pois, err := h.poiService.GetGeneralPOIByDistance(ctx, userID, lat, lon, distance)

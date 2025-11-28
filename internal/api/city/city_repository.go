@@ -111,12 +111,12 @@ func NewNullFloat64(f float64) sql.NullFloat64 {
 // FindCityByNameAndCountry You'll also need to update FindCityByNameAndCountry to retrieve these new fields.
 func (r *RepositoryImpl) FindCityByNameAndCountry(ctx context.Context, cityName, countryName string) (*types.CityDetail, error) {
 	query := `
-        SELECT 
-            id, name, country, 
+        SELECT
+            id, name, country,
             COALESCE(state_province, '') as state_province, -- Handle NULL state_province
-            ai_summary,
-            ST_Y(center_location) as center_latitude,    -- Extract Y coordinate (latitude)
-            ST_X(center_location) as center_longitude   -- Extract X coordinate (longitude)
+            COALESCE(ai_summary, '') as ai_summary,         -- Handle NULL ai_summary
+            ST_Y(center_location) as center_latitude,       -- Extract Y coordinate (latitude)
+            ST_X(center_location) as center_longitude       -- Extract X coordinate (longitude)
             -- Add bounding_box retrieval if you store it: ST_AsText(bounding_box) as bounding_box_wkt
         FROM cities
         WHERE LOWER(name) = LOWER($1)
@@ -155,12 +155,12 @@ func (r *RepositoryImpl) FindCityByNameAndCountry(ctx context.Context, cityName,
 // FindCityByFuzzyName finds the city with the most similar name using trigram similarity.
 func (r *RepositoryImpl) FindCityByFuzzyName(ctx context.Context, cityName string) (*types.CityDetail, error) {
 	query := `
-		SELECT 
-			id, name, country, 
+		SELECT
+			id, name, country,
 			COALESCE(state_province, '') as state_province, -- Handle NULL state_province
-			ai_summary,
-			ST_Y(center_location) as center_latitude,    -- Extract Y coordinate (latitude)
-			ST_X(center_location) as center_longitude   -- Extract X coordinate (longitude)
+			COALESCE(ai_summary, '') as ai_summary,         -- Handle NULL ai_summary
+			ST_Y(center_location) as center_latitude,       -- Extract Y coordinate (latitude)
+			ST_X(center_location) as center_longitude       -- Extract X coordinate (longitude)
 		FROM cities
 		WHERE similarity(name, $1) > 0.3 -- you can adjust the threshold
 		ORDER BY similarity(name, $1) DESC
@@ -262,10 +262,10 @@ func (r *RepositoryImpl) FindSimilarCities(ctx context.Context, queryEmbedding [
 	query := `
         SELECT 
             id, 
-            name, 
+            name,
             country,
             COALESCE(state_province, '') as state_province,
-            ai_summary,
+            COALESCE(ai_summary, '') as ai_summary,
             ST_Y(center_location) as center_latitude,
             ST_X(center_location) as center_longitude,
             1 - (embedding <=> $1::vector) AS similarity_score
@@ -401,10 +401,10 @@ func (r *RepositoryImpl) GetCitiesWithoutEmbeddings(ctx context.Context, limit i
 	query := `
         SELECT 
             id, 
-            name, 
+            name,
             country,
             COALESCE(state_province, '') as state_province,
-            ai_summary,
+            COALESCE(ai_summary, '') as ai_summary,
             ST_Y(center_location) as center_latitude,
             ST_X(center_location) as center_longitude
         FROM cities
@@ -475,10 +475,10 @@ func (r *RepositoryImpl) GetAllCities(ctx context.Context) ([]types.CityDetail, 
 	query := `
         SELECT 
             id, 
-            name, 
+            name,
             country,
             COALESCE(state_province, '') as state_province,
-            ai_summary,
+            COALESCE(ai_summary, '') as ai_summary,
             ST_Y(center_location) as center_latitude,
             ST_X(center_location) as center_longitude
         FROM cities

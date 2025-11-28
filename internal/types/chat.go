@@ -4,10 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
-	"regexp"
 	"strings"
 	"time"
+
+	a "github.com/petar-dambovaliev/aho-corasick"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -288,31 +288,114 @@ type ContinueChatRequest struct {
 
 //
 
+// Aho-Corasick matchers for intent classification
+var (
+	intentAddBuilder = a.NewAhoCorasickBuilder(a.Opts{
+		AsciiCaseInsensitive: true,
+		MatchOnlyWholeWords:  true,
+	})
+	intentAddMatcher = intentAddBuilder.Build([]string{"add", "include", "visit"})
+
+	intentRemoveBuilder = a.NewAhoCorasickBuilder(a.Opts{
+		AsciiCaseInsensitive: true,
+		MatchOnlyWholeWords:  true,
+	})
+	intentRemoveMatcher = intentRemoveBuilder.Build([]string{"remove", "delete", "skip"})
+
+	intentQuestionBuilder = a.NewAhoCorasickBuilder(a.Opts{
+		AsciiCaseInsensitive: true,
+		MatchOnlyWholeWords:  true,
+	})
+	intentQuestionMatcher = intentQuestionBuilder.Build([]string{"what", "where", "how", "why", "when"})
+)
+
+// Aho-Corasick single matcher for domain detection
+var (
+	domainMatcherBuilder = a.NewAhoCorasickBuilder(a.Opts{
+		AsciiCaseInsensitive: true,
+		MatchOnlyWholeWords:  true,
+	})
+
+	domainMatcher = domainMatcherBuilder.Build([]string{
+		// Accommodation keywords
+		"hotel", "hostel", "accommodation", "stay", "sleep", "room",
+		"booking", "airbnb", "lodge", "resort", "guesthouse",
+		// Dining keywords
+		"restaurant", "food", "eat", "dine", "meal", "cuisine",
+		"drink", "cafe", "bar", "lunch", "dinner", "breakfast", "brunch",
+		// Activities keywords
+		"activity", "museum", "park", "attraction", "tour", "visit",
+		"see", "do", "experience", "adventure", "shopping", "nightlife",
+		// Itinerary keywords
+		"itinerary", "plan", "schedule", "trip", "day", "week",
+		"journey", "route", "organize", "arrange",
+	})
+
+	// Map keywords to their respective domains
+	keywordToDomain = map[string]DomainType{
+		// Accommodation
+		"hotel": DomainAccommodation, "hostel": DomainAccommodation,
+		"accommodation": DomainAccommodation, "stay": DomainAccommodation,
+		"sleep": DomainAccommodation, "room": DomainAccommodation,
+		"booking": DomainAccommodation, "airbnb": DomainAccommodation,
+		"lodge": DomainAccommodation, "resort": DomainAccommodation,
+		"guesthouse": DomainAccommodation,
+		// Dining
+		"restaurant": DomainDining, "food": DomainDining,
+		"eat": DomainDining, "dine": DomainDining,
+		"meal": DomainDining, "cuisine": DomainDining,
+		"drink": DomainDining, "cafe": DomainDining,
+		"bar": DomainDining, "lunch": DomainDining,
+		"dinner": DomainDining, "breakfast": DomainDining,
+		"brunch": DomainDining,
+		// Activities
+		"activity": DomainActivities, "museum": DomainActivities,
+		"park": DomainActivities, "attraction": DomainActivities,
+		"tour": DomainActivities, "visit": DomainActivities,
+		"see": DomainActivities, "do": DomainActivities,
+		"experience": DomainActivities, "adventure": DomainActivities,
+		"shopping": DomainActivities, "nightlife": DomainActivities,
+		// Itinerary
+		"itinerary": DomainItinerary, "plan": DomainItinerary,
+		"schedule": DomainItinerary, "trip": DomainItinerary,
+		"day": DomainItinerary, "week": DomainItinerary,
+		"journey": DomainItinerary, "route": DomainItinerary,
+		"organize": DomainItinerary, "arrange": DomainItinerary,
+	}
+
+	// Priority order for domain selection when multiple domains match
+	domainPriority = map[DomainType]int{
+		DomainItinerary:     1, // Highest priority
+		DomainAccommodation: 2,
+		DomainDining:        3,
+		DomainActivities:    4,
+		DomainGeneral:       5, // Lowest priority
+	}
+)
+
 type SimpleIntentClassifier struct{}
 
 func (c *SimpleIntentClassifier) Classify(_ context.Context, message string) (IntentType, error) {
 	message = strings.ToLower(message)
-	matched, err := regexp.MatchString(`add|include|visit`, message)
-	if err != nil {
-		return IntentModifyItinerary, fmt.Errorf("failed to match add pattern: %w", err)
-	}
-	if matched {
+
+	// Check for add/include/visit intent
+	iter := intentAddMatcher.Iter(message)
+	if iter.Next() != nil {
 		return IntentAddPOI, nil
 	}
-	matched, err = regexp.MatchString(`remove|delete|skip`, message)
-	if err != nil {
-		return IntentModifyItinerary, fmt.Errorf("failed to match remove pattern: %w", err)
-	}
-	if matched {
+
+	// Check for remove/delete/skip intent
+	iter = intentRemoveMatcher.Iter(message)
+	if iter.Next() != nil {
 		return IntentRemovePOI, nil
 	}
-	matched, err = regexp.MatchString(`what|where|how|why|when`, message)
-	if err != nil {
-		return IntentModifyItinerary, fmt.Errorf("failed to match question pattern: %w", err)
-	}
-	if matched {
+
+	// Check for question intent
+	iter = intentQuestionMatcher.Iter(message)
+	if iter.Next() != nil {
 		return IntentAskQuestion, nil
 	}
+
 	return IntentModifyItinerary, nil // Default intent
 }
 
@@ -322,32 +405,36 @@ type DomainDetector struct{}
 func (d *DomainDetector) DetectDomain(_ context.Context, message string) DomainType {
 	message = strings.ToLower(message)
 
-	// Accommodation domain keywords
-	matched, err := regexp.MatchString(`hotel|hostel|accommodation|stay|sleep|room|booking|airbnb|lodge|resort|guesthouse`, message)
-	if err == nil && matched {
-		return DomainAccommodation
+	// Scan the message ONCE with the single matcher
+	matches := domainMatcher.FindAll(message)
+
+	if len(matches) == 0 {
+		return DomainGeneral
 	}
 
-	// Dining domain keywords
-	matched, err = regexp.MatchString(`restaurant|food|eat|dine|meal|cuisine|drink|cafe|bar|lunch|dinner|breakfast|brunch`, message)
-	if err == nil && matched {
-		return DomainDining
+	// If multiple matches found, select the highest priority domain
+	bestDomain := DomainGeneral
+	bestPriority := 999
+
+	seen := make(map[DomainType]bool)
+	for _, match := range matches {
+		matchedWord := message[match.Start():match.End()]
+		domain := keywordToDomain[matchedWord]
+
+		// Skip if we've already processed this domain
+		if seen[domain] {
+			continue
+		}
+		seen[domain] = true
+
+		priority := domainPriority[domain]
+		if priority < bestPriority {
+			bestPriority = priority
+			bestDomain = domain
+		}
 	}
 
-	// Activity domain keywords
-	matched, err = regexp.MatchString(`activity|museum|park|attraction|tour|visit|see|do|experience|adventure|shopping|nightlife`, message)
-	if err == nil && matched {
-		return DomainActivities
-	}
-
-	// Itinerary domain keywords
-	matched, err = regexp.MatchString(`itinerary|plan|schedule|trip|day|week|journey|route|organize|arrange`, message)
-	if err == nil && matched {
-		return DomainItinerary
-	}
-
-	// Default to general domain
-	return DomainGeneral
+	return bestDomain
 }
 
 // RecentInteraction represents a recent user interaction with cities and POIs

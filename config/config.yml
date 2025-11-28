@@ -35,7 +35,7 @@ repositories:
     # port: "5432"
     # host: "postgres-loci"
     password: "postgres"
-    port: "5454"
+    port: "5459"
     host: "localhost"
     username: "postgres"
     db: "loci-dev"

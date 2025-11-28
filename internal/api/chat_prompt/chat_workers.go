@@ -15,6 +15,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/utils"
 )
 
 func (l *ServiceImpl) GenerateCityDataWorker(wg *sync.WaitGroup,
@@ -56,7 +57,7 @@ func (l *ServiceImpl) GenerateCityDataWorker(wg *sync.WaitGroup,
 		}
 		span.SetAttributes(attribute.Int("response.length", len(txt)))
 
-		cleanTxt := cleanJSONResponse(txt)
+		cleanTxt := utils.CleanJSONResponse(txt)
 		var cityDataFromAI struct {
 			CityName        string  `json:"city_name"`
 			StateProvince   *string `json:"state_province"` // Use pointer for nullable string
@@ -140,7 +141,7 @@ func (l *ServiceImpl) GenerateGeneralPOIWorker(wg *sync.WaitGroup,
 	}
 	span.SetAttributes(attribute.Int("response.length", len(txt)))
 
-	cleanTxt := cleanJSONResponse(txt)
+	cleanTxt := utils.CleanJSONResponse(txt)
 	var poiData struct {
 		PointsOfInterest []types.POIDetailedInfo `json:"points_of_interest"`
 	}
@@ -198,7 +199,7 @@ func (l *ServiceImpl) GeneratePersonalisedPOIWorker(wg *sync.WaitGroup, ctx cont
 	}
 	span.SetAttributes(attribute.Int("response.length", len(txt)))
 
-	cleanTxt := cleanJSONResponse(txt)
+	cleanTxt := utils.CleanJSONResponse(txt)
 	var itineraryData struct {
 		ItineraryName      string                  `json:"itinerary_name"`
 		OverallDescription string                  `json:"overall_description"`
@@ -296,7 +297,7 @@ func (l *ServiceImpl) GeneratePersonalisedPOIWorkerWithSemantics(wg *sync.WaitGr
 	}
 	span.SetAttributes(attribute.Int("response.length", len(txt)))
 
-	cleanTxt := cleanJSONResponse(txt)
+	cleanTxt := utils.CleanJSONResponse(txt)
 	var itineraryData struct {
 		ItineraryName      string                  `json:"itinerary_name"`
 		OverallDescription string                  `json:"overall_description"`

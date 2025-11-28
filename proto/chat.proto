@@ -1,293 +1,318 @@
 syntax = "proto3";
 
-package ai_poi.chat.v1;
+package loci.chat;
+
+option go_package = "github.com/your-org/go-ai-poi-server/gen/proto/chat";
 
 import "google/protobuf/timestamp.proto";
+import "proto/common.proto";
+import "proto/city.proto";
+import "proto/poi.proto";
+import "proto/profile.proto";
 
-option go_package = "github.com/facorreiaa/go-ai-poi-server/proto/chat/v1";
-
-// ChatService provides AI-powered chat functionality with streaming support
-service ChatService {
-  // Start a new chat session with streaming responses
-  rpc StartChatStream(StartChatRequest) returns (stream ChatEvent);
-  
-  // Continue an existing chat session with streaming responses  
-  rpc ContinueChatStream(ContinueChatRequest) returns (stream ChatEvent);
-  
-  // Free chat without authentication (streaming)
-  rpc FreeChatStream(FreeChatRequest) returns (stream ChatEvent);
-  
-  // Get user's chat sessions (non-streaming)
-  rpc GetChatSessions(GetChatSessionsRequest) returns (GetChatSessionsResponse);
-  
-  // Save itinerary from chat
-  rpc SaveItinerary(SaveItineraryRequest) returns (SaveItineraryResponse);
-  
-  // Get saved itineraries 
-  rpc GetSavedItineraries(GetSavedItinerariesRequest) returns (GetSavedItinerariesResponse);
-  
-  // Remove saved itinerary
-  rpc RemoveItinerary(RemoveItineraryRequest) returns (RemoveItineraryResponse);
-  
-  // Get POI details for chat context
-  rpc GetPOIDetails(GetPOIDetailsRequest) returns (GetPOIDetailsResponse);
+// Enums for chat types
+enum MessageRole {
+  MESSAGE_ROLE_UNSPECIFIED = 0;
+  MESSAGE_ROLE_USER = 1;
+  MESSAGE_ROLE_ASSISTANT = 2;
+  MESSAGE_ROLE_SYSTEM = 3;
 }
 
-// Streaming event for chat responses
-message ChatEvent {
-  string event_type = 1; // "message", "thinking", "complete", "error"
-  string data = 2;
-  string session_id = 3;
-  google.protobuf.Timestamp timestamp = 4;
-  
-  oneof payload {
-    ChatMessage message = 5;
-    ThinkingEvent thinking = 6;
-    ErrorEvent error = 7;
-    CompleteEvent complete = 8;
-    CityResponse city_response = 9;
-    ItineraryResponse itinerary_response = 10;
-  }
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_INITIAL_REQUEST = 1;
+  MESSAGE_TYPE_MODIFICATION_REQUEST = 2;
+  MESSAGE_TYPE_RESPONSE = 3;
+  MESSAGE_TYPE_CLARIFICATION = 4;
+  MESSAGE_TYPE_ITINERARY_RESPONSE = 5;
+  MESSAGE_TYPE_ERROR = 6;
 }
 
-// Chat message
-message ChatMessage {
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_ACTIVE = 1;
+  SESSION_STATUS_EXPIRED = 2;
+  SESSION_STATUS_CLOSED = 3;
+}
+
+enum IntentType {
+  INTENT_TYPE_UNSPECIFIED = 0;
+  INTENT_TYPE_INITIAL_REQUEST = 1;
+  INTENT_TYPE_ADD_POI = 2;
+  INTENT_TYPE_REMOVE_POI = 3;
+  INTENT_TYPE_MODIFY_ITINERARY = 4;
+  INTENT_TYPE_CHANGE_PREFERENCES = 5;
+  INTENT_TYPE_ASK_QUESTION = 6;
+  INTENT_TYPE_CLARIFICATION = 7;
+  INTENT_TYPE_PROVIDE_FEEDBACK = 8;
+  INTENT_TYPE_CHIT_CHAT = 9;
+  INTENT_TYPE_GET_POI_DETAILS = 10;
+  INTENT_TYPE_FIND_HOTELS = 11;
+  INTENT_TYPE_FIND_RESTAURANTS = 12;
+  INTENT_TYPE_REPLACE_POI = 13;
+  INTENT_TYPE_CHANGE_DATE = 14;
+  INTENT_TYPE_CHANGE_LOCATION = 15;
+  INTENT_TYPE_SORT_ITINERARY = 16;
+}
+
+enum DomainType {
+  DOMAIN_TYPE_UNSPECIFIED = 0;
+  DOMAIN_TYPE_GENERAL = 1;
+  DOMAIN_TYPE_ACCOMMODATION = 2;
+  DOMAIN_TYPE_DINING = 3;
+  DOMAIN_TYPE_ACTIVITIES = 4;
+  DOMAIN_TYPE_ITINERARY = 5;
+  DOMAIN_TYPE_TRANSPORT = 6;
+}
+
+// LlmInteraction represents an interaction with the LLM
+message LlmInteraction {
   string id = 1;
   string session_id = 2;
-  string content = 3;
-  string role = 4; // "user", "assistant", "system"
-  google.protobuf.Timestamp created_at = 5;
-  ChatContextType context_type = 6;
+  string user_id = 3;
+  string profile_id = 4;
+  optional string city_name = 5;
+  string prompt = 6;
+  bytes request_payload = 7;
+  string response_text = 8;
+  bytes response_payload = 9;
+  string model_used = 10;
+  int32 prompt_tokens = 11;
+  int32 completion_tokens = 12;
+  int32 total_tokens = 13;
+  int32 latency_ms = 14;
+  google.protobuf.Timestamp timestamp = 15;
+  optional double latitude = 16;
+  optional double longitude = 17;
+  optional double distance = 18;
 }
 
-// Context type for chat
-enum ChatContextType {
-  CHAT_CONTEXT_TYPE_UNSPECIFIED = 0;
-  CHAT_CONTEXT_TYPE_GENERAL = 1;
-  CHAT_CONTEXT_TYPE_CITY_EXPLORATION = 2;
-  CHAT_CONTEXT_TYPE_ITINERARY_PLANNING = 3;
-  CHAT_CONTEXT_TYPE_RESTAURANT_RECOMMENDATION = 4;
-  CHAT_CONTEXT_TYPE_ACTIVITY_SUGGESTION = 5;
-}
-
-// Thinking event for AI processing indication
-message ThinkingEvent {
-  string message = 1;
-  int32 progress = 2;
-}
-
-// Error event
-message ErrorEvent {
-  string code = 1;
-  string message = 2;
-  map<string, string> details = 3;
-}
-
-// Complete event
-message CompleteEvent {
-  string session_id = 1;
-  int32 total_messages = 2;
-  google.protobuf.Timestamp completed_at = 3;
-}
-
-// AI City response
-message CityResponse {
-  string name = 1;
-  string country = 2;
-  string description = 3;
-  repeated string highlights = 4;
-  repeated POIReference pois = 5;
-  WeatherInfo weather = 6;
-  CulturalInfo cultural_info = 7;
-}
-
-// AI Itinerary response
-message ItineraryResponse {
-  string title = 1;
-  string description = 2;
-  int32 duration_days = 3;
-  repeated ItineraryDay days = 4;
-  repeated POIReference featured_pois = 5;
-  EstimatedCosts estimated_costs = 6;
-}
-
-// Itinerary day
-message ItineraryDay {
-  int32 day_number = 1;
-  string title = 2;
-  string description = 3;
-  repeated ItineraryActivity activities = 4;
-}
-
-// Itinerary activity
-message ItineraryActivity {
-  string time_slot = 1;
-  string title = 2;
-  string description = 3;
-  string location = 4;
-  int32 duration_minutes = 5;
-  string category = 6;
-  POIReference poi_reference = 7;
-}
-
-// POI reference in responses
-message POIReference {
+// ConversationMessage represents a single message in a conversation
+message ConversationMessage {
   string id = 1;
-  string name = 2;
-  string category = 3;
-  double latitude = 4;
-  double longitude = 5;
-  string description = 6;
+  MessageRole role = 2;
+  string content = 3;
+  MessageType message_type = 4;
+  google.protobuf.Timestamp timestamp = 5;
+  optional MessageMetadata metadata = 6;
 }
 
-// Weather information
-message WeatherInfo {
-  string current_condition = 1;
-  int32 temperature_celsius = 2;
-  string description = 3;
+// MessageMetadata contains additional metadata for messages
+message MessageMetadata {
+  optional string llm_interaction_id = 1;
+  int32 modified_poi_count = 2;
+  optional string request_type = 3;
 }
 
-// Cultural information
-message CulturalInfo {
-  string language = 1;
-  string currency = 2;
-  repeated string customs = 3;
-  repeated string festivals = 4;
+// ModificationRecord represents a modification in the session
+message ModificationRecord {
+  string type = 1;
+  string description = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  bool applied = 4;
 }
 
-// Estimated costs
-message EstimatedCosts {
-  string currency = 1;
-  double budget_low = 2;
-  double budget_medium = 3;
-  double budget_high = 4;
-  repeated CostBreakdown breakdown = 5;
+// SessionContext contains context information for a session
+message SessionContext {
+  string city_name = 1;
+  string last_city_id = 2;
+  optional loci.profile.UserPreferenceProfile user_preferences = 3;
+  repeated string active_interests = 4;
+  repeated string active_tags = 5;
+  string conversation_summary = 6;
+  repeated ModificationRecord modification_history = 7;
 }
 
-// Cost breakdown
-message CostBreakdown {
-  string category = 1;
-  double amount = 2;
-  string description = 3;
+// AIItineraryResponse represents an AI-generated itinerary response
+message AIItineraryResponse {
+  string itinerary_name = 1;
+  string overall_description = 2;
+  repeated loci.poi.POIDetailedInfo points_of_interest = 3;
+  repeated loci.poi.POIDetailedInfo restaurants = 4;
+  repeated loci.poi.POIDetailedInfo bars = 5;
 }
 
-// Request messages
-message StartChatRequest {
-  string user_id = 1;
-  string profile_id = 2;
-  string initial_message = 3;
-  ChatContextType context_type = 4;
-  map<string, string> metadata = 5;
+// AiCityResponse represents a complete AI city response
+message AiCityResponse {
+  loci.city.GeneralCityData general_city_data = 1;
+  repeated loci.poi.POIDetailedInfo points_of_interest = 2;
+  AIItineraryResponse itinerary_response = 3;
+  string session_id = 4;
 }
 
-message ContinueChatRequest {
-  string session_id = 1;
-  string user_id = 2;
-  string message = 3;
-  ChatContextType context_type = 4;
+// SessionPerformanceMetrics contains performance metrics
+message SessionPerformanceMetrics {
+  int32 avg_response_time_ms = 1;
+  int32 total_tokens = 2;
+  int32 prompt_tokens = 3;
+  int32 completion_tokens = 4;
+  repeated string models_used = 5;
+  int32 total_latency_ms = 6;
 }
 
-message FreeChatRequest {
-  string message = 1;
-  string session_token = 2; // For session continuity without auth
-  ChatContextType context_type = 3;
+// SessionContentMetrics contains content metrics
+message SessionContentMetrics {
+  int32 total_pois = 1;
+  int32 total_hotels = 2;
+  int32 total_restaurants = 3;
+  repeated string cities_covered = 4;
+  bool has_itinerary = 5;
+  int32 complexity_score = 6;
+  repeated string dominant_categories = 7;
 }
 
-message GetChatSessionsRequest {
-  string user_id = 1;
-  string profile_id = 2;
-  int32 limit = 3;
-  int32 offset = 4;
+// SessionEngagementMetrics contains engagement metrics
+message SessionEngagementMetrics {
+  int32 message_count = 1;
+  int64 conversation_duration_seconds = 2;
+  int32 user_message_count = 3;
+  int32 assistant_message_count = 4;
+  int32 avg_message_length = 5;
+  optional google.protobuf.Timestamp peak_activity_time = 6;
+  string engagement_level = 7;
 }
 
-message GetChatSessionsResponse {
-  repeated ChatSession sessions = 1;
-  int32 total_count = 2;
-}
-
+// ChatSession represents a chat session
 message ChatSession {
   string id = 1;
   string user_id = 2;
   string profile_id = 3;
-  string title = 4;
-  google.protobuf.Timestamp created_at = 5;
-  google.protobuf.Timestamp updated_at = 6;
-  int32 message_count = 7;
-  ChatContextType context_type = 8;
+  string city_name = 4;
+  optional AiCityResponse current_itinerary = 5;
+  repeated ConversationMessage conversation_history = 6;
+  SessionContext session_context = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  google.protobuf.Timestamp expires_at = 10;
+  SessionStatus status = 11;
+  SessionPerformanceMetrics performance_metrics = 12;
+  SessionContentMetrics content_metrics = 13;
+  SessionEngagementMetrics engagement_metrics = 14;
 }
 
-// Itinerary management
-message SaveItineraryRequest {
-  string user_id = 1;
-  string session_id = 2;
-  string title = 3;
-  string description = 4;
-  ItineraryResponse itinerary_data = 5;
+// ChatRequest for sending a message
+message ChatRequest {
+  optional string session_id = 1;
+  string message = 2;
+  optional string city_name = 3;
 }
 
-message SaveItineraryResponse {
-  string itinerary_id = 1;
-  bool success = 2;
-  string message = 3;
+// ChatResponse for chat response
+message ChatResponse {
+  string session_id = 1;
+  string message = 2;
+  optional AiCityResponse updated_itinerary = 3;
+  bool is_new_session = 4;
+  bool requires_clarification = 5;
+  repeated string suggested_actions = 6;
 }
 
-message GetSavedItinerariesRequest {
-  string user_id = 1;
-  int32 limit = 2;
-  int32 offset = 3;
+// StreamEvent represents a streaming event
+message StreamEvent {
+  string type = 1;
+  string message = 2;
+  bytes data = 3;
+  optional string error = 4;
+  google.protobuf.Timestamp timestamp = 5;
+  string event_id = 6;
+  bool is_final = 7;
+  optional NavigationData navigation = 8;
 }
 
-message GetSavedItinerariesResponse {
-  repeated UserSavedItinerary itineraries = 1;
-  int32 total_count = 2;
+// NavigationData contains navigation information
+message NavigationData {
+  string url = 1;
+  string route_type = 2;
+  map<string, string> query_params = 3;
 }
 
-message UserSavedItinerary {
+// StartChatRequest for starting a new chat session
+message StartChatRequest {
+  string city_name = 1;
+  DomainType context_type = 2;
+  optional string initial_message = 3;
+}
+
+// ContinueChatRequest for continuing a chat session
+message ContinueChatRequest {
+  string session_id = 1;
+  string message = 2;
+  optional string city_name = 3;
+  DomainType context_type = 4;
+}
+
+// GetChatSessionRequest for retrieving a chat session
+message GetChatSessionRequest {
+  string session_id = 1;
+}
+
+// GetChatSessionResponse for chat session retrieval
+message GetChatSessionResponse {
+  ChatSession session = 1;
+}
+
+// GetChatSessionsRequest for retrieving multiple chat sessions
+message GetChatSessionsRequest {
+  optional string user_id = 1;
+  loci.common.PaginationRequest pagination = 2;
+}
+
+// GetChatSessionsResponse for chat sessions retrieval
+message GetChatSessionsResponse {
+  repeated ChatSession sessions = 1;
+  loci.common.PaginationMetadata pagination = 2;
+}
+
+// RecentInteraction represents a recent user interaction
+message RecentInteraction {
   string id = 1;
   string user_id = 2;
-  string session_id = 3;
-  string title = 4;
-  string description = 5;
-  string itinerary_data = 6; // JSON string
-  google.protobuf.Timestamp created_at = 7;
-  google.protobuf.Timestamp updated_at = 8;
+  string city_name = 3;
+  optional string city_id = 4;
+  string prompt = 5;
+  optional string response_text = 6;
+  string model_used = 7;
+  int32 latency_ms = 8;
+  google.protobuf.Timestamp created_at = 9;
+  repeated loci.poi.POIDetailedInfo pois = 10;
+  repeated loci.poi.HotelDetailedInfo hotels = 11;
+  repeated loci.poi.RestaurantDetailedInfo restaurants = 12;
 }
 
-message RemoveItineraryRequest {
-  string user_id = 1;
-  string itinerary_id = 2;
+// CityInteractions groups interactions for a specific city
+message CityInteractions {
+  string city_name = 1;
+  string session_id = 2;
+  repeated RecentInteraction interactions = 3;
+  int32 poi_count = 4;
+  google.protobuf.Timestamp last_activity = 5;
+  repeated string session_ids = 6;
+  string title = 7;
+  optional int32 total_favorites = 8;
+  optional int32 total_itineraries = 9;
 }
 
-message RemoveItineraryResponse {
-  bool success = 1;
-  string message = 2;
+// GetRecentInteractionsRequest for retrieving recent interactions
+message GetRecentInteractionsRequest {
+  optional string user_id = 1;
+  loci.common.PaginationRequest pagination = 2;
 }
 
-// POI details request
-message GetPOIDetailsRequest {
-  string poi_id = 1;
-  bool include_reviews = 2;
-  bool include_photos = 3;
+// GetRecentInteractionsResponse for recent interactions retrieval
+message GetRecentInteractionsResponse {
+  repeated CityInteractions cities = 1;
+  loci.common.PaginationMetadata pagination = 2;
 }
 
-message GetPOIDetailsResponse {
-  POIDetailedInfo poi = 1;
-}
-
-// POI detailed information (reference to poi.proto)
-message POIDetailedInfo {
-  string id = 1;
-  string name = 2;
-  double latitude = 3;
-  double longitude = 4;
-  string category = 5;
-  string description = 6;
-  double rating = 7;
-  int32 review_count = 8;
-  string price_range = 9;
-  string address = 10;
-  string phone = 11;
-  string website = 12;
-  repeated string photos = 13;
-  map<string, string> metadata = 14;
+// ChatService defines chat-related RPCs
+service ChatService {
+  rpc StartChat(StartChatRequest) returns (ChatResponse);
+  rpc ContinueChat(ContinueChatRequest) returns (ChatResponse);
+  rpc GetChatSession(GetChatSessionRequest) returns (GetChatSessionResponse);
+  rpc GetChatSessions(GetChatSessionsRequest) returns (GetChatSessionsResponse);
+  rpc GetRecentInteractions(GetRecentInteractionsRequest) returns (GetRecentInteractionsResponse);
+  rpc EndSession(GetChatSessionRequest) returns (loci.common.Response);
+  
+  // Streaming RPC for real-time chat responses
+  rpc StreamChat(ChatRequest) returns (stream StreamEvent);
 }

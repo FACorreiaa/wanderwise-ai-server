@@ -1,0 +1,205 @@
+syntax = "proto3";
+
+package loci.itinerary;
+
+option go_package = "github.com/your-org/go-ai-poi-server/gen/proto/itinerary";
+
+import "google/protobuf/timestamp.proto";
+import "proto/common.proto";
+import "proto/poi.proto";
+
+// ContentType defines the type of content in a list item
+enum ContentType {
+  CONTENT_TYPE_UNSPECIFIED = 0;
+  CONTENT_TYPE_POI = 1;
+  CONTENT_TYPE_RESTAURANT = 2;
+  CONTENT_TYPE_HOTEL = 3;
+  CONTENT_TYPE_ITINERARY = 4;
+}
+
+// List represents a list or itinerary
+message List {
+  string id = 1;
+  string user_id = 2;
+  string name = 3;
+  string description = 4;
+  string image_url = 5;
+  bool is_public = 6;
+  bool is_itinerary = 7;
+  optional string parent_list_id = 8;
+  string city_id = 9;
+  int32 view_count = 10;
+  int32 save_count = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+}
+
+// ListItem represents an item in a list
+message ListItem {
+  string list_id = 1;
+  string item_id = 2;
+  string poi_id = 3;
+  ContentType content_type = 4;
+  int32 position = 5;
+  string notes = 6;
+  optional int32 day_number = 7;
+  optional google.protobuf.Timestamp time_slot = 8;
+  optional int32 duration = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+  optional string source_llm_interaction_id = 12;
+  string item_ai_description = 13;
+}
+
+// ListItemWithContent combines a ListItem with its content details
+message ListItemWithContent {
+  ListItem list_item = 1;
+  optional loci.poi.POIDetailedInfo poi = 2;
+  optional loci.poi.RestaurantDetailedInfo restaurant = 3;
+  optional loci.poi.HotelDetailedInfo hotel = 4;
+  optional UserSavedItinerary itinerary = 5;
+}
+
+// ListWithDetailedItems combines a List with its items and content
+message ListWithDetailedItems {
+  List list = 1;
+  repeated ListItemWithContent items = 2;
+}
+
+// UserSavedItinerary represents a saved itinerary
+message UserSavedItinerary {
+  string id = 1;
+  string user_id = 2;
+  optional string source_llm_interaction_id = 3;
+  optional string session_id = 4;
+  optional string primary_city_id = 5;
+  string title = 6;
+  optional string description = 7;
+  string markdown_content = 8;
+  repeated string tags = 9;
+  optional int32 estimated_duration_days = 10;
+  optional int32 estimated_cost_level = 11;
+  bool is_public = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+}
+
+// CreateListRequest for creating a new list
+message CreateListRequest {
+  string name = 1;
+  string description = 2;
+  optional string city_id = 3;
+  bool is_itinerary = 4;
+  bool is_public = 5;
+}
+
+// UpdateListRequest for updating a list
+message UpdateListRequest {
+  string list_id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional string image_url = 4;
+  optional bool is_public = 5;
+  optional string city_id = 6;
+}
+
+// AddListItemRequest for adding an item to a list
+message AddListItemRequest {
+  string list_id = 1;
+  string item_id = 2;
+  ContentType content_type = 3;
+  int32 position = 4;
+  string notes = 5;
+  optional int32 day_number = 6;
+  optional google.protobuf.Timestamp time_slot = 7;
+  optional int32 duration_minutes = 8;
+  optional string source_llm_interaction_id = 9;
+  string item_ai_description = 10;
+}
+
+// UpdateListItemRequest for updating a list item
+message UpdateListItemRequest {
+  string list_id = 1;
+  string item_id = 2;
+  optional ContentType content_type = 3;
+  optional int32 position = 4;
+  optional string notes = 5;
+  optional int32 day_number = 6;
+  optional google.protobuf.Timestamp time_slot = 7;
+  optional int32 duration_minutes = 8;
+  optional string source_llm_interaction_id = 9;
+  optional string item_ai_description = 10;
+}
+
+// UpdateItineraryRequest for updating an itinerary
+message UpdateItineraryRequest {
+  string itinerary_id = 1;
+  optional string title = 2;
+  optional string description = 3;
+  repeated string tags = 4;
+  optional int32 estimated_duration_days = 5;
+  optional int32 estimated_cost_level = 6;
+  optional bool is_public = 7;
+  optional string markdown_content = 8;
+}
+
+// BookmarkRequest for bookmarking an itinerary
+message BookmarkRequest {
+  optional string llm_interaction_id = 1;
+  optional string session_id = 2;
+  optional string primary_city_id = 3;
+  string primary_city_name = 4;
+  string title = 5;
+  optional string description = 6;
+  repeated string tags = 7;
+  optional bool is_public = 8;
+}
+
+// GetListRequest for retrieving a list
+message GetListRequest {
+  string list_id = 1;
+  optional bool include_items = 2;
+}
+
+// GetListResponse for list retrieval
+message GetListResponse {
+  ListWithDetailedItems list = 1;
+}
+
+// GetUserListsRequest for retrieving user's lists
+message GetUserListsRequest {
+  optional string user_id = 1;
+  optional bool itineraries_only = 2;
+  loci.common.PaginationRequest pagination = 3;
+}
+
+// GetUserListsResponse for user lists retrieval
+message GetUserListsResponse {
+  repeated List lists = 1;
+  loci.common.PaginationMetadata pagination = 2;
+}
+
+// GetUserItinerariesRequest for retrieving user's itineraries
+message GetUserItinerariesRequest {
+  optional string user_id = 1;
+  loci.common.PaginationRequest pagination = 2;
+}
+
+// GetUserItinerariesResponse for user itineraries retrieval
+message GetUserItinerariesResponse {
+  repeated UserSavedItinerary itineraries = 1;
+  loci.common.PaginationMetadata pagination = 2;
+}
+
+// ItineraryService defines itinerary-related RPCs
+service ItineraryService {
+  rpc CreateList(CreateListRequest) returns (loci.common.Response);
+  rpc UpdateList(UpdateListRequest) returns (loci.common.Response);
+  rpc GetList(GetListRequest) returns (GetListResponse);
+  rpc GetUserLists(GetUserListsRequest) returns (GetUserListsResponse);
+  rpc AddListItem(AddListItemRequest) returns (loci.common.Response);
+  rpc UpdateListItem(UpdateListItemRequest) returns (loci.common.Response);
+  rpc GetUserItineraries(GetUserItinerariesRequest) returns (GetUserItinerariesResponse);
+  rpc UpdateItinerary(UpdateItineraryRequest) returns (loci.common.Response);
+  rpc BookmarkItinerary(BookmarkRequest) returns (loci.common.Response);
+}

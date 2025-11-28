@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"go.uber.org/zap"
 
 	"github.com/google/uuid"
 	"github.com/patrickmn/go-cache"
@@ -34,6 +35,8 @@ import (
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/profiles"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/tags"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/types"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/utils"
+	"github.com/FACorreiaa/go-poi-au-suggestions/logger"
 )
 
 const (
@@ -119,7 +122,7 @@ func NewLlmInteractiontService(interestRepo interests.Repository,
 
 	// Initialize RAG service
 
-	c := cache.New(24*time.Hour, 1*time.Hour) // Cache for 24 hours with cleanup every hour
+	c := cache.New(48*time.Hour, 1*time.Hour) // Cache for 48 hours with cleanup every hour
 	service := &ServiceImpl{
 		logger:             logger,
 		tagsRepo:           tagsRepo,
@@ -396,7 +399,7 @@ func (l *ServiceImpl) GenerateEnhancedPersonalisedPOIWorker(wg *sync.WaitGroup, 
 	}
 	span.SetAttributes(attribute.Int("response.length", len(txt)))
 
-	cleanTxt := cleanJSONResponse(txt)
+	cleanTxt := utils.CleanJSONResponse(txt)
 	var itineraryData types.AIItineraryResponse
 	if err := json.Unmarshal([]byte(cleanTxt), &itineraryData); err != nil {
 		span.RecordError(err)
@@ -527,7 +530,7 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 
 	// Prepare primaryCityID - handle both PrimaryCityID and PrimaryCityName
 	var primaryCityID pgtype.UUID
-	
+
 	// Handle city resolution
 	if req.PrimaryCityID != nil {
 		// Use provided city ID
@@ -543,7 +546,7 @@ func (l *ServiceImpl) SaveItenerary(ctx context.Context, userID uuid.UUID, req t
 			span.RecordError(err)
 			return uuid.Nil, fmt.Errorf("failed to find city: %w", err)
 		}
-		
+
 		if city == nil {
 			// City doesn't exist, create it
 			cityDetail := types.CityDetail{
@@ -786,7 +789,7 @@ func (l *ServiceImpl) getPOIDetailedInfos(wg *sync.WaitGroup, ctx context.Contex
 	}
 
 	span.SetAttributes(attribute.Int("response.length", len(txt)))
-	cleanTxt := cleanJSONResponse(txt)
+	cleanTxt := utils.CleanJSONResponse(txt)
 	var detailedInfo types.POIDetailedInfo
 	if err := json.Unmarshal([]byte(cleanTxt), &detailedInfo); err != nil {
 		span.RecordError(err)
@@ -979,7 +982,7 @@ func (l *ServiceImpl) generatePOIData(ctx context.Context, poiName, cityName str
 	}
 	span.SetAttributes(attribute.String("llm.interaction_id.for_poi_data", savedLlmInteractionID.String()))
 
-	cleanResponse := cleanJSONResponse(response)
+	cleanResponse := utils.CleanJSONResponse(response)
 	var poiData types.POIDetailedInfo
 	if err := json.Unmarshal([]byte(cleanResponse), &poiData); err != nil || poiData.Name == "" {
 		l.logger.WarnContext(ctx, "LLM returned invalid or empty POI data",
@@ -1304,7 +1307,7 @@ If no city is mentioned, use empty string for city.
 		return "", "", fmt.Errorf("empty response from AI parser")
 	}
 
-	cleanResponse := cleanJSONResponse(responseText)
+	cleanResponse := utils.CleanJSONResponse(responseText)
 	var parsed struct {
 		City    string `json:"city"`
 		Message string `json:"message"`
@@ -1437,7 +1440,7 @@ func (l *ServiceImpl) ContinueSessionStreamed(
 		cityData, err = l.cityRepo.FindCityByFuzzyName(ctx, session.SessionContext.CityName)
 		if err != nil || cityData == nil {
 			if err == nil {
-				err = fmt.Errorf("city '%s' not found for session %s %w", session.SessionContext.CityName, sessionID, err)
+				err = fmt.Errorf("city '%s' not found for session %s", session.SessionContext.CityName, sessionID)
 			} else {
 				err = fmt.Errorf("failed to find city '%s' for session %s: %w", session.SessionContext.CityName, sessionID, err)
 			}
@@ -1750,7 +1753,7 @@ func (l *ServiceImpl) generatePOIDataStream(
 	}
 
 	// Parse response
-	cleanJSON := cleanJSONResponse(fullText)
+	cleanJSON := utils.CleanJSONResponse(fullText)
 	var poiData types.POIDetailedInfo
 	if err := json.Unmarshal([]byte(cleanJSON), &poiData); err != nil || poiData.Name == "" {
 		l.logger.WarnContext(ctx, "Invalid POI data from LLM", slog.String("response", fullText), slog.Any("error", err))
@@ -2240,6 +2243,58 @@ func (l *ServiceImpl) ProcessUnifiedChatMessageStream(ctx context.Context, userI
 				return
 			}
 		}
+		// Create structured completeData from individual response parts
+		completeData := map[string]interface{}{
+			"session_id": sessionID.String(),
+		}
+		
+		// Parse and add each response part as structured JSON
+		for partType, builder := range responses {
+			if builder != nil && builder.Len() > 0 {
+				content := builder.String()
+				// Extract JSON from markdown code blocks if present
+				content = extractJSONFromMarkdown(content)
+				
+				// Try to parse as JSON
+				var parsedJSON interface{}
+				if err := json.Unmarshal([]byte(content), &parsedJSON); err == nil {
+					switch partType {
+					case "city_data":
+						completeData["general_city_data"] = parsedJSON
+					case "general_pois":
+						completeData["points_of_interest"] = parsedJSON
+					case "itinerary":
+						completeData["itinerary_response"] = parsedJSON
+					case "hotels":
+						completeData["accommodation_response"] = parsedJSON
+					case "restaurants":
+						completeData["dining_response"] = parsedJSON
+					case "activities":
+						completeData["activities_response"] = parsedJSON
+					default:
+						completeData[partType] = parsedJSON
+					}
+				} else {
+					// If parsing fails, store as string
+					l.logger.WarnContext(asyncCtx, "Failed to parse JSON from response part", 
+						slog.String("part_type", partType), slog.Any("error", err))
+					completeData[partType+"_raw"] = content
+				}
+			}
+		}
+		
+		jsonData, err := json.MarshalIndent(completeData, "", "  ")
+		if err != nil {
+			logger.Log.Error("Failed to marshal completeData to JSON", zap.Error(err))
+		} else {
+			filename := "complete_itinerary.json" // Or fmt.Sprintf("complete_itinerary_%s.json", sessionID)
+			if writeErr := os.WriteFile(filename, jsonData, 0644); writeErr != nil {
+				l.logger.ErrorContext(ctx, "Failed to write completeData to file", slog.String("file", filename), slog.Any("error", writeErr))
+			} else {
+				l.logger.InfoContext(ctx, "Complete itinerary data written to file", slog.String("file", filename))
+			}
+			l.logger.InfoContext(ctx, "Complete itinerary data being displayed in view", slog.String("json", string(jsonData)))
+		}
 
 		// Create and save interaction first to get proper llmInteractionID
 		interaction := types.LlmInteraction{
@@ -2618,6 +2673,51 @@ func (l *ServiceImpl) parseCityDataFromResponse(_ context.Context, responseConte
 
 // streamWorkerWithResponseAndCache handles streaming for a single worker with response capture and cache support
 func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prompt, partType string, sendEvent func(types.StreamEvent), domain types.DomainType, cacheKey string) {
+	// Step 1: Check cache first if cacheKey is provided
+	if cacheKey != "" {
+		if cached, found := l.cache.Get(cacheKey); found {
+			if cachedText, ok := cached.(string); ok {
+				l.logger.InfoContext(ctx, "Cache hit for LLM response",
+					slog.String("part_type", partType),
+					slog.String("cache_key", cacheKey))
+
+				// Stream cached response in chunks to simulate real streaming
+				chunkSize := 100 // characters per chunk
+				for i := 0; i < len(cachedText); i += chunkSize {
+					if ctx.Err() != nil {
+						return // Stop if context is canceled
+					}
+
+					end := i + chunkSize
+					if end > len(cachedText) {
+						end = len(cachedText)
+					}
+					chunk := cachedText[i:end]
+
+					sendEvent(types.StreamEvent{
+						Type: types.EventTypeChunk,
+						Data: map[string]interface{}{
+							"part":       partType,
+							"chunk":      chunk,
+							"domain":     string(domain),
+							"cache_key":  cacheKey,
+							"cache_used": true,
+						},
+					})
+
+					// Small delay to simulate streaming
+					time.Sleep(10 * time.Millisecond)
+				}
+				return
+			}
+		}
+
+		l.logger.InfoContext(ctx, "Cache miss for LLM response",
+			slog.String("part_type", partType),
+			slog.String("cache_key", cacheKey))
+	}
+
+	// Step 2: Cache miss or no cache key - call LLM
 	iter, err := l.aiClient.GenerateContentStreamWithCache(ctx, prompt, &genai.GenerateContentConfig{Temperature: genai.Ptr[float32](defaultTemperature)}, cacheKey)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -2629,6 +2729,7 @@ func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prom
 		return
 	}
 
+	// Step 3: Stream response and collect full text for caching
 	var fullResponse strings.Builder
 	for resp, err := range iter {
 		if ctx.Err() != nil {
@@ -2656,7 +2757,7 @@ func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prom
 								"chunk":      chunk,
 								"domain":     string(domain),
 								"cache_key":  cacheKey,
-								"cache_used": cacheKey != "",
+								"cache_used": false,
 							},
 						})
 					}
@@ -2664,4 +2765,42 @@ func (l *ServiceImpl) streamWorkerWithResponseAndCache(ctx context.Context, prom
 			}
 		}
 	}
+
+	// Step 4: Save full response to cache if cacheKey is provided
+	if cacheKey != "" && fullResponse.Len() > 0 {
+		l.cache.Set(cacheKey, fullResponse.String(), cache.DefaultExpiration)
+		l.logger.InfoContext(ctx, "Saved LLM response to cache",
+			slog.String("part_type", partType),
+			slog.String("cache_key", cacheKey),
+			slog.Int("response_length", fullResponse.Len()))
+	}
+}
+
+// extractJSONFromMarkdown extracts JSON content from markdown code blocks
+func extractJSONFromMarkdown(content string) string {
+	// Remove markdown code block delimiters
+	lines := strings.Split(content, "\n")
+	var jsonLines []string
+	inCodeBlock := false
+	
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+		if trimmedLine == "```json" || trimmedLine == "```" {
+			inCodeBlock = !inCodeBlock
+			continue
+		}
+		if inCodeBlock || (!strings.HasPrefix(trimmedLine, "```") && (strings.HasPrefix(trimmedLine, "{") || strings.HasPrefix(trimmedLine, "[") || len(jsonLines) > 0)) {
+			jsonLines = append(jsonLines, line)
+		}
+	}
+	
+	result := strings.Join(jsonLines, "\n")
+	result = strings.TrimSpace(result)
+	
+	// If no JSON was extracted, return the original content
+	if result == "" {
+		return strings.TrimSpace(content)
+	}
+	
+	return result
 }

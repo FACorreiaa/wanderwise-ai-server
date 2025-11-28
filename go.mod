@@ -22,6 +22,7 @@ require (
 	github.com/markbates/goth v1.81.0
 	github.com/pashagolub/pgxmock/v4 v4.8.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
+	github.com/petar-dambovaliev/aho-corasick v0.0.0-20250424160509-463d218d4745
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.22.0
 	github.com/redis/go-redis/v9 v9.7.1

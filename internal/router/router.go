@@ -11,6 +11,7 @@ import (
 	authMiddleware "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/auth"
 	llmChat "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/chat_prompt"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/discover"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/interests"
 	itineraryList "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/list"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/poi"
@@ -38,6 +39,7 @@ type Config struct {
 	CityHandler             *city.Handler
 	RecentsHandler          *recents.HandlerImpl
 	StatisticsHandler       *statistics.HandlerImpl
+	DiscoverHandler         *discover.HandlerImpl
 }
 
 // SetupRouter initializes and configures the main application router.
@@ -61,55 +63,63 @@ func SetupRouter(cfg *Config) chi.Router {
 	// Group API routes, potentially versioning them
 	r.Route("/api/v1", func(r chi.Router) {
 
-		// --- Public Auth Routes ---
-		// Routes that DO NOT require JWT authentication
+		// --- Public Routes (No Authentication Required) ---
+		// ONLY auth, about, features, and pricing are public
 		r.Group(func(r chi.Router) {
-			// Example: Mount auth routes that don't need the JWT check
-			r.Post("/auth/register", cfg.AuthHandler.Register) // Assuming Register HandlerImpl exists
+			// Authentication routes (public)
+			r.Post("/auth/register", cfg.AuthHandler.Register)
 			r.Post("/auth/login", cfg.AuthHandler.Login)
 			r.Get("/auth/google", cfg.AuthHandler.LoginWithGoogle)
 			r.Get("/auth/google/callback", cfg.AuthHandler.GoogleCallback)
-			r.Post("/auth/refresh", cfg.AuthHandler.RefreshToken) // Refresh tokens via HttpOnly cookie
-			// Apply rate limiting to free LLM endpoint
-			r.With(middleware.RateLimitMiddleware(cfg.RateLimiter, cfg.Logger)).Post("/llm/chat/stream/free", cfg.LLMInteractionHandler.StartChatMessageStreamFree)
+			r.Post("/auth/refresh", cfg.AuthHandler.RefreshToken)
 
-			// Public city routes
-			r.Mount("/cities", CityRoutes(cfg.CityHandler))
-			r.Mount("/statistics", StatisticsRoutes(cfg.StatisticsHandler)) // Statistics routes (public for main page stats)
-
+			// Marketing/informational routes (public)
+			// TODO: Implement these handlers
+			// r.Get("/about", cfg.InfoHandler.GetAbout)
+			// r.Get("/features", cfg.InfoHandler.GetFeatures)
+			// r.Get("/pricing", cfg.InfoHandler.GetPricing)
 		})
 
 		// --- Protected Routes ---
-		// Routes under this group WILL require JWT authentication
+		// ALL routes under this group require JWT authentication
 		r.Group(func(r chi.Router) {
 			// Apply the authentication middleware passed from main.go
 			r.Use(cfg.AuthenticateMiddleware)
 
-			// Mount protected auth routes
+			// Protected auth routes
 			r.Post("/auth/logout", cfg.AuthHandler.Logout)
-			//r.Get("/auth/session/{sessionID}", cfg.AuthHandlerImpl.GetSession)                    // Needs Auth? Usually yes.
-			r.Post("/auth/validate-session", cfg.AuthHandler.ValidateSession) // Needs Auth
-			//r.Post("/auth/verify-password", cfg.AuthHandlerImpl.VerifyPassword)                   // Needs Auth
-			r.Put("/auth/update-password", cfg.AuthHandler.ChangePassword) // Needs Auth (use PUT for update)
-			//r.Post("/auth/invalidate-tokens", cfg.AuthHandlerImpl.InvalidateAllUserRefreshTokens) // Needs Auth
+			r.Post("/auth/validate-session", cfg.AuthHandler.ValidateSession)
+			r.Put("/auth/update-password", cfg.AuthHandler.ChangePassword)
 
-			// Mount other protected resource routes
-			r.Mount("/user", UserRoutes(cfg.UserHandler)) // User routes
+			// User profile routes
+			r.Mount("/user", UserRoutes(cfg.UserHandler))
 			r.Mount("/user/interests", interestsRoutes(cfg.InterestHandler))
 			r.Mount("/user/search-profile", profilesRoutes(cfg.SearchProfileHandler))
 			r.Mount("/user/tags", tagsRoutes(cfg.TagsHandler))
+
+			// POI routes (protected user actions)
+			r.Mount("/pois", POIProtectedRoutes(cfg.PointsOfInterestHandler))
+
+			// City routes (now protected)
+			r.Mount("/cities", CityRoutes(cfg.CityHandler))
+
+			// Discover routes (now protected)
+			r.Mount("/discover", DiscoverRoutes(cfg.DiscoverHandler))
+
+			// Statistics routes (now protected)
+			r.Mount("/statistics", StatisticsRoutes(cfg.StatisticsHandler))
+			// Backwards-compatible user-statistics aliases (protected)
+			r.Get("/user-statistics/landing-page", cfg.StatisticsHandler.GetLandingPageStatisticsHandler)
+			r.Get("/user-statistics/landing", cfg.StatisticsHandler.GetLandingPageStatisticsHandler)
+
+			// LLM interaction routes (now protected)
 			r.Mount("/llm", LLMInteractionRoutes(cfg.LLMInteractionHandler, cfg.RateLimiter, cfg.Logger))
-			r.Mount("/pois", POIRoutes(cfg.PointsOfInterestHandler)) // Points of Interest routes
+
+			// Itinerary routes
 			r.Mount("/itineraries", ItineraryListRoutes(cfg.ItineraryListHandler))
-			r.Mount("/recents", RecentsRoutes(cfg.RecentsHandler)) // Recent interactions routes
 
-			// Mount protected statistics routes with different paths to avoid conflicts
-			r.Route("/user-statistics", func(r chi.Router) {
-				r.Get("/poi/detailed", cfg.StatisticsHandler.GetDetailedPOIStatisticsHandler)
-				r.Get("/landing-page", cfg.StatisticsHandler.GetLandingPageStatisticsHandler)
-			})
-
-			// r.Mount("/pois", POIRoutes(cfg.HandlerImpl))   // Example for POI routes
+			// Recent interactions routes
+			r.Mount("/recents", RecentsRoutes(cfg.RecentsHandler))
 		})
 
 		// --- Admin Routes (Example) ---
@@ -219,40 +229,43 @@ func LLMInteractionRoutes(HandlerImpl *llmChat.HandlerImpl, rateLimiter *middlew
 	return r
 }
 
-func POIRoutes(HandlerImpl *poi.HandlerImpl) http.Handler {
+// POIProtectedRoutes - All POI routes (now protected - requires authentication)
+func POIProtectedRoutes(HandlerImpl *poi.HandlerImpl) http.Handler {
 	r := chi.NewRouter()
-	// Points of Interest routes
 
-	r.Get("/city/{cityID}", HandlerImpl.GetPOIsByCityID)
-	r.Get("/itineraries", HandlerImpl.GetItineraries)                           // GET /api/v1/itineraries?page=1&page_size=20
-	r.Get("/itineraries/itinerary/{itinerary_id}", HandlerImpl.GetItinerary)    // GET /api/v1/itineraries/{uuid}
-	r.Put("/itineraries/itinerary/{itinerary_id}", HandlerImpl.UpdateItinerary) // PUT /api/v1/itineraries/{uuid}
-	r.Get("/nearby", HandlerImpl.GetNearbyRecommendations)                      // GET http://localhost:8000/api/v1/llm/prompt-response/poi/nearby
+	// Search routes
+	r.Route("/search", func(r chi.Router) {
+		r.Get("/", HandlerImpl.GetPOIs)                               // GET /api/v1/pois/search?q=Hotels&city=Lisbon
+		r.Get("/semantic", HandlerImpl.SearchPOIsSemantic)            // GET /api/v1/pois/search/semantic?query=romantic%20restaurants
+		r.Get("/semantic/city", HandlerImpl.SearchPOIsSemanticByCity) // GET /api/v1/pois/search/semantic/city?query=museums&city_id={uuid}
+		r.Get("/hybrid", HandlerImpl.SearchPOIsHybrid)                // GET /api/v1/pois/search/hybrid?query=outdoor%20activities&latitude=40.7128&longitude=-74.0060&radius=5.0
+	})
+
+	// Nearby routes
+	r.Get("/nearby", HandlerImpl.GetNearbyRecommendations) // GET /api/v1/pois/nearby?lat=41.1579&lon=-8.6291&distance=5000
 
 	// Domain-specific discover routes
-	r.Get("/discover/restaurants", HandlerImpl.GetNearbyRestaurants) // GET http://localhost:8000/api/v1/pois/discover/restaurants
-	r.Get("/discover/activities", HandlerImpl.GetNearbyActivities)   // GET http://localhost:8000/api/v1/pois/discover/activities
-	r.Get("/discover/hotels", HandlerImpl.GetNearbyHotels)           // GET http://localhost:8000/api/v1/pois/discover/hotels
-	r.Get("/discover/attractions", HandlerImpl.GetNearbyAttractions) // GET http://localhost:8000/api/v1/pois/discover/attractions
+	r.Get("/discover/restaurants", HandlerImpl.GetNearbyRestaurants) // GET /api/v1/pois/discover/restaurants
+	r.Get("/discover/activities", HandlerImpl.GetNearbyActivities)   // GET /api/v1/pois/discover/activities
+	r.Get("/discover/hotels", HandlerImpl.GetNearbyHotels)           // GET /api/v1/pois/discover/hotels
+	r.Get("/discover/attractions", HandlerImpl.GetNearbyAttractions) // GET /api/v1/pois/discover/attractions
+
+	// City routes
+	r.Get("/city/{cityID}", HandlerImpl.GetPOIsByCityID) // GET /api/v1/pois/city/{cityID}
+
+	// Itinerary routes
+	r.Get("/itineraries", HandlerImpl.GetItineraries)                           // GET /api/v1/pois/itineraries?page=1&page_size=20
+	r.Get("/itineraries/itinerary/{itinerary_id}", HandlerImpl.GetItinerary)    // GET /api/v1/pois/itineraries/itinerary/{uuid}
+	r.Put("/itineraries/itinerary/{itinerary_id}", HandlerImpl.UpdateItinerary) // PUT /api/v1/pois/itineraries/itinerary/{uuid}
 
 	// Favorites routes
-	r.Get("/favourites", HandlerImpl.GetFavouritePOIsByUserID)   // GET http://localhost:8000/api/v1/pois/favourites
-	r.Post("/favourites", HandlerImpl.AddPoiToFavourites)        // POST http://localhost:8000/api/v1/pois/favourites
-	r.Delete("/favourites", HandlerImpl.RemovePoiFromFavourites) // DELETE http://localhost:8000/api/v1/pois/favourites
-
-	// Traditional search
-	r.Get("/search", HandlerImpl.GetPOIs) // GET http://localhost:8000/api/v1/pois/search
-
-	// Semantic search routes
-	r.Route("/search", func(r chi.Router) {
-		r.Get("/semantic", HandlerImpl.SearchPOIsSemantic)            // GET http://localhost:8000/api/v1/pois/search/semantic?query=romantic%20restaurants
-		r.Get("/semantic/city", HandlerImpl.SearchPOIsSemanticByCity) // GET http://localhost:8000/api/v1/pois/search/semantic/city?query=museums&city_id={uuid}
-		r.Get("/hybrid", HandlerImpl.SearchPOIsHybrid)                // GET http://localhost:8000/api/v1/pois/search/hybrid?query=outdoor%20activities&latitude=40.7128&longitude=-74.0060&radius=5.0
-	})
+	r.Get("/favourites", HandlerImpl.GetFavouritePOIsByUserID)   // GET /api/v1/pois/favourites
+	r.Post("/favourites", HandlerImpl.AddPoiToFavourites)        // POST /api/v1/pois/favourites
+	r.Delete("/favourites", HandlerImpl.RemovePoiFromFavourites) // DELETE /api/v1/pois/favourites
 
 	// Embedding management routes (for admin/maintenance)
 	r.Route("/embeddings", func(r chi.Router) {
-		r.Post("/generate", HandlerImpl.GenerateEmbeddingsForPOIs) // POST http://localhost:8000/api/v1/pois/embeddings/generate?batch_size=20
+		r.Post("/generate", HandlerImpl.GenerateEmbeddingsForPOIs) // POST /api/v1/pois/embeddings/generate?batch_size=20
 	})
 
 	return r
@@ -317,6 +330,19 @@ func StatisticsRoutes(h *statistics.HandlerImpl) http.Handler {
 	// Public statistics endpoints (no authentication required)
 	r.Get("/main-page", h.GetMainPageStatisticsHandler) // GET http://localhost:8000/api/v1/statistics/main-page
 	r.Get("/main-page/stream", h.StatisticsSSEHandler)  // GET http://localhost:8000/api/v1/statistics/main-page/stream (SSE)
+
+	return r
+}
+
+func DiscoverRoutes(h *discover.HandlerImpl) http.Handler {
+	r := chi.NewRouter()
+
+	// Discover endpoints (allow unauthenticated access for landing/marketing)
+	r.Get("/", h.GetDiscoverPageData)                  // GET http://localhost:8000/api/v1/discover
+	r.Get("/trending", h.GetTrendingDiscoveries)       // GET http://localhost:8000/api/v1/discover/trending
+	r.Get("/featured", h.GetFeaturedCollections)       // GET http://localhost:8000/api/v1/discover/featured
+	r.Get("/recent", h.GetRecentDiscoveries)           // GET http://localhost:8000/api/v1/discover/recent
+	r.Get("/category/{category}", h.GetCategoryResults) // GET http://localhost:8000/api/v1/discover/category/{category}
 
 	return r
 }

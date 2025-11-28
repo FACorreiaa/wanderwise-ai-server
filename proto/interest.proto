@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package loci.interest;
+
+option go_package = "github.com/your-org/go-ai-poi-server/gen/proto/interest";
+
+import "google/protobuf/timestamp.proto";
+import "proto/common.proto";
+
+// Interest represents an interest tag
+message Interest {
+  string id = 1;
+  string name = 2;
+  optional string description = 3;
+  optional bool active = 4;
+  google.protobuf.Timestamp created_at = 5;
+  optional google.protobuf.Timestamp updated_at = 6;
+  string source = 7;
+}
+
+// Tags represents a tag
+message Tags {
+  string id = 1;
+  string name = 2;
+  string tag_type = 3;
+  optional string description = 4;
+  optional string source = 5;
+  optional bool active = 6;
+  google.protobuf.Timestamp created_at = 7;
+  optional google.protobuf.Timestamp updated_at = 8;
+}
+
+// CreateInterestRequest for creating a new interest
+message CreateInterestRequest {
+  string name = 1;
+  optional string description = 2;
+  bool active = 3;
+}
+
+// UpdateInterestRequest for updating an interest
+message UpdateInterestRequest {
+  string interest_id = 1;
+  string name = 2;
+  optional string description = 3;
+  bool active = 4;
+}
+
+// AddInterestRequest for adding an interest to user
+message AddInterestRequest {
+  string interest_id = 1;
+}
+
+// UpdatePreferenceLevelRequest for updating preference level
+message UpdatePreferenceLevelRequest {
+  int32 preference_level = 1;
+}
+
+// GetInterestsRequest for retrieving interests
+message GetInterestsRequest {
+  optional bool active_only = 1;
+}
+
+// GetInterestsResponse for interests retrieval
+message GetInterestsResponse {
+  repeated Interest interests = 1;
+}
+
+// GetUserInterestsRequest for retrieving user interests
+message GetUserInterestsRequest {
+  optional string user_id = 1;
+}
+
+// GetUserInterestsResponse for user interests retrieval
+message GetUserInterestsResponse {
+  repeated Interest interests = 1;
+}
+
+// InterestService defines interest-related RPCs
+service InterestService {
+  rpc GetInterests(GetInterestsRequest) returns (GetInterestsResponse);
+  rpc GetUserInterests(GetUserInterestsRequest) returns (GetUserInterestsResponse);
+  rpc CreateInterest(CreateInterestRequest) returns (loci.common.Response);
+  rpc UpdateInterest(UpdateInterestRequest) returns (loci.common.Response);
+  rpc AddInterestToUser(AddInterestRequest) returns (loci.common.Response);
+  rpc UpdatePreferenceLevel(UpdatePreferenceLevelRequest) returns (loci.common.Response);
+}

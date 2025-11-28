@@ -13,6 +13,7 @@ import (
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/auth"
 	llmChat "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/chat_prompt"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/city"
+	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/discover"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/interests"
 	itineraryList "github.com/FACorreiaa/go-poi-au-suggestions/internal/api/list"
 	"github.com/FACorreiaa/go-poi-au-suggestions/internal/api/poi"
@@ -41,6 +42,7 @@ type Container struct {
 	CityHandler               *city.Handler
 	RecentsHandler            *recents.HandlerImpl
 	StatisticsHandler         *statistics.HandlerImpl
+	DiscoverHandler           *discover.HandlerImpl
 	// Add other HandlerImpls, services, and repositories as needed
 }
 
@@ -109,8 +111,14 @@ func NewContainer(cfg *config.Config, logger *slog.Logger) (*Container, error) {
 		logger.Error("Failed to initialize embedding service", slog.Any("error", err))
 		return nil, err
 	}
+
+	// Initialize discover components (needed for POI service tracking)
+	discoverRepository := discover.NewRepositoryImpl(pool, logger)
+	discoverService := discover.NewServiceImpl(discoverRepository, logger)
+	discoverHandler := discover.NewHandlerImpl(discoverService, logger)
+
 	poiRepository := poi.NewRepository(pool, logger)
-	poiService := poi.NewServiceImpl(poiRepository, embeddingService, cityRepo, logger)
+	poiService := poi.NewServiceImpl(poiRepository, embeddingService, cityRepo, discoverRepository, logger)
 	poiHandler := poi.NewHandlerImpl(poiService, logger)
 
 	itineraryListRepository := itineraryList.NewRepository(pool, logger)
@@ -146,6 +154,7 @@ func NewContainer(cfg *config.Config, logger *slog.Logger) (*Container, error) {
 		CityHandler:               cityHandler,
 		RecentsHandler:            recentsHandler,
 		StatisticsHandler:         statisticsHandler,
+		DiscoverHandler:           discoverHandler,
 		// Add other HandlerImpls, services, and repositories as needed
 	}, nil
 }

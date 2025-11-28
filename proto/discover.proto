@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package loci.discover;
+
+option go_package = "github.com/your-org/go-ai-poi-server/gen/proto/discover";
+
+import "google/protobuf/timestamp.proto";
+import "proto/common.proto";
+import "proto/chat.proto";
+
+// TrendingDiscovery represents a trending discovery/search
+message TrendingDiscovery {
+  string city_name = 1;
+  int32 search_count = 2;
+  string emoji = 3;
+}
+
+// FeaturedCollection represents a featured collection of POIs
+message FeaturedCollection {
+  string category = 1;
+  string title = 2;
+  int32 item_count = 3;
+  string emoji = 4;
+}
+
+// DiscoverResult represents a single discovery result (POI)
+message DiscoverResult {
+  string id = 1;
+  string name = 2;
+  double latitude = 3;
+  double longitude = 4;
+  string category = 5;
+  string description = 6;
+  string address = 7;
+  optional string website = 8;
+  optional string phone_number = 9;
+  optional string opening_hours = 10;
+  string price_level = 11;
+  double rating = 12;
+  repeated string tags = 13;
+  repeated string images = 14;
+  optional string cuisine_type = 15;
+  optional string star_rating = 16;
+}
+
+// DiscoverPageData contains all data needed for the discover page
+message DiscoverPageData {
+  repeated TrendingDiscovery trending = 1;
+  repeated FeaturedCollection featured = 2;
+  repeated loci.chat.ChatSession recent_discoveries = 3;
+}
+
+// GetDiscoverPageRequest for retrieving the discover page data
+message GetDiscoverPageRequest {
+  // Empty for now, could add filters later
+}
+
+// GetDiscoverPageResponse for discover page data retrieval
+message GetDiscoverPageResponse {
+  DiscoverPageData data = 1;
+}
+
+// GetTrendingRequest for retrieving trending discoveries
+message GetTrendingRequest {
+  optional int32 limit = 1;
+}
+
+// GetTrendingResponse for trending discoveries retrieval
+message GetTrendingResponse {
+  repeated TrendingDiscovery trending = 1;
+}
+
+// GetFeaturedRequest for retrieving featured collections
+message GetFeaturedRequest {
+  optional int32 limit = 1;
+}
+
+// GetFeaturedResponse for featured collections retrieval
+message GetFeaturedResponse {
+  repeated FeaturedCollection featured = 1;
+}
+
+// GetRecentDiscoveriesRequest for retrieving recent discoveries
+message GetRecentDiscoveriesRequest {
+  optional string user_id = 1;
+  loci.common.PaginationRequest pagination = 2;
+}
+
+// GetRecentDiscoveriesResponse for recent discoveries retrieval
+message GetRecentDiscoveriesResponse {
+  repeated loci.chat.ChatSession sessions = 1;
+  loci.common.PaginationMetadata pagination = 2;
+}
+
+// GetCategoryResultsRequest for retrieving category results
+message GetCategoryResultsRequest {
+  string category = 1;
+  optional string city_name = 2;
+  loci.common.PaginationRequest pagination = 3;
+}
+
+// GetCategoryResultsResponse for category results retrieval
+message GetCategoryResultsResponse {
+  string category = 1;
+  repeated DiscoverResult results = 2;
+  loci.common.PaginationMetadata pagination = 3;
+}
+
+// DiscoverService defines discover-related RPCs
+service DiscoverService {
+  rpc GetDiscoverPage(GetDiscoverPageRequest) returns (GetDiscoverPageResponse);
+  rpc GetTrending(GetTrendingRequest) returns (GetTrendingResponse);
+  rpc GetFeatured(GetFeaturedRequest) returns (GetFeaturedResponse);
+  rpc GetRecentDiscoveries(GetRecentDiscoveriesRequest) returns (GetRecentDiscoveriesResponse);
+  rpc GetCategoryResults(GetCategoryResultsRequest) returns (GetCategoryResultsResponse);
+}

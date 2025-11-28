@@ -26,7 +26,7 @@ services:
 
   postgres-loci:
     platform: linux/amd64
-    container_name: postgres-loci
+    container_name: postgres-loci-api-db
     build:
       context: . 
       dockerfile: postgres.Dockerfile
@@ -40,7 +40,7 @@ services:
     ports:
       # Optional: Expose DB port to host *only* for local development/debugging
       # Be careful exposing DB ports directly
-      - "5454:5432" # Map host 5454 -> container 5432
+      - "5459:5432" # Map host 5454 -> container 5432
     volumes:
       - postgres-loci-data:/var/lib/postgresql/data
       - ./scripts/postgres/init:/docker-entrypoint-initdb.d # Your extensions script
