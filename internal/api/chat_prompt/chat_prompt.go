@@ -14,7 +14,7 @@ BASIC PREFERENCES:
     - Profile Name: %s
     - Search Radius: %.1f km
     - Preferred Time: %s
-    - Budget Level: %d (0=any, 1=cheap, 4=expensive)
+    - Budget Level: %d (0=any, 1=cheap, 4=expensPive)
     - Prefers Outdoor Seating: %t
     - Prefers Dog Friendly: %t
     - Preferred Dietary Needs: [%s]
